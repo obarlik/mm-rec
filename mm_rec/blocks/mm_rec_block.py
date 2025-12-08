@@ -1,10 +1,12 @@
 """
 MM-Rec Block
 Main layer combining Associative Scan, MDI, HDS, and Core Formula
+Optimized for performance and memory efficiency.
 """
 
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 from typing import Tuple, Optional
 from ..core.associative_scan_triton import associative_scan_exponential
 from ..core.mdi import MemoryDecayIntegration
@@ -105,12 +107,17 @@ class MMRecBlock(nn.Module):
         
         # Dropout
         self.dropout_layer = nn.Dropout(dropout)
+        
+        # Performance optimization flags
+        self.use_gradient_checkpointing = False  # Can be enabled via config
+        self.use_kernel_fusion = True  # Enable kernel fusion optimizations
     
     def forward(
         self,
         x: torch.Tensor,
         state: MemoryState,
-        hds: Optional[HierarchicalDataStructure] = None
+        hds: Optional[HierarchicalDataStructure] = None,
+        use_checkpointing: Optional[bool] = None
     ) -> Tuple[torch.Tensor, MemoryState]:
         """
         Forward pass through MM-Rec block with sequential state updates.
@@ -118,10 +125,15 @@ class MMRecBlock(nn.Module):
         Processes the entire sequence step-by-step, updating memory state
         at each timestep to ensure correct sequential dependencies.
         
+        Optimizations:
+        - Kernel fusion: Pre-compute QKVZ projections for entire sequence
+        - Gradient checkpointing: Reduce memory usage (optional)
+        
         Args:
             x: Input tensor [batch, seq_len, model_dim]
             state: MemoryState instance
             hds: Optional HierarchicalDataStructure (created if None)
+            use_checkpointing: Override checkpointing setting (default: self.use_gradient_checkpointing)
         
         Returns:
             Tuple of (output, updated_state):
@@ -129,6 +141,10 @@ class MMRecBlock(nn.Module):
                 - updated_state: Updated MemoryState with sequential updates
         """
         batch_size, seq_len, _ = x.shape
+        
+        # Override checkpointing if specified
+        if use_checkpointing is not None:
+            self.use_gradient_checkpointing = use_checkpointing
         
         # Create HDS if not provided
         if hds is None:

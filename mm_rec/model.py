@@ -108,6 +108,9 @@ class MMRecModel(nn.Module):
         
         # Tie weights: output embedding = input embedding (common in LLMs)
         self.embedding.weight = self.lm_head.weight
+        
+        # Performance optimization flags
+        self.use_gradient_checkpointing = False  # Can be enabled for memory efficiency
     
     def create_memory_state(self, batch_size: int, device: torch.device) -> MemoryState:
         """
@@ -155,9 +158,19 @@ class MMRecModel(nn.Module):
         x = self.embedding(input_ids)  # [batch, seq_len, model_dim]
         
         # Forward through all MM-Rec blocks
+        # OPTIMIZATION: Use gradient checkpointing for memory efficiency
+        # Can be enabled via model configuration
         new_memory_states = []
         for i, block in enumerate(self.blocks):
-            x, updated_state = block(x, memory_states[i])
+            # Enable checkpointing for deeper layers (saves more memory)
+            use_checkpointing = getattr(self, 'use_gradient_checkpointing', False)
+            if use_checkpointing and i >= len(self.blocks) // 2:  # Checkpoint deeper layers
+                from torch.utils.checkpoint import checkpoint
+                def block_forward(x_in, state_in):
+                    return block(x_in, state_in, use_checkpointing=False)
+                x, updated_state = checkpoint(block_forward, x, memory_states[i], use_reentrant=False)
+            else:
+                x, updated_state = block(x, memory_states[i])
             new_memory_states.append(updated_state)
         
         # Final normalization
