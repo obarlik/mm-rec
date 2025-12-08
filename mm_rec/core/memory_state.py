@@ -160,7 +160,7 @@ class MemoryState(nn.Module):
         new_v: torch.Tensor
     ):
         """
-        Update Key and Value tensors for specified bank.
+        Update Key and Value tensors for specified bank (full replacement).
         
         Args:
             bank_type: 'short' for short-term, 'long' for long-term
@@ -173,6 +173,138 @@ class MemoryState(nn.Module):
         elif bank_type == 'long':
             self.long_term.k.data = new_k.to(self.long_term.k.device)
             self.long_term.v.data = new_v.to(self.long_term.v.device)
+        else:
+            raise ValueError(f"Unknown bank_type: {bank_type}. Use 'short' or 'long'.")
+    
+    def get_initial_state(self, batch_size: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Get initial state (t=0) for a batch.
+        
+        Returns zero tensors representing initial memory state.
+        
+        Args:
+            batch_size: Batch size
+        
+        Returns:
+            Tuple of (k_short_init, v_short_init, k_long_init, v_long_init)
+            All tensors are zeros with appropriate shapes
+        """
+        # Short-term initial state: [batch, 1, model_dim] (single timestep)
+        k_short_init = torch.zeros(
+            batch_size, 1, self.short_term.k_dim,
+            dtype=self.short_term.k.dtype,
+            device=self.short_term.k.device
+        )
+        v_short_init = torch.zeros(
+            batch_size, 1, self.short_term.v_dim,
+            dtype=self.short_term.v.dtype,
+            device=self.short_term.v.device
+        )
+        
+        # Long-term initial state: [batch, num_memories, M, mem_dim]
+        # Use existing long_term structure but create batch-sized zeros
+        k_long_init = torch.zeros(
+            batch_size, 1, self.long_term.num_slots, self.long_term.k_dim,
+            dtype=self.long_term.k.dtype,
+            device=self.long_term.k.device
+        )
+        v_long_init = torch.zeros(
+            batch_size, 1, self.long_term.num_slots, self.long_term.v_dim,
+            dtype=self.long_term.v.dtype,
+            device=self.long_term.v.device
+        )
+        
+        return k_short_init, v_short_init, k_long_init, v_long_init
+    
+    def update_state_sequential(
+        self,
+        bank_type: str,
+        new_k: torch.Tensor,
+        new_v: torch.Tensor,
+        step: int
+    ):
+        """
+        Update memory state at a specific sequence step.
+        
+        This is critical for short-term memory where we need to track
+        state evolution across sequence steps.
+        
+        Args:
+            bank_type: 'short' for short-term, 'long' for long-term
+            new_k: New Key tensor for this step [batch, k_dim] or [batch, 1, k_dim]
+            new_v: New Value tensor for this step [batch, v_dim] or [batch, 1, v_dim]
+            step: Sequence step index (0-indexed)
+        """
+        if bank_type == 'short':
+            # Ensure correct shape: [batch, k_dim] -> [batch, 1, k_dim]
+            if new_k.dim() == 2:
+                new_k = new_k.unsqueeze(1)
+            if new_v.dim() == 2:
+                new_v = new_v.unsqueeze(1)
+            
+            # Update at specific step: bank.k[step] = new_k
+            # Shape: [batch, seq_len, k_dim]
+            batch_size = new_k.shape[0]
+            
+            # Ensure bank tensors have correct batch dimension
+            if self.short_term.k.shape[0] == 1 and batch_size > 1:
+                # Expand to batch size
+                self.short_term.k.data = self.short_term.k.data.expand(batch_size, -1, -1)
+                self.short_term.v.data = self.short_term.v.data.expand(batch_size, -1, -1)
+            
+            # Update at step position
+            if step < self.short_term.num_slots:
+                self.short_term.k.data[:, step:step+1, :] = new_k.to(self.short_term.k.device)
+                self.short_term.v.data[:, step:step+1, :] = new_v.to(self.short_term.v.device)
+            else:
+                # If step exceeds num_slots, append (grow tensor)
+                # This shouldn't happen in normal operation, but handle gracefully
+                raise ValueError(f"Step {step} exceeds num_slots {self.short_term.num_slots}")
+                
+        elif bank_type == 'long':
+            # Long-term memory update (less frequent, typically at block level)
+            # For now, use full replacement
+            if new_k.dim() == 3:  # [batch, num_slots, k_dim]
+                self.long_term.k.data = new_k.to(self.long_term.k.device)
+                self.long_term.v.data = new_v.to(self.long_term.v.device)
+            else:
+                # Single step update - update all slots with same value
+                batch_size = new_k.shape[0]
+                if new_k.dim() == 2:
+                    new_k = new_k.unsqueeze(1).expand(-1, self.long_term.num_slots, -1)
+                    new_v = new_v.unsqueeze(1).expand(-1, self.long_term.num_slots, -1)
+                self.long_term.k.data = new_k.to(self.long_term.k.device)
+                self.long_term.v.data = new_v.to(self.long_term.v.device)
+        else:
+            raise ValueError(f"Unknown bank_type: {bank_type}. Use 'short' or 'long'.")
+    
+    def get_state_at_step(self, bank_type: str, step: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Get memory state at a specific sequence step.
+        
+        Args:
+            bank_type: 'short' for short-term, 'long' for long-term
+            step: Sequence step index (0-indexed)
+        
+        Returns:
+            Tuple of (k_step, v_step) tensors for the specified step
+        """
+        if bank_type == 'short':
+            k, v = self.get_state('short')
+            # k: [num_slots, k_dim] or [batch, num_slots, k_dim]
+            if k.dim() == 2:
+                # No batch dimension
+                k_step = k[step:step+1, :]  # [1, k_dim]
+                v_step = v[step:step+1, :]  # [1, v_dim]
+            else:
+                # Has batch dimension
+                k_step = k[:, step:step+1, :]  # [batch, 1, k_dim]
+                v_step = v[:, step:step+1, :]  # [batch, 1, v_dim]
+            return k_step, v_step
+        elif bank_type == 'long':
+            # Long-term memory doesn't have step-wise access
+            # Return full memory
+            return self.get_state('long')
         else:
             raise ValueError(f"Unknown bank_type: {bank_type}. Use 'short' or 'long'.")
     
