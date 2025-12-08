@@ -23,3 +23,34 @@ except ImportError as e:
     warnings.warn(f"Could not import associative_scan_triton: {e}")
     __all__ = []
 
+# Memory State Management
+from .memory_state import (
+    MemoryBank,
+    MemoryState,
+    MemoryBankConfig,
+)
+
+__all__.extend([
+    'MemoryBank',
+    'MemoryState',
+    'MemoryBankConfig',
+])
+
+# Memory Decay/Integration
+from .mdi import (
+    MemoryDecayIntegration,
+)
+
+__all__.extend([
+    'MemoryDecayIntegration',
+])
+
+# Hierarchical Data Structure
+from .hds import (
+    HierarchicalDataStructure,
+)
+
+__all__.extend([
+    'HierarchicalDataStructure',
+])
+
