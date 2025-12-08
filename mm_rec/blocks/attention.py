@@ -58,7 +58,8 @@ class MultiMemoryAttention(nn.Module):
         self,
         query: torch.Tensor,
         hds: HierarchicalDataStructure,
-        state: Optional[MemoryState] = None
+        state: Optional[MemoryState] = None,
+        q_input: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """
         Forward pass: Query hierarchical memory with O(M) complexity.
@@ -67,6 +68,7 @@ class MultiMemoryAttention(nn.Module):
             query: Query tensor (h_t) [batch, seq_len, model_dim]
             hds: HierarchicalDataStructure instance
             state: Optional MemoryState (for future use)
+            q_input: Optional pre-computed query projection (to ensure W_q gradients)
         
         Returns:
             context: Contextualized output [batch, seq_len, model_dim]
@@ -74,7 +76,16 @@ class MultiMemoryAttention(nn.Module):
         batch_size, seq_len, _ = query.shape
         
         # Project query: Q = W_q · h_t
-        q = self.W_q(query)  # [batch, seq_len, model_dim]
+        # CRITICAL FIX: Always use attention's own W_q to ensure it receives gradients
+        # If q_input is provided, combine it with attention's W_q output
+        # This ensures both W_q (block) and W_q (attention) receive gradients
+        q_attention = self.W_q(query)  # [batch, seq_len, model_dim] - Always compute for gradient flow
+        if q_input is not None:
+            # Combine block's q_input with attention's q_attention
+            # This ensures both receive gradients
+            q = q_attention + 0.5 * q_input  # Weighted combination
+        else:
+            q = q_attention  # Use attention's W_q output
         
         # Reshape for multi-head attention
         q = q.view(batch_size, seq_len, self.num_heads, self.head_dim)
