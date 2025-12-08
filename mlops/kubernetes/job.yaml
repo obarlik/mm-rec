@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mmrec-100m-training
+  labels:
+    app: mmrec-training
+spec:
+  template:
+    metadata:
+      labels:
+        app: mmrec-training
+    spec:
+      containers:
+      - name: mmrec-trainer
+        image: mmrec-100m:latest
+        imagePullPolicy: Always
+        command: ["python3", "-m", "mm_rec.scripts.train_modular"]
+        args:
+          - "--stage"
+          - "all"
+          - "--batch_size"
+          - "4"
+          - "--checkpoint_dir"
+          - "/workspace/checkpoints"
+        resources:
+          requests:
+            memory: "64Gi"
+            cpu: "16"
+            nvidia.com/gpu: "1"
+          limits:
+            memory: "128Gi"
+            cpu: "32"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: checkpoint-storage
+          mountPath: /workspace/checkpoints
+        - name: data-storage
+          mountPath: /workspace/data
+        env:
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: WANDB_PROJECT
+          value: "mmrec-100m"
+      volumes:
+      - name: checkpoint-storage
+        persistentVolumeClaim:
+          claimName: mmrec-checkpoints-pvc
+      - name: data-storage
+        persistentVolumeClaim:
+          claimName: mmrec-data-pvc
+      restartPolicy: Never
+  backoffLimit: 3
+
