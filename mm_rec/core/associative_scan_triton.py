@@ -599,6 +599,11 @@ class AssociativeScanExponential(Function):
         # We process blocks sequentially to handle carry-over
         grid = (batch_size, num_heads, head_dim)
         
+        # CRITICAL: Triton fallback detection
+        # Check if Triton is available and working
+        triton_available = torch.cuda.is_available() and hasattr(triton, 'jit')
+        triton_failed = False
+        
         # Process blocks sequentially with carry-over propagation
         for block_idx in range(num_blocks):
             # Determine carry_in pointer and flag
@@ -609,30 +614,60 @@ class AssociativeScanExponential(Function):
             has_carry_out = block_idx < num_blocks - 1
             carry_out_ptr = carry_out if has_carry_out else torch.empty(0, device=log_gamma_clamped.device)
             
-            # Launch kernel for this block
-            associative_scan_parallel_kernel[grid](
-                log_gamma_clamped,
-                log_cumsum,
-                carry_in_ptr,
-                carry_out_ptr,
-                batch_size,
-                num_heads,
-                seq_len,
-                head_dim,
-                stride_batch,
-                stride_heads,
-                stride_seq,
-                stride_dim,
-                block_idx,  # Current block index
-                has_carry_in=has_carry_in,
-                has_carry_out=has_carry_out,
-                BLOCK_SIZE=BLOCK_SIZE,
-            )
+            # Launch kernel for this block with error handling
+            try:
+                if triton_available:
+                    associative_scan_parallel_kernel[grid](
+                        log_gamma_clamped,
+                        log_cumsum,
+                        carry_in_ptr,
+                        carry_out_ptr,
+                        batch_size,
+                        num_heads,
+                        seq_len,
+                        head_dim,
+                        stride_batch,
+                        stride_heads,
+                        stride_seq,
+                        stride_dim,
+                        block_idx,  # Current block index
+                        has_carry_in=has_carry_in,
+                        has_carry_out=has_carry_out,
+                        BLOCK_SIZE=BLOCK_SIZE,
+                    )
+                else:
+                    triton_failed = True
+                    break
+            except Exception as e:
+                # Triton kernel failed - fall back to CPU
+                triton_failed = True
+                import warnings
+                warnings.warn(
+                    f"⚠️ Triton kernel failed at block {block_idx}/{num_blocks}: {e}\n"
+                    f"   Falling back to CPU implementation (O(N) sequential, NOT O(N log N)).\n"
+                    f"   This indicates a CRITICAL performance issue for long sequences!",
+                    RuntimeWarning,
+                    stacklevel=2
+                )
+                break
             
             # Propagate carry-over to next block
             if block_idx < num_blocks - 1:
                 carry_in = carry_out.clone()
                 carry_out.zero_()
+        
+        # If Triton failed, use CPU fallback
+        if triton_failed:
+            import warnings
+            warnings.warn(
+                "⚠️ CRITICAL: Triton kernel failed! Using CPU fallback (O(N) sequential).\n"
+                "   This will cause O(N²) memory growth for long sequences (100K+).\n"
+                "   Please check CUDA/Triton installation and kernel correctness.",
+                RuntimeWarning,
+                stacklevel=2
+            )
+            # Use CPU fallback
+            log_cumsum = torch.cumsum(log_gamma_clamped, dim=2)
         
         # Step 5: Convert back to linear space with stability
         # Use max-subtraction pattern: exp(log_sum - max) * exp(max)

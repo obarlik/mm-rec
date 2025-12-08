@@ -108,8 +108,24 @@ class MultiMemoryAttention(nn.Module):
         v_mem = v_mem.transpose(1, 2)  # [batch, num_heads, num_slots_M, head_dim]
         
         # Compute attention scores: scores = Q · K_mem^T / sqrt(d_k)
+        # CRITICAL: This is O(N*M) not O(N²) because M << N (M=1024, N=100K)
+        # However, for very long sequences (100K+), this can still be large.
+        # Memory: batch * num_heads * seq_len * num_slots_M * 4 bytes (FP32)
+        # For 100K seq_len: 1 * 8 * 100000 * 1024 * 4 = ~3.2 GB (acceptable but large)
         scores = torch.matmul(q, k_mem.transpose(-2, -1)) * self.scale
         # scores: [batch, num_heads, seq_len, num_slots_M]
+        
+        # MEMORY CHECK: Warn if attention scores matrix is too large
+        scores_size_mb = scores.numel() * scores.element_size() / (1024 ** 2)
+        if scores_size_mb > 1000:  # > 1 GB
+            import warnings
+            warnings.warn(
+                f"⚠️ Large attention scores matrix: {scores_size_mb:.2f} MB\n"
+                f"   Shape: {scores.shape}, Memory: O(N*M) where N={seq_len}, M={k_mem.shape[-2]}\n"
+                f"   Consider using chunking for sequences > 32K.",
+                RuntimeWarning,
+                stacklevel=2
+            )
         
         # Apply softmax
         attn_weights = F.softmax(scores, dim=-1)
