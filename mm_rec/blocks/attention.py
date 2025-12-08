@@ -85,6 +85,10 @@ class MultiMemoryAttention(nn.Module):
         # k_mem: [batch, num_slots_M, model_dim]
         # v_mem: [batch, num_slots_M, model_dim]
         
+        # Ensure dtype matches query
+        k_mem = k_mem.to(query.dtype)
+        v_mem = v_mem.to(query.dtype)
+        
         # Reshape memory Keys and Values for multi-head
         k_mem = k_mem.view(batch_size, -1, self.num_heads, self.head_dim)
         k_mem = k_mem.transpose(1, 2)  # [batch, num_heads, num_slots_M, head_dim]

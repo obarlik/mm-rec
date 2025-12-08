@@ -64,18 +64,21 @@ class MMRecModel(nn.Module):
         # Long-term memory: [batch, num_memories, M, mem_dim] where M << seq_len
         M = 1024  # Long-term memory size (M << max_seq_len)
         
+        # Use float32 for training stability (can be changed to bfloat16 for inference)
+        memory_dtype = torch.float32
+        
         short_term_config = {
             'k_dim': model_dim,
             'v_dim': model_dim,
             'num_slots': max_seq_len,  # Can hold full sequence
-            'dtype': torch.bfloat16
+            'dtype': memory_dtype
         }
         
         long_term_config = {
             'k_dim': self.mem_dim,
             'v_dim': self.mem_dim,
             'num_slots': M,  # Fixed size M << seq_len
-            'dtype': torch.bfloat16
+            'dtype': memory_dtype
         }
         
         # Create initial memory state (will be created per batch)
