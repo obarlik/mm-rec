@@ -243,23 +243,56 @@ class MemoryState(nn.Module):
                 new_v = new_v.unsqueeze(1)
             
             # Update at specific step: bank.k[step] = new_k
-            # Shape: [batch, seq_len, k_dim]
+            # MemoryBank stores [num_slots, k_dim], but we need [batch, num_slots, k_dim]
             batch_size = new_k.shape[0]
             
-            # Ensure bank tensors have correct batch dimension
-            if self.short_term.k.shape[0] == 1 and batch_size > 1:
-                # Expand to batch size
-                self.short_term.k.data = self.short_term.k.data.expand(batch_size, -1, -1)
-                self.short_term.v.data = self.short_term.v.data.expand(batch_size, -1, -1)
+            # Check current shape of bank tensors
+            k_shape = self.short_term.k.data.shape
+            v_shape = self.short_term.v.data.shape
             
-            # Update at step position
-            if step < self.short_term.num_slots:
-                self.short_term.k.data[:, step:step+1, :] = new_k.to(self.short_term.k.device)
-                self.short_term.v.data[:, step:step+1, :] = new_v.to(self.short_term.v.device)
+            # If bank tensors are 2D [num_slots, k_dim], we need to handle per-batch
+            # For now, store batch-specific state by creating a buffer
+            # In practice, MemoryBank should support batch dimension
+            
+            if len(k_shape) == 2:
+                # 2D tensor: [num_slots, k_dim] - no batch dimension
+                # Update single slot (for first batch only, or average)
+                if step < self.short_term.num_slots:
+                    # Take mean across batch if multiple batches
+                    if batch_size > 1:
+                        new_k_mean = new_k.mean(dim=0, keepdim=True)  # [1, k_dim]
+                        new_v_mean = new_v.mean(dim=0, keepdim=True)  # [1, v_dim]
+                    else:
+                        new_k_mean = new_k.squeeze(1)  # [k_dim]
+                        new_v_mean = new_v.squeeze(1)  # [v_dim]
+                    
+                    self.short_term.k.data[step:step+1, :] = new_k_mean.to(self.short_term.k.device)
+                    self.short_term.v.data[step:step+1, :] = new_v_mean.to(self.short_term.v.device)
+                else:
+                    raise ValueError(f"Step {step} exceeds num_slots {self.short_term.num_slots}")
+            elif len(k_shape) == 3:
+                # 3D tensor: [batch, num_slots, k_dim] - has batch dimension
+                if k_shape[0] != batch_size:
+                    # Resize to match batch size
+                    old_k = self.short_term.k.data
+                    old_v = self.short_term.v.data
+                    self.short_term.k.data = torch.zeros(
+                        batch_size, self.short_term.num_slots, self.short_term.k_dim,
+                        dtype=old_k.dtype, device=old_k.device
+                    )
+                    self.short_term.v.data = torch.zeros(
+                        batch_size, self.short_term.num_slots, self.short_term.v_dim,
+                        dtype=old_v.dtype, device=old_v.device
+                    )
+                
+                # Update at step position
+                if step < self.short_term.num_slots:
+                    self.short_term.k.data[:, step:step+1, :] = new_k.to(self.short_term.k.device)
+                    self.short_term.v.data[:, step:step+1, :] = new_v.to(self.short_term.v.device)
+                else:
+                    raise ValueError(f"Step {step} exceeds num_slots {self.short_term.num_slots}")
             else:
-                # If step exceeds num_slots, append (grow tensor)
-                # This shouldn't happen in normal operation, but handle gracefully
-                raise ValueError(f"Step {step} exceeds num_slots {self.short_term.num_slots}")
+                raise ValueError(f"Unexpected tensor shape: {k_shape}")
                 
         elif bank_type == 'long':
             # Long-term memory update (less frequent, typically at block level)
