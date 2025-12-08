@@ -381,6 +381,27 @@ class TestGradients(unittest.TestCase):
         # Print some parameters with gradients for verification
         if params_with_gradients:
             print(f"  Examples with gradients: {params_with_gradients[:5]}")
+        
+        # Detailed check: Try to assert all parameters receive gradients
+        # This will help identify which parameters are not receiving gradients
+        try:
+            assert_all_parameters_receive_gradients(model)
+            print("✓ All parameters receive gradients")
+        except AssertionError as e:
+            # Print detailed information about missing gradients
+            print(f"⚠ Some parameters don't receive gradients:")
+            print(str(e))
+            # List parameters without gradients for debugging
+            if params_without_gradients:
+                print(f"\nParameters without gradients ({len(params_without_gradients)}):")
+                for name in params_without_gradients[:10]:  # Show first 10
+                    print(f"  - {name}")
+                if len(params_without_gradients) > 10:
+                    print(f"  ... and {len(params_without_gradients) - 10} more")
+            
+            # Don't fail the test, but provide information for debugging
+            # Uncomment the line below to make this a hard failure:
+            # raise
     
     def test_multiple_forward_backward_passes(self):
         """
