@@ -154,7 +154,15 @@ class MMRecBlock(nn.Module):
         # Reshape for associative scan: [batch, heads, seq_len, head_dim]
         # For simplicity, treat each dimension independently
         gamma_reshaped = gamma.view(batch_size, self.num_heads, seq_len, -1)
-        cumprod = associative_scan_exponential(gamma_reshaped)
+        
+        # Use CPU fallback if CUDA not available
+        try:
+            cumprod = associative_scan_exponential(gamma_reshaped)
+        except RuntimeError:
+            # Fallback to CPU implementation if Triton fails
+            from ..core.associative_scan_triton import associative_scan_exponential_cpu_fallback
+            cumprod = associative_scan_exponential_cpu_fallback(gamma_reshaped)
+        
         cumprod = cumprod.view(batch_size, seq_len, self.model_dim)
         
         # Step 5: MDI - Get previous hidden state and compute new state
