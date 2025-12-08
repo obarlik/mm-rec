@@ -19,6 +19,53 @@ from mm_rec.model import MMRecModel
 from mm_rec.core.memory_state import MemoryState
 
 
+def assert_all_parameters_receive_gradients(model: nn.Module) -> None:
+    """
+    Assert that all trainable parameters in the model receive gradients.
+    
+    This function checks every parameter in the model and raises an AssertionError
+    if any parameter that requires gradients does not have a gradient computed.
+    
+    Args:
+        model: PyTorch model to check
+    
+    Raises:
+        AssertionError: If any parameter requiring gradients has None gradient
+    
+    Potential reasons for missing gradients:
+    1. torch.no_grad() context used during forward pass
+    2. .detach() called on intermediate tensors
+    3. Zero attention scores (softmax outputs all zeros)
+    4. Hard clamping/thresholding in MDI (e.g., gamma clamped to constant)
+    5. Unused code paths (parameters not used in forward pass)
+    6. Stop gradient operations (e.g., stop_gradient in JAX)
+    """
+    parameters_without_gradients = []
+    
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            if param.grad is None:
+                parameters_without_gradients.append(name)
+            elif torch.isnan(param.grad).any():
+                parameters_without_gradients.append(f"{name} (has NaN gradients)")
+            elif torch.isinf(param.grad).any():
+                parameters_without_gradients.append(f"{name} (has Inf gradients)")
+    
+    if parameters_without_gradients:
+        error_msg = (
+            f"Found {len(parameters_without_gradients)} parameters without valid gradients:\n"
+            + "\n".join(f"  - {name}" for name in parameters_without_gradients)
+            + "\n\nPotential causes:"
+            + "\n  1. torch.no_grad() used during forward pass"
+            + "\n  2. .detach() called on intermediate tensors"
+            + "\n  3. Zero attention scores (all softmax outputs zero)"
+            + "\n  4. Hard clamping in MDI (gamma clamped to constant value)"
+            + "\n  5. Unused code paths (parameters not used in forward pass)"
+            + "\n  6. Stop gradient operations"
+        )
+        raise AssertionError(error_msg)
+
+
 class TestGradients(unittest.TestCase):
     """Tests for gradient correctness and numerical stability."""
     
