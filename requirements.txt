@@ -1,0 +1,10 @@
+# MM-Rec Requirements
+
+# Core dependencies
+torch>=2.0.0
+triton>=2.0.0  # Optional, for GPU acceleration
+
+# Development dependencies (optional)
+# numpy>=1.21.0
+# pytest>=7.0.0
+
