@@ -132,7 +132,10 @@ class MMRecBlock(nn.Module):
             
             import mm_rec_cpp_cpu
             self.use_cpp_optimization = True
-            print("✅ C++ optimizations available")
+            # Only print once per process (not per block instance)
+            if not hasattr(MMRecBlock, '_cpp_optimization_printed'):
+                print("✅ C++ optimizations available")
+                MMRecBlock._cpp_optimization_printed = True
         except ImportError as e:
             # On CPU, C++ extension is REQUIRED
             import torch
