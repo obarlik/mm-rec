@@ -263,9 +263,17 @@ def main():
     
     model.train()
     start_time = time.time()
+    last_print_time = time.time()
+    print_interval = 5.0  # Print status every 5 seconds
     
-    pbar = tqdm(range(args.max_steps), desc="Training", ncols=100, 
-                bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
+    # Enhanced progress bar with more info
+    pbar = tqdm(range(args.max_steps), desc="🚀 Training", ncols=120, 
+                bar_format='{desc} |{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}',
+                miniters=1, mininterval=1.0)
+    
+    print("\n" + "="*80)
+    print("📊 Training Started - Real-time Updates")
+    print("="*80 + "\n")
     
     for step in pbar:
         step_start = time.time()
@@ -295,14 +303,38 @@ def main():
             
             metrics.update(loss, perplexity, lr, step_time)
             
+            # Update progress bar with detailed info
+            avg_loss = metrics.get_summary()['avg_loss']
+            steps_per_sec = 1.0 / step_time if step_time > 0 else 0
+            elapsed_time = time.time() - start_time
+            
             pbar.set_postfix({
                 'loss': f'{loss:.4f}',
-                'ppl': f'{perplexity:.2f}',
+                'avg': f'{avg_loss:.4f}',
+                'ppl': f'{perplexity:.1f}',
                 'lr': f'{lr:.2e}',
-                't/s': f'{1/step_time:.1f}'
+                'spd': f'{steps_per_sec:.1f}/s'
             })
             
-            # Checkpoint
+            # Print detailed status every N seconds
+            current_time = time.time()
+            if current_time - last_print_time >= print_interval or step == 0 or (step + 1) % 10 == 0:
+                elapsed_str = f"{elapsed_time/60:.1f}m" if elapsed_time > 60 else f"{elapsed_time:.1f}s"
+                eta_seconds = (args.max_steps - step - 1) * step_time
+                eta_str = f"{eta_seconds/60:.1f}m" if eta_seconds > 60 else f"{eta_seconds:.1f}s"
+                
+                status_line = (
+                    f"📈 Step {step+1}/{args.max_steps} | "
+                    f"Loss: {loss:.4f} (avg: {avg_loss:.4f}) | "
+                    f"PPL: {perplexity:.1f} | "
+                    f"LR: {lr:.2e} | "
+                    f"Speed: {steps_per_sec:.1f} steps/s | "
+                    f"Time: {elapsed_str} (ETA: {eta_str})"
+                )
+                pbar.write(status_line)
+                last_print_time = current_time
+            
+            # Checkpoint with detailed info
             if (step + 1) % args.checkpoint_interval == 0:
                 checkpoint_path = Path(args.checkpoint_dir) / f"checkpoint_step_{step+1}.pt"
                 checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -318,9 +350,21 @@ def main():
                     'args': vars(args)
                 }, checkpoint_path)
                 
-                pbar.write(f"💾 Checkpoint {step+1}: loss={loss:.4f}, avg={metrics.get_summary()['avg_loss']:.4f}")
+                summary = metrics.get_summary()
+                checkpoint_msg = (
+                    f"\n💾 Checkpoint {step+1} saved!\n"
+                    f"   Loss: {loss:.4f} | Avg Loss: {summary['avg_loss']:.4f} | "
+                    f"Min Loss: {summary['min_loss']:.4f}\n"
+                    f"   Avg PPL: {summary['avg_perplexity']:.2f} | "
+                    f"Steps/sec: {1/summary['avg_step_time']:.2f}\n"
+                    f"   File: {checkpoint_path}\n"
+                )
+                pbar.write(checkpoint_msg)
         
-        except Exception:
+        except Exception as e:
+            # Show error but continue
+            error_msg = str(e)[:100]
+            pbar.write(f"⚠️ Step {step+1} error: {error_msg}")
             continue
     
     total_time = time.time() - start_time
