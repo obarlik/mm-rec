@@ -229,6 +229,12 @@ def main():
                         help="Weight decay")
     parser.add_argument("--grad_clip", type=float, default=1.0,
                         help="Gradient clipping norm")
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1,
+                        help="Gradient accumulation steps (effective batch size = batch_size * gradient_accumulation_steps)")
+    parser.add_argument("--use_amp", action="store_true",
+                        help="Use Automatic Mixed Precision (AMP) for training")
+    parser.add_argument("--use_gradient_checkpointing", action="store_true",
+                        help="Use gradient checkpointing to save memory")
     parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints_pretrain",
                         help="Checkpoint directory")
     parser.add_argument("--checkpoint_interval", type=int, default=5000,
@@ -416,6 +422,14 @@ def main():
     print("="*80)
     
     model.train()
+    
+    # Gradient checkpointing
+    if args.use_gradient_checkpointing:
+        # Enable gradient checkpointing in model if supported
+        if hasattr(model, 'gradient_checkpointing_enable'):
+            model.gradient_checkpointing_enable()
+        print(f"✅ Gradient Checkpointing: ENABLED")
+    
     total_loss = 0.0
     start_time = time.time()
     start_step = 0
@@ -440,38 +454,71 @@ def main():
     
     pbar = tqdm(range(start_step, args.max_steps), desc="Pre-training", ncols=100, initial=start_step)
     
+    # Gradient accumulation
+    accumulation_steps = args.gradient_accumulation_steps
+    effective_batch_size = args.batch_size * accumulation_steps
+    
     for step in pbar:
         # Get batch
         batch = data_loader.get_batch(device)
         if batch is None:
             continue
         
-        # Forward pass
-        loss = compute_pretrain_loss(model, batch)
+        # Forward pass (with AMP if enabled)
+        if scaler is not None:
+            from torch.cuda.amp import autocast
+            with autocast():
+                loss = compute_pretrain_loss(model, batch)
+            # Scale loss for gradient accumulation
+            loss = loss / accumulation_steps
+        else:
+            loss = compute_pretrain_loss(model, batch)
+            loss = loss / accumulation_steps
         
         # Backward pass
-        optimizer.zero_grad()
-        loss.backward()
+        if scaler is not None:
+            scaler.scale(loss).backward()
+        else:
+            loss.backward()
         
-        # Gradient clipping
-        if args.grad_clip > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+        # Gradient accumulation: only update every N steps
+        if (step + 1) % accumulation_steps == 0:
+            # Gradient clipping
+            if args.grad_clip > 0:
+                if scaler is not None:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+                else:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+            
+            # Optimizer step
+            if scaler is not None:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
+            
+            scheduler.step()
+            optimizer.zero_grad()
         
-        optimizer.step()
-        scheduler.step()
-        
-        # Update metrics
-        total_loss += loss.item()
+        # Update metrics (unscale for display)
+        loss_display = loss.item() * accumulation_steps  # Unscale for display
+        total_loss += loss_display
         avg_loss = total_loss / (step - start_step + 1)
         
         # Update progress bar
         lr = scheduler.get_last_lr()[0]
         cpp_status = "✅ C++" if cpp_available else "⚠️  Python"
+        amp_status = "AMP" if scaler is not None else ""
+        acc_status = f"acc={accumulation_steps}" if accumulation_steps > 1 else ""
+        opt_status = f"{cpp_status} {amp_status} {acc_status}".strip()
+        
         pbar.set_postfix({
-            'loss': f'{loss.item():.4f}',
+            'loss': f'{loss_display:.4f}',
             'avg': f'{avg_loss:.4f}',
             'lr': f'{lr:.2e}',
-            'opt': cpp_status
+            'opt': opt_status,
+            'eff_batch': effective_batch_size if accumulation_steps > 1 else ''
         })
         
         # Checkpoint
