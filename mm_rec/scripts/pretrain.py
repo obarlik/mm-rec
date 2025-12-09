@@ -235,6 +235,11 @@ def main():
                         help="Use Automatic Mixed Precision (AMP) for training")
     parser.add_argument("--use_gradient_checkpointing", action="store_true",
                         help="Use gradient checkpointing to save memory")
+    parser.add_argument("--use_qat", action="store_true",
+                        help="Use Quantization-Aware Training (QAT)")
+    parser.add_argument("--qat_backend", type=str, default="fbgemm",
+                        choices=["fbgemm", "qnnpack"],
+                        help="Quantization backend (fbgemm for x86, qnnpack for ARM)")
     parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints_pretrain",
                         help="Checkpoint directory")
     parser.add_argument("--checkpoint_interval", type=int, default=5000,
@@ -554,6 +559,8 @@ def main():
             opt_parts.append(acc_status)
         if ckpt_status:
             opt_parts.append(ckpt_status)
+        if qat_status:
+            opt_parts.append(qat_status)
         opt_status = " ".join(opt_parts)
         
         pbar.set_postfix({
