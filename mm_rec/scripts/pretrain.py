@@ -181,7 +181,8 @@ def compute_pretrain_loss(
     input_ids_target = input_ids[:, 1:]  # [batch, seq_len-1]
     
     # Forward pass
-    logits, _ = model(input_ids_input)  # [batch, seq_len-1, vocab_size]
+    # MMRec100M returns only logits by default (return_memory=False)
+    logits = model(input_ids_input)  # [batch, seq_len-1, vocab_size]
     
     # Verify shapes match
     if logits.shape[0] != input_ids_target.shape[0] or logits.shape[1] != input_ids_target.shape[1]:
@@ -330,6 +331,10 @@ def main():
     # Training loop
     print("\n" + "="*80)
     print("🚀 Starting Pre-training")
+    print("="*80)
+    print(f"⚙️  C++ Optimizations: {'✅ ACTIVE' if cpp_available else '❌ INACTIVE (Python fallback)'}")
+    print(f"🖥️  Device: {device}")
+    print(f"📊 Steps: {args.max_steps}")
     print("="*80)
     
     model.train()
