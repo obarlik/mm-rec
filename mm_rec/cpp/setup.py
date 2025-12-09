@@ -20,7 +20,13 @@ except:
     cuda_available = False
 
 # Base compile arguments
-cxx_args = ['-O3', '-std=c++17', '-fopenmp']
+# Get PyTorch library path for rpath
+import torch
+import os
+torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
+rpath_flag = f'-Wl,-rpath,{torch_lib}'
+
+cxx_args = ['-O3', '-std=c++17', '-fopenmp', rpath_flag]
 nvcc_args = ['-O3', '--use_fast_math']
 
 # Add architecture-specific flags
