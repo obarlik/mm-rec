@@ -487,9 +487,8 @@ def main():
             continue
         
         # Forward pass (with AMP if enabled)
-        if scaler is not None:
-            from torch.cuda.amp import autocast
-            with autocast():
+        if scaler is not None and autocast_context is not None:
+            with autocast_context():
                 loss = compute_pretrain_loss(model, batch)
             # Scale loss for gradient accumulation
             loss = loss / accumulation_steps
@@ -499,7 +498,12 @@ def main():
         
         # Backward pass
         if scaler is not None:
-            scaler.scale(loss).backward()
+            # Scale loss before backward
+            if use_cpu_amp:
+                scaled_loss = loss * scaler.scale_value
+            else:
+                scaled_loss = scaler.scale(loss)
+            scaled_loss.backward()
         else:
             loss.backward()
         
@@ -515,8 +519,15 @@ def main():
             
             # Optimizer step
             if scaler is not None:
-                scaler.step(optimizer)
-                scaler.update()
+                # For CPU scaler, we need to handle step differently
+                if use_cpu_amp:
+                    # CPU scaler: unscale already done, just step
+                    optimizer.step()
+                    scaler.step(optimizer)  # Update scaler state
+                else:
+                    # GPU scaler: standard flow
+                    scaler.step(optimizer)
+                    scaler.update()
             else:
                 optimizer.step()
             
