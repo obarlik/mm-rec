@@ -125,11 +125,33 @@ class PreTrainingDataLoader:
             padded_batch.append(padded)
         
         # Ensure we have exactly batch_size items
-        while len(padded_batch) < self.batch_size:
-            # Duplicate last item if needed
-            padded_batch.append(padded_batch[-1].clone())
+        if len(padded_batch) < self.batch_size:
+            # If not enough items, pad with last item
+            while len(padded_batch) < self.batch_size:
+                if padded_batch:
+                    padded_batch.append(padded_batch[-1].clone())
+                else:
+                    # If empty, return None
+                    return None
         
+        # Stack and ensure correct shape
         batch_tensor = torch.stack(padded_batch[:self.batch_size]).to(device)
+        
+        # Ensure all sequences have same length
+        if batch_tensor.size(1) != self.seq_len + 1:
+            # Truncate or pad to exact length
+            current_len = batch_tensor.size(1)
+            if current_len > self.seq_len + 1:
+                batch_tensor = batch_tensor[:, :self.seq_len + 1]
+            elif current_len < self.seq_len + 1:
+                padding = torch.zeros(
+                    self.batch_size, 
+                    self.seq_len + 1 - current_len, 
+                    dtype=batch_tensor.dtype, 
+                    device=device
+                )
+                batch_tensor = torch.cat([batch_tensor, padding], dim=1)
+        
         return batch_tensor
 
 
@@ -149,19 +171,29 @@ def compute_pretrain_loss(
     Returns:
         Loss tensor
     """
+    batch_size, seq_len = input_ids.shape
+    
     # Shift input for next token prediction
+    if seq_len < 2:
+        return torch.tensor(0.0, device=input_ids.device, requires_grad=True)
+    
     input_ids_input = input_ids[:, :-1]  # [batch, seq_len-1]
     input_ids_target = input_ids[:, 1:]  # [batch, seq_len-1]
     
     # Forward pass
     logits, _ = model(input_ids_input)  # [batch, seq_len-1, vocab_size]
     
+    # Verify shapes match
+    if logits.shape[0] != input_ids_target.shape[0] or logits.shape[1] != input_ids_target.shape[1]:
+        # Shape mismatch - return zero loss
+        return torch.tensor(0.0, device=input_ids.device, requires_grad=True)
+    
     # Flatten for loss computation
     logits_flat = logits.reshape(-1, logits.size(-1))
     targets_flat = input_ids_target.reshape(-1)
     
-    # Create mask for padding
-    mask = (targets_flat != ignore_index)
+    # Create mask for padding (0 is typically padding token)
+    mask = (targets_flat != ignore_index) & (targets_flat != 0)
     if mask.sum() == 0:
         return torch.tensor(0.0, device=input_ids.device, requires_grad=True)
     
