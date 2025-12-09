@@ -296,13 +296,40 @@ def main():
     ).to(device)
     
     # Check C++ optimizations
+    # On CPU, C++ should be available (it's built for CPU)
     cpp_available = False
     try:
         import mm_rec_cpp_cpu
         cpp_available = True
         print(f"✅ C++ optimizations: AVAILABLE")
     except ImportError:
-        print(f"⚠️  C++ optimizations: NOT AVAILABLE (using Python fallback)")
+        # Try with explicit path and LD_LIBRARY_PATH fix
+        try:
+            import sys
+            import os
+            
+            # Add PyTorch lib to LD_LIBRARY_PATH for libc10.so
+            torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
+            if os.path.exists(torch_lib):
+                ld_lib_path = os.environ.get('LD_LIBRARY_PATH', '')
+                if torch_lib not in ld_lib_path:
+                    os.environ['LD_LIBRARY_PATH'] = f"{ld_lib_path}:{torch_lib}" if ld_lib_path else torch_lib
+            
+            # Try loading from build path
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            cpp_build_path = os.path.join(script_dir, '../../cpp/build/lib.linux-x86_64-cpython-312')
+            cpp_build_path = os.path.abspath(cpp_build_path)
+            
+            if os.path.exists(cpp_build_path):
+                sys.path.insert(0, cpp_build_path)
+                import mm_rec_cpp_cpu
+                cpp_available = True
+                print(f"✅ C++ optimizations: LOADED from build path")
+        except Exception as e:
+            print(f"⚠️  C++ optimizations: Could not load ({type(e).__name__}: {e})")
+        
+        if not cpp_available:
+            print(f"⚠️  C++ optimizations: NOT AVAILABLE (using Python fallback)")
     
     print(f"✅ Model initialized ({model.get_num_params():,} params)")
     
