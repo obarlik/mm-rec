@@ -418,11 +418,27 @@ def main():
     model.train()
     total_loss = 0.0
     start_time = time.time()
+    start_step = 0
     
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     
-    pbar = tqdm(range(args.max_steps), desc="Pre-training", ncols=100)
+    # Resume from checkpoint if provided
+    if args.resume_from:
+        checkpoint_path = Path(args.resume_from)
+        if checkpoint_path.exists():
+            print(f"\n📂 Resuming from checkpoint: {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            start_step = checkpoint.get('step', 0) + 1
+            total_loss = checkpoint.get('avg_loss', 0.0) * start_step
+            print(f"✅ Resumed from step {start_step}")
+        else:
+            print(f"⚠️  Checkpoint not found: {checkpoint_path}")
+    
+    pbar = tqdm(range(start_step, args.max_steps), desc="Pre-training", ncols=100, initial=start_step)
     
     for step in pbar:
         # Get batch
