@@ -30,7 +30,7 @@ class Test32KSequence(unittest.TestCase):
         self.vocab_size = 32000
         self.seq_len = 32768  # 32K tokens
     
-    @pytest.mark.timeout(120)  # 2 minute timeout for 32K test
+    @pytest.mark.timeout(120, method='thread')  # 2 minute timeout for 32K test
     def test_32k_forward_pass(self):
         """Test forward pass with 32K sequence."""
         print(f"\n{'='*80}")
@@ -94,6 +94,7 @@ class Test32KSequence(unittest.TestCase):
                 else:
                     raise
     
+    @pytest.mark.timeout(120, method='thread')  # 2 minute timeout
     def test_32k_with_memory_states(self):
         """Test 32K sequence with explicit memory states."""
         print(f"\n{'='*80}")
@@ -154,7 +155,7 @@ class Test32KSequence(unittest.TestCase):
                 else:
                     raise
     
-    @pytest.mark.timeout(180)  # 3 minute timeout (multiple chunk sizes)
+    @pytest.mark.timeout(180, method='thread')  # 3 minute timeout (multiple chunk sizes)
     def test_32k_chunking(self):
         """Test that chunking works correctly for 32K sequence."""
         print(f"\n{'='*80}")
