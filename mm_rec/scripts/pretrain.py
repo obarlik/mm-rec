@@ -311,10 +311,10 @@ def main():
             import os
             import ctypes
             
-            # Preload PyTorch libraries using ctypes
+            # Preload PyTorch libraries using ctypes (REQUIRED for libc10.so)
             torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
             if os.path.exists(torch_lib):
-                # Preload libc10.so
+                # Preload libc10.so with RTLD_GLOBAL
                 libc10_path = os.path.join(torch_lib, 'libc10.so')
                 if os.path.exists(libc10_path):
                     try:
@@ -325,9 +325,10 @@ def main():
                 # Set LD_LIBRARY_PATH
                 os.environ['LD_LIBRARY_PATH'] = torch_lib
             
-            # Try loading from build path
+            # Try loading from build path (script is in mm_rec/scripts/, so go up to mm_rec/cpp/)
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            cpp_build_path = os.path.join(script_dir, '../../cpp/build/lib.linux-x86_64-cpython-312')
+            # From mm_rec/scripts/ to mm_rec/cpp/build/...
+            cpp_build_path = os.path.join(script_dir, '../cpp/build/lib.linux-x86_64-cpython-312')
             cpp_build_path = os.path.abspath(cpp_build_path)
             
             if os.path.exists(cpp_build_path):
