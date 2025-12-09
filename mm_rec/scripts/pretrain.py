@@ -296,24 +296,34 @@ def main():
     ).to(device)
     
     # Check C++ optimizations
-    # On CPU, C++ should be available (it's built for CPU)
+    # On CPU, C++ extension is REQUIRED (not optional)
     cpp_available = False
+    cpp_error = None
+    
     try:
         import mm_rec_cpp_cpu
         cpp_available = True
         print(f"✅ C++ optimizations: AVAILABLE")
-    except ImportError:
-        # Try with explicit path and LD_LIBRARY_PATH fix
+    except ImportError as e:
+        # Try with explicit path and library preloading
         try:
             import sys
             import os
+            import ctypes
             
-            # Add PyTorch lib to LD_LIBRARY_PATH for libc10.so
+            # Preload PyTorch libraries using ctypes
             torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
             if os.path.exists(torch_lib):
-                ld_lib_path = os.environ.get('LD_LIBRARY_PATH', '')
-                if torch_lib not in ld_lib_path:
-                    os.environ['LD_LIBRARY_PATH'] = f"{ld_lib_path}:{torch_lib}" if ld_lib_path else torch_lib
+                # Preload libc10.so
+                libc10_path = os.path.join(torch_lib, 'libc10.so')
+                if os.path.exists(libc10_path):
+                    try:
+                        ctypes.CDLL(libc10_path, mode=ctypes.RTLD_GLOBAL)
+                    except Exception:
+                        pass
+                
+                # Set LD_LIBRARY_PATH
+                os.environ['LD_LIBRARY_PATH'] = torch_lib
             
             # Try loading from build path
             script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -325,11 +335,22 @@ def main():
                 import mm_rec_cpp_cpu
                 cpp_available = True
                 print(f"✅ C++ optimizations: LOADED from build path")
+            else:
+                cpp_error = f"Build path not found: {cpp_build_path}"
         except Exception as e:
-            print(f"⚠️  C++ optimizations: Could not load ({type(e).__name__}: {e})")
-        
-        if not cpp_available:
-            print(f"⚠️  C++ optimizations: NOT AVAILABLE (using Python fallback)")
+            cpp_error = f"{type(e).__name__}: {str(e)}"
+    
+    # On CPU, C++ extension is REQUIRED
+    if device.type == 'cpu' and not cpp_available:
+        print(f"\n❌ CRITICAL ERROR: C++ extension is REQUIRED for CPU mode!")
+        print(f"   Error: {cpp_error or 'Import failed'}")
+        print(f"\n💡 Solutions:")
+        print(f"   1. Rebuild C++ extension:")
+        print(f"      cd mm_rec/cpp && python3 setup.py build_ext --inplace")
+        print(f"   2. Check PyTorch installation")
+        print(f"   3. Check library paths")
+        print(f"\n❌ Pre-training cannot start without C++ extension on CPU!")
+        return 1
     
     print(f"✅ Model initialized ({model.get_num_params():,} params)")
     

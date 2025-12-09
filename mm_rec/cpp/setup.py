@@ -20,11 +20,12 @@ except:
     cuda_available = False
 
 # Base compile arguments
-# Get PyTorch library path for rpath
+# Get PyTorch library path for rpath and library paths
 import torch
 import os
 torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
 rpath_flag = f'-Wl,-rpath,{torch_lib}'
+library_dirs = [torch_lib] if os.path.exists(torch_lib) else []
 
 cxx_args = ['-O3', '-std=c++17', '-fopenmp', rpath_flag]
 nvcc_args = ['-O3', '--use_fast_math']
@@ -59,6 +60,8 @@ cpp_extensions = [
             'src/mm_rec_block_cpp.cpp',
         ],
         extra_compile_args=cxx_args,
+        extra_link_args=[rpath_flag] if 'rpath_flag' in locals() else [],
+        library_dirs=library_dirs if 'library_dirs' in locals() else [],
         language='c++'
     )
 ]
