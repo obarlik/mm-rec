@@ -38,12 +38,18 @@ class CPUScaler:
         self.growth_interval = growth_interval
         self._growth_tracker = 0
         self._per_tensor_enabled = True
+        # Expose scale as property for direct access
+        self.scale_value = self.scale
         
-    def scale(self, outputs):
+    def __call__(self, outputs):
         """Scale outputs (loss) to prevent underflow."""
         if isinstance(outputs, torch.Tensor):
             return outputs * self.scale
         return tuple(out * self.scale for out in outputs)
+    
+    def scale(self, outputs):
+        """Scale outputs (loss) to prevent underflow. (Alias for __call__)"""
+        return self(outputs)
     
     def unscale_(self, optimizer):
         """Unscale gradients before optimizer step."""

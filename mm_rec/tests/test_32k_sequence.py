@@ -16,6 +16,11 @@ if project_root not in sys.path:
 from mm_rec.models.mmrec_100m import MMRec100M
 
 
+import pytest
+
+
+@pytest.mark.long
+@pytest.mark.slow
 class Test32KSequence(unittest.TestCase):
     """Test 32K sequence length processing."""
     

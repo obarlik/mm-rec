@@ -91,6 +91,7 @@ class TestGradients(unittest.TestCase):
         # Longer sequence config for numerical stability tests
         # NOTE: Reduced from 8192 to 512 for faster testing
         # For full 8192 test, modify this config or use environment variable
+        # Marked as slow test - can be skipped with pytest -m "not slow"
         self.long_seq_config = {
             'vocab_size': 100,
             'model_dim': 128,
@@ -128,6 +129,7 @@ class TestGradients(unittest.TestCase):
         
         return model, input_ids
     
+    @pytest.mark.slow
     def test_mm_rec_model_gradcheck(self):
         """
         Test gradient correctness using torch.autograd.gradcheck.
@@ -136,7 +138,7 @@ class TestGradients(unittest.TestCase):
         finite difference approximations.
         
         NOTE: This test can be slow. For faster testing, skip with:
-        python -m unittest mm_rec.tests.test_gradients.TestGradients.test_mm_rec_model_gradcheck --skip-slow
+        pytest -m "not slow"
         """
         print(f"\n[Progress] Gradcheck testi başlıyor (bu test uzun sürebilir)...")
         config = self.test_config

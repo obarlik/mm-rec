@@ -7,6 +7,7 @@ import torch
 import unittest
 import sys
 import os
+import pytest
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -82,6 +83,7 @@ class TestAssociativeScanValidation(unittest.TestCase):
             f"Triton result does not match reference. Max diff: {max_diff:.6e}"
         )
     
+    @pytest.mark.slow
     def test_medium_sequence(self):
         """Test with medium sequence (1024 tokens)."""
         batch_size, num_heads, seq_len, head_dim = 2, 8, 1024, 64
@@ -110,6 +112,8 @@ class TestAssociativeScanValidation(unittest.TestCase):
             f"Triton result does not match reference. Max diff: {max_diff:.6e}"
         )
     
+    @pytest.mark.long
+    @pytest.mark.slow
     def test_long_sequence(self):
         """Test with long sequence (8192 tokens)."""
         batch_size, num_heads, seq_len, head_dim = 1, 4, 8192, 32

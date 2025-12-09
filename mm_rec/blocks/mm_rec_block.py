@@ -112,15 +112,39 @@ class MMRecBlock(nn.Module):
         self.use_gradient_checkpointing = False  # Can be enabled via config
         self.use_kernel_fusion = True  # Enable kernel fusion optimizations
         
-        # C++ optimization flag (auto-detect if available)
+        # C++ optimization flag (REQUIRED on CPU)
         self.use_cpp_optimization = False
         try:
+            # Preload PyTorch libraries to fix libc10.so issues
+            import ctypes
+            import os
+            import torch
+            
+            torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
+            if os.path.exists(torch_lib):
+                libc10_path = os.path.join(torch_lib, 'libc10.so')
+                if os.path.exists(libc10_path):
+                    try:
+                        ctypes.CDLL(libc10_path, mode=ctypes.RTLD_GLOBAL)
+                    except Exception:
+                        pass
+                os.environ['LD_LIBRARY_PATH'] = torch_lib
+            
             import mm_rec_cpp_cpu
             self.use_cpp_optimization = True
             print("✅ C++ optimizations available")
-        except ImportError:
+        except ImportError as e:
+            # On CPU, C++ extension is REQUIRED
+            import torch
+            if not torch.cuda.is_available():
+                raise RuntimeError(
+                    f"❌ CRITICAL: C++ extension 'mm_rec_cpp_cpu' is REQUIRED for CPU mode!\n"
+                    f"   Error: {e}\n"
+                    f"   Solution: cd mm_rec/cpp && python setup.py build_ext --inplace\n"
+                    f"   Fallback to Python is DISABLED for performance."
+                ) from e
+            # On GPU, C++ is optional (Triton preferred)
             self.use_cpp_optimization = False
-            # Silent fallback to Python
     
     def forward(
         self,
@@ -223,12 +247,28 @@ class MMRecBlock(nn.Module):
             # Reshape for associative scan: [batch, heads, 1, head_dim]
             gamma_t_reshaped = gamma_new_t.view(batch_size, self.num_heads, 1, -1)
             
-            # Use CPU fallback if CUDA not available
-            try:
-                cumprod_t = associative_scan_exponential(gamma_t_reshaped)
-            except RuntimeError:
+            # On CPU, C++ extension is REQUIRED (no fallback)
+            # On GPU, try Triton first, then C++ extension
+            if not torch.cuda.is_available():
+                # CPU mode: C++ extension MUST be available
                 from ..core.associative_scan_triton import associative_scan_exponential_cpu_fallback
-                cumprod_t = associative_scan_exponential_cpu_fallback(gamma_t_reshaped)
+                try:
+                    cumprod_t = associative_scan_exponential_cpu_fallback(gamma_t_reshaped)
+                except RuntimeError as e:
+                    # C++ extension failed - this is fatal
+                    raise RuntimeError(
+                        f"❌ CRITICAL: C++ extension required for CPU mode in MMRecBlock!\n"
+                        f"   {str(e)}\n"
+                        f"   Block cannot proceed without optimized C++ extension."
+                    ) from e
+            else:
+                # GPU mode: Try Triton, fallback to C++ if needed
+                try:
+                    cumprod_t = associative_scan_exponential(gamma_t_reshaped)
+                except RuntimeError:
+                    # GPU Triton failed, try C++ extension as last resort
+                    from ..core.associative_scan_triton import associative_scan_exponential_cpu_fallback
+                    cumprod_t = associative_scan_exponential_cpu_fallback(gamma_t_reshaped)
             
             cumprod_t = cumprod_t.view(batch_size, 1, self.model_dim)
             

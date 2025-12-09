@@ -656,17 +656,26 @@ class AssociativeScanExponential(Function):
                 carry_in = carry_out.clone()
                 carry_out.zero_()
         
-        # If Triton failed, use CPU fallback
+        # If Triton failed, handle based on device
         if triton_failed:
+            # On CPU, C++ extension is REQUIRED (no slow Python fallback)
+            if not torch.cuda.is_available():
+                raise RuntimeError(
+                    "❌ CRITICAL: Triton kernel failed on CPU and C++ extension is REQUIRED!\n"
+                    "   Solution: Ensure mm_rec_scan_cpu is built and loadable.\n"
+                    "   Fallback to slow Python implementation is DISABLED."
+                )
+            
+            # On GPU, log warning but continue with slow fallback (last resort)
             import warnings
             warnings.warn(
-                "⚠️ CRITICAL: Triton kernel failed! Using CPU fallback (O(N) sequential).\n"
+                "⚠️ CRITICAL: Triton kernel failed! Using slow CPU fallback (O(N) sequential).\n"
                 "   This will cause O(N²) memory growth for long sequences (100K+).\n"
                 "   Please check CUDA/Triton installation and kernel correctness.",
                 RuntimeWarning,
                 stacklevel=2
             )
-            # Use CPU fallback
+            # Use slow Python fallback (only on GPU, as last resort)
             log_cumsum = torch.cumsum(log_gamma_clamped, dim=2)
         
         # Step 5: Convert back to linear space with stability
@@ -880,13 +889,33 @@ def associative_scan_exponential_cpu_fallback(gamma: torch.Tensor) -> torch.Tens
     Returns:
         cumulative_product: [BATCH, HEADS, SEQ_LEN, D_HEAD] cumulative products
     """
-    # Try to use C++ optimized extension first
+    # Try to use C++ optimized extension first (REQUIRED on CPU)
     try:
+        # Preload PyTorch libraries to fix libc10.so issues
+        import ctypes
+        import os
+        import torch
+        
+        torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
+        if os.path.exists(torch_lib):
+            libc10_path = os.path.join(torch_lib, 'libc10.so')
+            if os.path.exists(libc10_path):
+                try:
+                    ctypes.CDLL(libc10_path, mode=ctypes.RTLD_GLOBAL)
+                except Exception:
+                    pass
+            os.environ['LD_LIBRARY_PATH'] = torch_lib
+        
         import mm_rec_scan_cpu
         return mm_rec_scan_cpu.associative_scan_exponential_cpu(gamma)
-    except ImportError:
-        # Fallback to Python vectorized implementation
-        pass
+    except ImportError as e:
+        # C++ extension is REQUIRED - no fallback allowed
+        raise RuntimeError(
+            f"❌ CRITICAL: C++ extension 'mm_rec_scan_cpu' is REQUIRED for CPU mode!\n"
+            f"   Error: {e}\n"
+            f"   Solution: cd mm_rec/cpp && python setup.py build_ext --inplace\n"
+            f"   Fallback mode is DISABLED for performance and correctness."
+        ) from e
     
     # Python fallback: vectorized operations (PyTorch MKL/OpenMP)
     gamma_fp32 = gamma.to(torch.float32)

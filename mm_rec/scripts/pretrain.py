@@ -240,6 +240,14 @@ def main():
     parser.add_argument("--qat_backend", type=str, default="fbgemm",
                         choices=["fbgemm", "qnnpack"],
                         help="Quantization backend (fbgemm for x86, qnnpack for ARM)")
+    parser.add_argument("--use_compile", action="store_true",
+                        help="Use torch.compile for 2-3x speedup (PyTorch 2.0+)")
+    parser.add_argument("--use_adaptive_lr", action="store_true",
+                        help="Use adaptive learning rate scheduler (loss-based)")
+    parser.add_argument("--adaptive_lr_patience", type=int, default=10,
+                        help="Patience for adaptive LR (steps before reducing)")
+    parser.add_argument("--adaptive_lr_factor", type=float, default=0.5,
+                        help="LR reduction factor for adaptive scheduler")
     parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints_pretrain",
                         help="Checkpoint directory")
     parser.add_argument("--checkpoint_interval", type=int, default=5000,
@@ -354,19 +362,42 @@ def main():
         except Exception as e:
             cpp_error = f"{type(e).__name__}: {str(e)}"
     
-    # On CPU, C++ extension is REQUIRED
+    # On CPU, C++ extension is REQUIRED - NO FALLBACK ALLOWED
     if device.type == 'cpu' and not cpp_available:
-        print(f"\n❌ CRITICAL ERROR: C++ extension is REQUIRED for CPU mode!")
+        print(f"\n" + "="*80)
+        print(f"❌ CRITICAL ERROR: C++ extension is REQUIRED for CPU mode!")
+        print(f"="*80)
         print(f"   Error: {cpp_error or 'Import failed'}")
         print(f"\n💡 Solutions:")
         print(f"   1. Rebuild C++ extension:")
         print(f"      cd mm_rec/cpp && python3 setup.py build_ext --inplace")
-        print(f"   2. Check PyTorch installation")
-        print(f"   3. Check library paths")
-        print(f"\n❌ Pre-training cannot start without C++ extension on CPU!")
+        print(f"   2. Check PyTorch installation:")
+        print(f"      python -c 'import torch; print(torch.__file__)'")
+        print(f"   3. Check library paths:")
+        print(f"      python -c 'import torch; import os; print(os.path.join(os.path.dirname(torch.__file__), \"lib\"))'")
+        print(f"   4. Preload PyTorch libraries:")
+        print(f"      export LD_LIBRARY_PATH=$(python -c 'import torch; import os; print(os.path.join(os.path.dirname(torch.__file__), \"lib\"))'):$LD_LIBRARY_PATH")
+        print(f"\n" + "="*80)
+        print(f"❌ FATAL: Pre-training CANNOT start without C++ extension on CPU!")
+        print(f"   Fallback mode is DISABLED for performance and correctness.")
+        print(f"="*80)
         return 1
     
     print(f"✅ Model initialized ({model.get_num_params():,} params)")
+    
+    # PyTorch Compile (CPU/GPU - 2-3x speedup)
+    if args.use_compile:
+        try:
+            print("🔧 Compiling model with PyTorch 2.0...")
+            model = torch.compile(
+                model,
+                mode='reduce-overhead',  # Good balance for CPU/GPU
+                fullgraph=False  # Allow graph breaks for flexibility
+            )
+            print("✅ Model compiled! (2-3x speedup expected)")
+        except Exception as e:
+            print(f"⚠️  torch.compile failed: {e}")
+            print("   Continuing without compilation...")
     
     # Initialize data loader
     print("\n📦 Initializing data loader...")
@@ -384,21 +415,55 @@ def main():
         weight_decay=args.weight_decay
     )
     
-    warmup_scheduler = LinearLR(
-        optimizer,
-        start_factor=0.1,
-        end_factor=1.0,
-        total_iters=args.warmup_steps
-    )
-    cosine_scheduler = CosineAnnealingLR(
-        optimizer,
-        T_max=args.max_steps - args.warmup_steps
-    )
-    scheduler = SequentialLR(
-        optimizer,
-        schedulers=[warmup_scheduler, cosine_scheduler],
-        milestones=[args.warmup_steps]
-    )
+    # Learning rate scheduler
+    adaptive_scheduler = None
+    if args.use_adaptive_lr:
+        # Adaptive learning rate scheduler (loss-based)
+        from ..core.adaptive_learning import AdaptiveLearningRateScheduler
+        adaptive_scheduler = AdaptiveLearningRateScheduler(
+            optimizer,
+            mode='min',  # Minimize loss
+            factor=args.adaptive_lr_factor,
+            patience=args.adaptive_lr_patience,
+            min_lr=1e-6,
+            verbose=True
+        )
+        print(f"✅ Adaptive Learning Rate: ENABLED")
+        print(f"   Patience: {args.adaptive_lr_patience} steps")
+        print(f"   Reduction factor: {args.adaptive_lr_factor}")
+        # Still use warmup + cosine for initial schedule
+        warmup_scheduler = LinearLR(
+            optimizer,
+            start_factor=0.1,
+            end_factor=1.0,
+            total_iters=args.warmup_steps
+        )
+        cosine_scheduler = CosineAnnealingLR(
+            optimizer,
+            T_max=args.max_steps - args.warmup_steps
+        )
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, cosine_scheduler],
+            milestones=[args.warmup_steps]
+        )
+    else:
+        # Standard warmup + cosine scheduler
+        warmup_scheduler = LinearLR(
+            optimizer,
+            start_factor=0.1,
+            end_factor=1.0,
+            total_iters=args.warmup_steps
+        )
+        cosine_scheduler = CosineAnnealingLR(
+            optimizer,
+            T_max=args.max_steps - args.warmup_steps
+        )
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, cosine_scheduler],
+            milestones=[args.warmup_steps]
+        )
     
     # Training loop
     print("\n" + "="*80)
@@ -472,7 +537,11 @@ def main():
             checkpoint = torch.load(checkpoint_path, map_location=device)
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            if 'scheduler_state_dict' in checkpoint and checkpoint['scheduler_state_dict'] is not None:
+                scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            if 'adaptive_scheduler_state_dict' in checkpoint and checkpoint['adaptive_scheduler_state_dict'] is not None:
+                if adaptive_scheduler is not None:
+                    adaptive_scheduler.load_state_dict(checkpoint['adaptive_scheduler_state_dict'])
             start_step = checkpoint.get('step', 0) + 1
             total_loss = checkpoint.get('avg_loss', 0.0) * start_step
             print(f"✅ Resumed from step {start_step}")
@@ -539,13 +608,19 @@ def main():
             scheduler.step()
             optimizer.zero_grad()
         
+        # Adaptive learning rate adjustment (if enabled)
+        if adaptive_scheduler is not None:
+            adaptive_scheduler.step(loss.item(), step=step)
+        
         # Update metrics (unscale for display)
         loss_display = loss.item() * accumulation_steps  # Unscale for display
         total_loss += loss_display
         avg_loss = total_loss / (step - start_step + 1)
         
         # Update progress bar with detailed optimization status
-        lr = scheduler.get_last_lr()[0]
+        lr = scheduler.get_last_lr()[0] if scheduler is not None else optimizer.param_groups[0]['lr']
+        if adaptive_scheduler is not None:
+            lr = adaptive_scheduler.get_last_lr()[0]
         cpp_status = "✅C++" if cpp_available else "⚠️Py"
         amp_status = "AMP" if scaler is not None else ""
         acc_status = f"acc{accumulation_steps}" if accumulation_steps > 1 else ""
@@ -578,7 +653,8 @@ def main():
             checkpoint_data = {
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict() if scheduler is not None else None,
+                'adaptive_scheduler_state_dict': adaptive_scheduler.state_dict() if adaptive_scheduler is not None else None,
                 'step': step + 1,
                 'loss': loss_display,
                 'avg_loss': avg_loss,
@@ -601,7 +677,7 @@ def main():
                         'quantized': True,
                         'config': {
                             'model_name': args.model_name,
-                            'vocab_size': vocab_size,
+                            'vocab_size': tokenizer.vocab_size,
                             'expert_dim': args.expert_dim,
                             'num_layers': args.num_layers,
                             'num_heads': args.num_heads,
@@ -622,7 +698,8 @@ def main():
     torch.save({
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-        'scheduler_state_dict': scheduler.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict() if scheduler is not None else None,
+        'adaptive_scheduler_state_dict': adaptive_scheduler.state_dict() if adaptive_scheduler is not None else None,
         'step': args.max_steps,
         'loss': loss.item(),
         'avg_loss': avg_loss,
