@@ -343,6 +343,21 @@ def main():
     print("🚀 Starting Pre-training")
     print("="*80)
     # cpp_available is defined above (line 299-305)
+    # On CPU, C++ should be active (it's built for CPU)
+    if device.type == 'cpu' and not cpp_available:
+        # Try to load C++ extension with explicit path
+        try:
+            import sys
+            import os
+            cpp_build_path = os.path.join(os.path.dirname(__file__), '../../cpp/build/lib.linux-x86_64-cpython-312')
+            if os.path.exists(cpp_build_path):
+                sys.path.insert(0, cpp_build_path)
+                import mm_rec_cpp_cpu
+                cpp_available = True
+                print(f"✅ C++ optimizations: LOADED (CPU mode)")
+        except Exception as e:
+            print(f"⚠️  C++ optimizations: Could not load ({e})")
+    
     cpp_status_msg = "✅ ACTIVE" if cpp_available else "❌ INACTIVE (Python fallback)"
     print(f"⚙️  C++ Optimizations: {cpp_status_msg}")
     print(f"🖥️  Device: {device}")
