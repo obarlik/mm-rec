@@ -27,7 +27,22 @@ torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
 rpath_flag = f'-Wl,-rpath,{torch_lib}'
 library_dirs = [torch_lib] if os.path.exists(torch_lib) else []
 
-cxx_args = ['-O3', '-std=c++17', '-fopenmp', rpath_flag]
+# Modern CPU optimizations
+cxx_args = [
+    '-O3',                    # Maximum optimization
+    '-std=c++17',             # C++17 standard
+    '-march=native',          # Use native CPU architecture (auto-detect)
+    '-mtune=native',          # Tune for native CPU
+    '-fopenmp',               # OpenMP support for parallel processing
+    '-mavx',                  # AVX instructions
+    '-mavx2',                 # AVX2 instructions (if available)
+    '-mfma',                  # FMA (Fused Multiply-Add) instructions
+    '-msse4.2',               # SSE4.2 instructions
+    '-funroll-loops',         # Loop unrolling
+    '-ffast-math',            # Fast math (with care for numerical stability)
+    '-fno-math-errno',        # Don't set errno for math functions
+    rpath_flag
+]
 nvcc_args = ['-O3', '--use_fast_math']
 
 # Add architecture-specific flags
@@ -52,7 +67,7 @@ if cuda_available:
 # Define extensions
 extensions = []
 
-# C++ only extensions (CPU fallback)
+# C++ only extensions (CPU fallback with modern optimizations)
 cpp_extensions = [
     CppExtension(
         'mm_rec_cpp_cpu',
@@ -60,7 +75,17 @@ cpp_extensions = [
             'src/mm_rec_block_cpp.cpp',
         ],
         extra_compile_args=cxx_args,
-        extra_link_args=[rpath_flag] if 'rpath_flag' in locals() else [],
+        extra_link_args=['-fopenmp', rpath_flag] if 'rpath_flag' in locals() else ['-fopenmp'],
+        library_dirs=library_dirs if 'library_dirs' in locals() else [],
+        language='c++'
+    ),
+    CppExtension(
+        'mm_rec_scan_cpu',
+        sources=[
+            'src/associative_scan_cpu.cpp',
+        ],
+        extra_compile_args=cxx_args,
+        extra_link_args=['-fopenmp', rpath_flag] if 'rpath_flag' in locals() else ['-fopenmp'],
         library_dirs=library_dirs if 'library_dirs' in locals() else [],
         language='c++'
     )
