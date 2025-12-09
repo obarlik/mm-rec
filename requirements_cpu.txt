@@ -1,0 +1,17 @@
+# CPU Training Dependencies
+# Additional requirements for automatic data download and CPU training
+
+# Data download
+requests>=2.31.0
+datasets>=2.14.0
+huggingface-hub>=0.16.0
+
+# CPU optimizations (optional)
+# mkl>=2023.0.0  # Intel MKL for CPU acceleration
+
+# Monitoring (optional)
+psutil>=5.9.0  # For CPU/memory monitoring
+
+# Progress bars
+tqdm>=4.65.0
+
