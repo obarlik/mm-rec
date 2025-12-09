@@ -51,7 +51,6 @@ cpp_extensions = [
         'mm_rec_cpp_cpu',
         sources=[
             'src/mm_rec_block_cpp.cpp',
-            'src/memory_state_cpp.cpp',
         ],
         extra_compile_args=cxx_args,
         language='c++'
