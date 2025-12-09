@@ -170,7 +170,7 @@ class SFTTrainer:
         input_ids, attention_mask, labels = self.prepare_chat_input(messages, device)
         
         # Forward pass
-        logits, _ = self.model(input_ids)
+        logits = self.model(input_ids)
         
         # Compute loss
         loss = self.compute_loss(logits, labels, attention_mask)
@@ -274,7 +274,7 @@ class ChatCompletionAPI:
         generated = input_ids.clone()
         
         for _ in range(max_tokens):
-            logits, _ = self.model(generated)
+            logits = self.model(generated)
             next_token_logits = logits[0, -1, :] / temperature
             
             # Top-p sampling (simplified)
