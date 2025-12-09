@@ -294,6 +294,16 @@ def main():
         num_heads=args.num_heads,
         ffn_dim=args.ffn_dim
     ).to(device)
+    
+    # Check C++ optimizations
+    cpp_available = False
+    try:
+        import mm_rec_cpp_cpu
+        cpp_available = True
+        print(f"✅ C++ optimizations: AVAILABLE")
+    except ImportError:
+        print(f"⚠️  C++ optimizations: NOT AVAILABLE (using Python fallback)")
+    
     print(f"✅ Model initialized ({model.get_num_params():,} params)")
     
     # Initialize data loader
