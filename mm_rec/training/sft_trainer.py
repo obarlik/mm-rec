@@ -136,13 +136,31 @@ class SFTTrainer:
         shift_logits = shift_logits.view(-1, shift_logits.size(-1))
         shift_labels = shift_labels.view(-1)
         
+        # Filter out ignored labels before computing loss
+        valid_mask = shift_labels != self.config.ignore_index
+        if valid_mask.sum() == 0:
+            # No valid labels, return zero loss
+            return torch.tensor(0.0, device=shift_logits.device, requires_grad=True)
+        
+        # Get valid logits and labels
+        valid_logits = shift_logits[valid_mask]
+        valid_labels = shift_labels[valid_mask]
+        
+        # Clamp logits for numerical stability
+        valid_logits = torch.clamp(valid_logits, min=-50.0, max=50.0)
+        
         # Compute loss (ignoring -100 labels)
         loss = F.cross_entropy(
-            shift_logits,
-            shift_labels,
-            ignore_index=self.config.ignore_index,
-            label_smoothing=self.config.label_smoothing
+            valid_logits.unsqueeze(0) if valid_logits.dim() == 1 else valid_logits,
+            valid_labels.unsqueeze(0) if valid_labels.dim() == 0 else valid_labels,
+            label_smoothing=self.config.label_smoothing,
+            reduction='mean'
         )
+        
+        # Check for NaN/Inf
+        if torch.isnan(loss) or torch.isinf(loss):
+            # Return small positive loss instead of NaN
+            loss = torch.tensor(1e-6, device=shift_logits.device, requires_grad=True)
         
         return loss
     

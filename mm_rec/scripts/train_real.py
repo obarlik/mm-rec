@@ -275,7 +275,12 @@ def main():
     print("📊 Training Started - Real-time Updates")
     print("="*80 + "\n")
     
+    # Force flush output
+    sys.stdout.flush()
+    
+    step_count = 0
     for step in pbar:
+        step_count += 1
         step_start = time.time()
         
         # Sample random conversation
@@ -290,6 +295,10 @@ def main():
         
         # Training step
         try:
+            # Print step start (every step for visibility)
+            if step_count <= 5 or step_count % 10 == 0:
+                print(f"\n🔄 Step {step_count}/{args.max_steps} - Processing...", flush=True)
+            
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 step_metrics = trainer.train_step(messages, optimizer, device)
@@ -302,6 +311,9 @@ def main():
             lr = scheduler.get_last_lr()[0]
             
             metrics.update(loss, perplexity, lr, step_time)
+            
+            # ALWAYS print step completion
+            print(f"✅ Step {step_count} completed: loss={loss:.4f}, time={step_time:.2f}s", flush=True)
             
             # Update progress bar with detailed info
             avg_loss = metrics.get_summary()['avg_loss']
