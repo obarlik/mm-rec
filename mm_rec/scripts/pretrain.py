@@ -104,6 +104,7 @@ class PreTrainingDataLoader:
             )
             
             if len(tokens) < 2:
+                # Skip if too short, try another text
                 continue
             
             # Convert to tensor
@@ -113,15 +114,22 @@ class PreTrainingDataLoader:
         if not batch_inputs:
             return None
         
-        # Pad to same length
-        max_len = max(len(ids) for ids in batch_inputs)
+        # Pad to same length (use seq_len + 1 as max)
+        max_len = min(max(len(ids) for ids in batch_inputs), self.seq_len + 1)
         padded_batch = []
         for ids in batch_inputs:
+            if len(ids) > max_len:
+                ids = ids[:max_len]  # Truncate if too long
             padding = torch.zeros(max_len - len(ids), dtype=torch.long)
             padded = torch.cat([ids, padding])
             padded_batch.append(padded)
         
-        batch_tensor = torch.stack(padded_batch).to(device)
+        # Ensure we have exactly batch_size items
+        while len(padded_batch) < self.batch_size:
+            # Duplicate last item if needed
+            padded_batch.append(padded_batch[-1].clone())
+        
+        batch_tensor = torch.stack(padded_batch[:self.batch_size]).to(device)
         return batch_tensor
 
 
