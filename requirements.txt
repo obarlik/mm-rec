@@ -4,7 +4,20 @@
 torch>=2.0.0
 triton>=2.0.0  # Optional, for GPU acceleration
 
-# Development dependencies (optional)
-# numpy>=1.21.0
-# pytest>=7.0.0
+# Testing infrastructure
+pytest>=7.4.0
+pytest-xdist>=3.3.0  # Parallel test execution
+pytest-html>=3.2.0  # HTML test reports
+pytest-json-report>=1.5.0  # JSON test reports
+pytest-benchmark>=4.0.0  # Performance benchmarking
+pytest-cov>=4.1.0  # Coverage reporting
+pytest-timeout>=2.2.0  # Test timeouts
+pytest-clarity>=1.0.1  # Better error messages
+pytest-profiling>=1.7.0  # Test profiling
+pytest-asyncio>=0.21.0  # Async test support
+pytest-mock>=3.11.0  # Mocking support
+pytest-parametrize>=0.1.0  # Better parametrization
+
+# Development dependencies
+numpy>=1.21.0
 

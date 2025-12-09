@@ -172,3 +172,4 @@ mlruns/
 *~
 .#*
 test_metrics/
+test_reports/
