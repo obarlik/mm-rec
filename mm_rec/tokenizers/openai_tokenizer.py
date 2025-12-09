@@ -90,7 +90,13 @@ class OpenAITokenizer:
         Returns:
             List of token IDs
         """
-        tokens = self.encoding.encode(text)
+        # Allow special tokens in text (like <|endoftext|>, <|system|>, etc.)
+        # Allow all special tokens (including <|endoftext|>, <|system|>, etc.)
+        try:
+            tokens = self.encoding.encode(text, allowed_special="all")
+        except Exception:
+            # Fallback: disable special token checking
+            tokens = self.encoding.encode(text, disallowed_special=())
         
         if add_special_tokens:
             tokens.append(self.eos_token_id)
