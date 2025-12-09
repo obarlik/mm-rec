@@ -575,16 +575,45 @@ def main():
         # Checkpoint
         if (step + 1) % args.checkpoint_interval == 0:
             checkpoint_path = checkpoint_dir / f"checkpoint_step_{step+1}.pt"
-            torch.save({
+            checkpoint_data = {
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
-                'step': step,
-                'loss': loss.item(),
+                'step': step + 1,
+                'loss': loss_display,
                 'avg_loss': avg_loss,
-                'args': vars(args)
-            }, checkpoint_path)
+                'args': vars(args),
+                'use_qat': args.use_qat,
+                'qat_backend': args.qat_backend if args.use_qat else None,
+            }
+            torch.save(checkpoint_data, checkpoint_path)
             pbar.write(f"💾 Checkpoint saved: {checkpoint_path}")
+            
+            # If QAT enabled, also save quantized model for deployment
+            if args.use_qat:
+                try:
+                    from mm_rec.core.quantization import convert_to_quantized
+                    model_quantized = convert_to_quantized(model, inplace=False)
+                    quantized_path = checkpoint_dir / f"checkpoint_step_{step+1}_quantized.pt"
+                    torch.save({
+                        'step': step + 1,
+                        'model_state_dict': model_quantized.state_dict(),
+                        'quantized': True,
+                        'config': {
+                            'model_name': args.model_name,
+                            'vocab_size': vocab_size,
+                            'expert_dim': args.expert_dim,
+                            'num_layers': args.num_layers,
+                            'num_heads': args.num_heads,
+                            'ffn_dim': args.ffn_dim,
+                            'seq_len': args.seq_len,
+                            'batch_size': args.batch_size,
+                            'qat_backend': args.qat_backend,
+                        }
+                    }, quantized_path)
+                    pbar.write(f"🔢 Quantized model saved: {quantized_path}")
+                except Exception as e:
+                    pbar.write(f"⚠️  Failed to save quantized model: {e}")
     
     total_time = time.time() - start_time
     
