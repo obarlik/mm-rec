@@ -550,6 +550,7 @@ def main():
         amp_status = "AMP" if scaler is not None else ""
         acc_status = f"acc{accumulation_steps}" if accumulation_steps > 1 else ""
         ckpt_status = "CKPT" if args.use_gradient_checkpointing else ""
+        qat_status = "QAT" if args.use_qat else ""
         
         # Build optimization status string
         opt_parts = [cpp_status]
