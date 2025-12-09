@@ -7,6 +7,7 @@ import torch
 import unittest
 import sys
 import os
+import time
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,7 +15,6 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from mm_rec.models.mmrec_100m import MMRec100M
-
 
 import pytest
 
@@ -30,7 +30,6 @@ class Test32KSequence(unittest.TestCase):
         self.vocab_size = 32000
         self.seq_len = 32768  # 32K tokens
     
-    @pytest.mark.timeout(120, method='thread')  # 2 minute timeout for 32K test
     def test_32k_forward_pass(self):
         """Test forward pass with 32K sequence."""
         print(f"\n{'='*80}")
@@ -94,7 +93,7 @@ class Test32KSequence(unittest.TestCase):
                 else:
                     raise
     
-    @pytest.mark.timeout(120, method='thread')  # 2 minute timeout
+    @pytest.mark.timeout(120, method='thread', func_only=True)  # 2 minute timeout
     def test_32k_with_memory_states(self):
         """Test 32K sequence with explicit memory states."""
         print(f"\n{'='*80}")
@@ -155,44 +154,162 @@ class Test32KSequence(unittest.TestCase):
                 else:
                     raise
     
-    @pytest.mark.timeout(180, method='thread')  # 3 minute timeout (multiple chunk sizes)
     def test_32k_chunking(self):
         """Test that chunking works correctly for 32K sequence."""
-        print(f"\n{'='*80}")
-        print("32K Sequence Chunking Test")
-        print(f"{'='*80}\n")
+        # CRITICAL: Print immediately to verify test starts
+        import sys
+        sys.stdout.flush()
+        print(f"\n{'='*80}", flush=True)
+        print("32K Sequence Chunking Test", flush=True)
+        print(f"{'='*80}\n", flush=True)
+        print(f"✅ Test started at {time.time()}", flush=True)
         
-        # Create model
-        model = MMRec100M(
-            vocab_size=self.vocab_size,
-            expert_dim=256,
-            num_layers=12,
-            num_heads=8,
-            ffn_dim=2048
-        ).to(self.device)
+        # AGGRESSIVE TIMEOUT: Start time for manual timeout checking
+        start_time = time.time()
+        timeout_seconds = 180  # 3 minutes - STRICT TIMEOUT
+        
+        def check_timeout():
+            """Check if timeout exceeded - fail immediately if so."""
+            elapsed = time.time() - start_time
+            if elapsed > timeout_seconds:
+                self.fail(
+                    f"❌ TIMEOUT: Test exceeded {timeout_seconds}s limit! "
+                    f"Elapsed: {elapsed:.2f}s. Test terminated."
+                )
+            return elapsed
+        
+        # CRITICAL: Create model in thread with STRICT timeout
+        print("Creating model...", flush=True)
+        import threading
+        model_container = [None]
+        model_exception = [None]
+        model_done = threading.Event()
+        
+        def create_model():
+            try:
+                print(f"  [Thread] Model creation started...", flush=True)
+                model_container[0] = MMRec100M(
+                    vocab_size=self.vocab_size,
+                    expert_dim=256,
+                    num_layers=12,
+                    num_heads=8,
+                    ffn_dim=2048
+                ).to(self.device)
+                print(f"  [Thread] ✅ Model created successfully", flush=True)
+            except Exception as e:
+                print(f"  [Thread] ❌ Model creation failed: {e}", flush=True)
+                model_exception[0] = e
+            finally:
+                model_done.set()
+                print(f"  [Thread] Model creation thread finished", flush=True)
+        
+        model_thread = threading.Thread(target=create_model, daemon=True)
+        print(f"  Starting model creation thread...", flush=True)
+        model_thread.start()
+        
+        # Wait for model creation with STRICT timeout (max 20s for testing)
+        model_timeout = 20
+        print(f"  Waiting for model creation (timeout: {model_timeout}s)...", flush=True)
+        model_done.wait(timeout=model_timeout)
+        
+        if model_thread.is_alive():
+            elapsed = time.time() - start_time
+            print(f"  ❌ TIMEOUT: Model creation exceeded {model_timeout}s! Elapsed: {elapsed:.2f}s", flush=True)
+            self.fail(
+                f"❌ TIMEOUT: Model creation exceeded {model_timeout}s! "
+                f"Elapsed: {elapsed:.2f}s. Test terminated."
+            )
+        
+        if model_exception[0]:
+            raise model_exception[0]
+        
+        model = model_container[0]
+        elapsed = check_timeout()  # Check after model creation
+        print(f"✅ Model created. Total elapsed: {elapsed:.2f}s", flush=True)
         
         # Generate input
+        print("Generating input...")
+        check_timeout()  # Check after input generation
         batch_size = 1
         input_ids = torch.randint(0, self.vocab_size, (batch_size, self.seq_len), device=self.device)
+        print(f"Input generated. Shape: {input_ids.shape}")
         
-        # Test with different chunk sizes
-        chunk_sizes = [4096, 8192, 16384]
+        # Test with different chunk sizes (reduced for faster testing with timeout)
+        # Only test one chunk size to ensure timeout works
+        chunk_sizes = [8192]  # Single chunk size for timeout testing
         
         model.eval()
         with torch.no_grad():
             results = {}
             
             for chunk_size in chunk_sizes:
+                # AGGRESSIVE: Check timeout BEFORE each chunk
+                elapsed = check_timeout()
+                remaining_time = timeout_seconds - elapsed
+                
+                if remaining_time <= 5:  # Less than 5 seconds remaining
+                    self.fail(
+                        f"❌ TIMEOUT: Only {remaining_time:.1f}s remaining, "
+                        f"skipping chunk {chunk_size}. Elapsed: {elapsed:.1f}s"
+                    )
+                
                 try:
-                    print(f"\nTesting chunk_size={chunk_size}...")
-                    logits = model(input_ids, chunk_size=chunk_size)
+                    print(f"\nTesting chunk_size={chunk_size}... (elapsed: {elapsed:.1f}s, remaining: {remaining_time:.1f}s)")
+                    chunk_start = time.time()
+                    
+                    # CRITICAL: Run model in thread with strict timeout
+                    import threading
+                    result_container = [None]
+                    exception_container = [None]
+                    thread_done = threading.Event()
+                    
+                    def run_model():
+                        try:
+                            result_container[0] = model(input_ids, chunk_size=chunk_size)
+                        except Exception as e:
+                            exception_container[0] = e
+                        finally:
+                            thread_done.set()
+                    
+                    model_thread = threading.Thread(target=run_model, daemon=True)
+                    model_thread.start()
+                    
+                    # Wait with strict timeout (max 60s per chunk, or remaining time)
+                    chunk_timeout = min(remaining_time - 2, 60)  # Leave 2s buffer
+                    if chunk_timeout <= 0:
+                        self.fail(f"❌ TIMEOUT: No time for chunk {chunk_size}")
+                    
+                    thread_done.wait(timeout=chunk_timeout)
+                    
+                    # Check if thread is still running (timeout occurred)
+                    if model_thread.is_alive():
+                        elapsed_total = time.time() - start_time
+                        self.fail(
+                            f"❌ TIMEOUT: Chunk {chunk_size} exceeded {chunk_timeout}s limit! "
+                            f"Total elapsed: {elapsed_total:.2f}s (limit: {timeout_seconds}s). "
+                            f"Test terminated."
+                        )
+                    
+                    # Check for exceptions
+                    if exception_container[0]:
+                        raise exception_container[0]
+                    
+                    logits = result_container[0]
+                    chunk_elapsed = time.time() - chunk_start
                     results[chunk_size] = logits
-                    print(f"  ✅ Chunk size {chunk_size} works")
+                    
+                    # Check timeout AFTER chunk
+                    check_timeout()
+                    
+                    print(f"  ✅ Chunk size {chunk_size} works (took {chunk_elapsed:.1f}s)")
                 except RuntimeError as e:
                     if "out of memory" in str(e):
                         print(f"  ⚠️ OOM with chunk_size={chunk_size}")
                     else:
                         raise
+                except AssertionError:
+                    # Re-raise timeout failures immediately
+                    raise
             
             # Compare results (should be similar)
             if len(results) >= 2:

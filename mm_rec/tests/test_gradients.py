@@ -131,7 +131,7 @@ class TestGradients(unittest.TestCase):
         return model, input_ids
     
     @pytest.mark.slow
-    @pytest.mark.timeout(300, method='thread')  # 5 minute timeout (gradcheck is very slow)
+    @pytest.mark.timeout(300, method='thread', func_only=True)  # 5 minute timeout (gradcheck is very slow)
     def test_mm_rec_model_gradcheck(self):
         """
         Test gradient correctness using torch.autograd.gradcheck.
@@ -259,7 +259,7 @@ class TestGradients(unittest.TestCase):
             self.fail(f"Backward pass failed: {e}")
     
     @pytest.mark.slow
-    @pytest.mark.timeout(60, method='thread')  # 1 minute timeout
+    @pytest.mark.timeout(60, method='thread', func_only=True)  # 1 minute timeout
     def test_numerical_stability_long_sequence(self):
         """
         Test numerical stability with long sequences (512 tokens).
