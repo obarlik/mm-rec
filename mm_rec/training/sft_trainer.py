@@ -210,7 +210,8 @@ class SFTTrainer:
         self,
         messages: List[ChatMessage],
         optimizer: torch.optim.Optimizer,
-        device: torch.device
+        device: torch.device,
+        verbose: bool = True
     ) -> Dict[str, float]:
         """
         Single training step.
@@ -219,29 +220,70 @@ class SFTTrainer:
             messages: List of ChatMessage objects
             optimizer: Optimizer
             device: Device
+            verbose: Print detailed progress
         
         Returns:
             Dictionary with loss and metrics
         """
+        import sys
+        
+        if verbose:
+            print("  📝 Preparing input...", flush=True, file=sys.stderr)
+        
         self.model.train()
         optimizer.zero_grad()
         
         # Prepare input
         input_ids, attention_mask, labels = self.prepare_chat_input(messages, device)
         
+        valid_labels_count = (labels != -100).sum().item()
+        if verbose:
+            print(f"  ✅ Input prepared: shape={input_ids.shape}, valid_labels={valid_labels_count}/{labels.numel()}", flush=True, file=sys.stderr)
+        
         # Forward pass
+        if verbose:
+            print("  🔄 Running forward pass...", flush=True, file=sys.stderr)
+        
         logits = self.model(input_ids)
         
+        if verbose:
+            print(f"  ✅ Forward done: logits shape={logits.shape}", flush=True, file=sys.stderr)
+        
         # Compute loss
+        if verbose:
+            print("  📊 Computing loss...", flush=True, file=sys.stderr)
+        
         loss = self.compute_loss(logits, labels, attention_mask)
         
+        if verbose:
+            print(f"  ✅ Loss computed: {loss.item():.6f}", flush=True, file=sys.stderr)
+        
         # Backward
+        if verbose:
+            print("  ⬅️  Running backward pass...", flush=True, file=sys.stderr)
+        
         loss.backward()
+        
+        if verbose:
+            # Check gradients
+            total_grad_norm = 0.0
+            param_count = 0
+            for p in self.model.parameters():
+                if p.grad is not None:
+                    param_norm = p.grad.data.norm(2)
+                    total_grad_norm += param_norm.item() ** 2
+                    param_count += 1
+            total_grad_norm = total_grad_norm ** (1. / 2)
+            print(f"  ✅ Backward done: grad_norm={total_grad_norm:.4f}, params_with_grad={param_count}", flush=True, file=sys.stderr)
+        
         optimizer.step()
+        
+        if verbose:
+            print("  ✅ Optimizer step completed", flush=True, file=sys.stderr)
         
         return {
             'loss': loss.item(),
-            'perplexity': torch.exp(loss).item()
+            'perplexity': torch.exp(loss).item() if loss.item() < 10 else float('inf')
         }
 
 

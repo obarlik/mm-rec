@@ -1,0 +1,41 @@
+================================================================================
+MM-Rec 100M - Real Training
+================================================================================
+🖥️  Device: cpu
+📅 Start time: 2025-12-09 18:58:33
+📦 Loading data from ./data/chat_data_real.jsonl... ✅ 1400 conversations
+
+🔤 Initializing tokenizer... ✅ (vocab=100277)
+🤖 Initializing model... ✅ (148,788,480 params)
+🎓 Initializing trainer... ✅
+
+🚀 Starting REAL training:
+   Steps: 10
+   Batch size: 1
+   Max length: 128
+   Learning rate: 1e-05
+   Warmup steps: 500
+================================================================================
+🚀 Training |                                                                                          | 0/10 [00:00<?] 
+================================================================================
+📊 Training Started - Real-time Updates
+================================================================================
+
+
+🔄 Step 1/10 - Processing...
+  📝 Preparing input...
+  ✅ Input prepared: shape=torch.Size([1, 128]), valid_labels=128/128
+  🔄 Running forward pass...
+  ✅ Forward done: logits shape=torch.Size([1, 128, 100277])
+  📊 Computing loss...
+  ✅ Loss computed: 11.595111
+  ⬅️  Running backward pass...
+  ✅ Backward done: grad_norm=11.4833, params_with_grad=967
+  ✅ Optimizer step completed
+✅ Step 1 completed: loss=11.5951, time=70.92s
+🚀 Training |                              | 0/10 [01:10<?] , loss=11.5951, avg=11.5951, ppl=inf, lr=1.02e-06, spd=0.0/s                                                                                                                        🚀 Training |                              | 0/10 [01:10<?] , loss=11.5951, avg=11.5951, ppl=inf, lr=1.02e-06, spd=0.0/s🚀 Training |██▌                       | 1/10 [01:10<10:38] , loss=11.5951, avg=11.5951, ppl=inf, lr=1.02e-06, spd=0.0/s📈 Step 1/10 | Loss: 11.5951 (avg: 11.5951) | PPL: inf | LR: 1.02e-06 | Speed: 0.0 steps/s | Time: 1.2m (ETA: 10.6m)
+
+🔄 Step 2/10 - Processing...
+  📝 Preparing input...
+  ✅ Input prepared: shape=torch.Size([1, 128]), valid_labels=128/128
+  🔄 Running forward pass...

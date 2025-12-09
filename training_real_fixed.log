@@ -23,3 +23,7 @@ MM-Rec 100M - Real Training
 
 
 🔄 Step 1/20 - Processing...
+✅ Step 1 completed: loss=11.0452, time=215.54s
+🚀 Training |                          | 0/20 [03:35<?] , loss=11.0452, avg=11.0452, ppl=62643.6, lr=1.02e-06, spd=0.0/s                                                                                                                        🚀 Training |                          | 0/20 [03:35<?] , loss=11.0452, avg=11.0452, ppl=62643.6, lr=1.02e-06, spd=0.0/s🚀 Training |█                   | 1/20 [03:35<1:08:15] , loss=11.0452, avg=11.0452, ppl=62643.6, lr=1.02e-06, spd=0.0/s📈 Step 1/20 | Loss: 11.0452 (avg: 11.0452) | PPL: 62643.6 | LR: 1.02e-06 | Speed: 0.0 steps/s | Time: 3.6m (ETA: 68.3m)
+
+🔄 Step 2/20 - Processing...
