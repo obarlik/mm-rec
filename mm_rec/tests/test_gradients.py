@@ -9,6 +9,7 @@ import torch.nn as nn
 from typing import Tuple, List
 import sys
 import os
+import pytest
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -130,6 +131,7 @@ class TestGradients(unittest.TestCase):
         return model, input_ids
     
     @pytest.mark.slow
+    @pytest.mark.timeout(300)  # 5 minute timeout (gradcheck is very slow)
     def test_mm_rec_model_gradcheck(self):
         """
         Test gradient correctness using torch.autograd.gradcheck.

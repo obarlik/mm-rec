@@ -114,6 +114,7 @@ class TestAssociativeScanValidation(unittest.TestCase):
     
     @pytest.mark.long
     @pytest.mark.slow
+    @pytest.mark.timeout(30)  # 30 second timeout for 8192 tokens
     def test_long_sequence(self):
         """Test with long sequence (8192 tokens)."""
         batch_size, num_heads, seq_len, head_dim = 1, 4, 8192, 32
