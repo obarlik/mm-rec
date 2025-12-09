@@ -421,6 +421,15 @@ def main():
     print(f"📊 Steps: {args.max_steps}")
     print("="*80)
     
+    # Mixed precision training (AMP) - must be defined before training loop
+    scaler = None
+    if args.use_amp and device.type == 'cuda':
+        from torch.cuda.amp import GradScaler, autocast
+        scaler = GradScaler()
+        print(f"✅ Mixed Precision (AMP): ENABLED")
+    elif args.use_amp and device.type == 'cpu':
+        print(f"⚠️  Mixed Precision (AMP): CPU'da kullanılamaz, devre dışı")
+    
     model.train()
     
     # Gradient checkpointing
@@ -506,12 +515,22 @@ def main():
         total_loss += loss_display
         avg_loss = total_loss / (step - start_step + 1)
         
-        # Update progress bar
+        # Update progress bar with detailed optimization status
         lr = scheduler.get_last_lr()[0]
-        cpp_status = "✅ C++" if cpp_available else "⚠️  Python"
+        cpp_status = "✅C++" if cpp_available else "⚠️Py"
         amp_status = "AMP" if scaler is not None else ""
-        acc_status = f"acc={accumulation_steps}" if accumulation_steps > 1 else ""
-        opt_status = f"{cpp_status} {amp_status} {acc_status}".strip()
+        acc_status = f"acc{accumulation_steps}" if accumulation_steps > 1 else ""
+        ckpt_status = "CKPT" if args.use_gradient_checkpointing else ""
+        
+        # Build optimization status string
+        opt_parts = [cpp_status]
+        if amp_status:
+            opt_parts.append(amp_status)
+        if acc_status:
+            opt_parts.append(acc_status)
+        if ckpt_status:
+            opt_parts.append(ckpt_status)
+        opt_status = " ".join(opt_parts)
         
         pbar.set_postfix({
             'loss': f'{loss_display:.4f}',
