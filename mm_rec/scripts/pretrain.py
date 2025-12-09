@@ -423,12 +423,25 @@ def main():
     
     # Mixed precision training (AMP) - must be defined before training loop
     scaler = None
-    if args.use_amp and device.type == 'cuda':
-        from torch.cuda.amp import GradScaler, autocast
-        scaler = GradScaler()
-        print(f"✅ Mixed Precision (AMP): ENABLED")
-    elif args.use_amp and device.type == 'cpu':
-        print(f"⚠️  Mixed Precision (AMP): CPU'da kullanılamaz, devre dışı")
+    autocast_context = None
+    use_cpu_amp = False
+    
+    if args.use_amp:
+        if device.type == 'cuda':
+            from torch.cuda.amp import GradScaler, autocast
+            scaler = GradScaler()
+            autocast_context = autocast
+            print(f"✅ Mixed Precision (AMP): ENABLED (GPU)")
+        elif device.type == 'cpu':
+            # CPU-specific mixed precision
+            from ..core.cpu_amp import CPUScaler, CPUAutocast, convert_model_to_mixed_precision
+            scaler = CPUScaler()
+            autocast_context = CPUAutocast(dtype=torch.bfloat16)
+            use_cpu_amp = True
+            # Convert model to mixed precision (FP16/BF16 storage)
+            model = convert_model_to_mixed_precision(model, dtype=torch.bfloat16)
+            print(f"✅ Mixed Precision (AMP): ENABLED (CPU - BF16 storage, FP32 computation)")
+            print(f"   Memory savings: ~50% (model weights in BF16)")
     
     model.train()
     
