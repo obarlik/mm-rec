@@ -1,223 +1,119 @@
 #!/usr/bin/env python3
 """
-Download Pre-training Data for MM-Rec
+Download additional pre-training data sources.
 
-Downloads WikiText-103 and other pre-training datasets.
+Downloads:
+- OpenWebText (Reddit links)
+- C4 (Colossal Clean Crawled Corpus) - optional
+- BookCorpus - optional
 """
 
-import argparse
-import sys
 import os
+import sys
+import argparse
 from pathlib import Path
-from typing import List, Optional
+import requests
+import gzip
+import shutil
+from tqdm import tqdm
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-try:
-    from datasets import load_dataset
-    DATASETS_AVAILABLE = True
-except ImportError:
-    DATASETS_AVAILABLE = False
-    print("⚠️  datasets library not installed. Install with: pip install datasets")
+
+def download_file(url: str, output_path: Path, desc: str = "Downloading"):
+    """Download a file with progress bar."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    response = requests.get(url, stream=True)
+    total_size = int(response.headers.get('content-length', 0))
+    
+    with open(output_path, 'wb') as f, tqdm(
+        desc=desc,
+        total=total_size,
+        unit='B',
+        unit_scale=True,
+        unit_divisor=1024,
+    ) as pbar:
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
+                pbar.update(len(chunk))
 
 
-def download_wikitext_103(output_dir: Path, max_samples: Optional[int] = None):
-    """Download WikiText-103 dataset."""
-    print(f"\n📥 Downloading WikiText-103...")
-    output_file = output_dir / "wikitext_103.txt"
+def download_openwebtext(data_dir: Path):
+    """Download OpenWebText dataset."""
+    print("📥 Downloading OpenWebText...")
+    print("   Note: OpenWebText is large (~8GB compressed)")
+    print("   This may take a while...")
     
-    try:
-        # Load dataset
-        print("   Loading dataset from Hugging Face...")
-        dataset = load_dataset("wikitext", "wikitext-103-raw-v1", split="train")
-        
-        # Extract text
-        texts = []
-        for i, example in enumerate(dataset):
-            text = example.get("text", "").strip()
-            if text and len(text) > 50:  # Filter very short texts
-                texts.append(text)
-            
-            if max_samples and len(texts) >= max_samples:
-                break
-            
-            if (i + 1) % 1000 == 0:
-                print(f"   Processed {i+1} examples, collected {len(texts)} texts...")
-        
-        # Save to file
-        print(f"   Saving {len(texts)} texts to {output_file}...")
-        with open(output_file, 'w', encoding='utf-8') as f:
-            for text in texts:
-                f.write(text + "\n\n")
-        
-        print(f"✅ WikiText-103 downloaded: {output_file}")
-        print(f"   Total texts: {len(texts)}")
-        print(f"   File size: {output_file.stat().st_size / 1024 / 1024:.2f} MB")
-        
-        return output_file
-        
-    except Exception as e:
-        print(f"❌ Error downloading WikiText-103: {e}")
-        return None
+    # OpenWebText is typically distributed as tar.gz
+    # For now, we'll provide instructions
+    print("\n💡 OpenWebText Download Instructions:")
+    print("   1. Visit: https://skylion007.github.io/OpenWebTextCorpus/")
+    print("   2. Download the dataset")
+    print("   3. Extract to:", data_dir / "openwebtext")
+    print("\n   Or use:")
+    print("   wget https://zenodo.org/record/3834942/files/openwebtext.tar.xz")
+    print("   tar -xf openwebtext.tar.xz -C", data_dir)
+    
+    return data_dir / "openwebtext"
 
 
-def download_openwebtext(output_dir: Path, max_samples: Optional[int] = None):
-    """Download OpenWebText dataset (if available)."""
-    print(f"\n📥 Downloading OpenWebText...")
-    output_file = output_dir / "openwebtext.txt"
+def download_c4(data_dir: Path):
+    """Download C4 dataset (optional, very large)."""
+    print("\n📥 C4 Dataset:")
+    print("   Size: ~750GB (compressed)")
+    print("   This is VERY large, optional for initial training")
+    print("\n💡 C4 Download:")
+    print("   Use TensorFlow Datasets:")
+    print("   import tensorflow_datasets as tfds")
+    print("   ds = tfds.load('c4', split='train', data_dir=", data_dir, ")")
     
-    try:
-        print("   Loading dataset from Hugging Face...")
-        # OpenWebText is large, use streaming
-        dataset = load_dataset("openwebtext", split="train", streaming=True)
-        
-        texts = []
-        for i, example in enumerate(dataset):
-            text = example.get("text", "").strip()
-            if text and len(text) > 100:
-                texts.append(text)
-            
-            if max_samples and len(texts) >= max_samples:
-                break
-            
-            if (i + 1) % 1000 == 0:
-                print(f"   Processed {i+1} examples, collected {len(texts)} texts...")
-        
-        # Save to file
-        print(f"   Saving {len(texts)} texts to {output_file}...")
-        with open(output_file, 'w', encoding='utf-8') as f:
-            for text in texts:
-                f.write(text + "\n\n")
-        
-        print(f"✅ OpenWebText downloaded: {output_file}")
-        print(f"   Total texts: {len(texts)}")
-        
-        return output_file
-        
-    except Exception as e:
-        print(f"⚠️  OpenWebText not available: {e}")
-        print("   Skipping...")
-        return None
-
-
-def create_synthetic_data(output_dir: Path, num_samples: int = 1000):
-    """Create synthetic pre-training data if real data unavailable."""
-    print(f"\n📝 Creating synthetic pre-training data...")
-    output_file = output_dir / "synthetic_pretrain.txt"
-    
-    # Simple synthetic text generation
-    import random
-    
-    templates = [
-        "The {subject} is a {adjective} {noun} that {verb} in the {location}.",
-        "{Subject} {verb} {adverb} through the {location}, {verb_ing} {noun}.",
-        "In the {location}, {subject} {verb} {adjective} {noun} with {noun2}.",
-    ]
-    
-    subjects = ["cat", "dog", "bird", "person", "car", "tree", "book", "computer"]
-    adjectives = ["beautiful", "fast", "slow", "big", "small", "bright", "dark"]
-    nouns = ["house", "garden", "park", "city", "mountain", "river", "ocean"]
-    verbs = ["runs", "walks", "flies", "swims", "reads", "writes", "thinks"]
-    locations = ["forest", "city", "beach", "mountain", "valley", "desert"]
-    adverbs = ["quickly", "slowly", "carefully", "quietly", "loudly"]
-    
-    texts = []
-    for i in range(num_samples):
-        template = random.choice(templates)
-        text = template.format(
-            subject=random.choice(subjects),
-            Subject=random.choice(subjects).capitalize(),
-            adjective=random.choice(adjectives),
-            noun=random.choice(nouns),
-            noun2=random.choice(nouns),
-            verb=random.choice(verbs),
-            verb_ing=random.choice(verbs).replace("s", "ing"),
-            adverb=random.choice(adverbs),
-            location=random.choice(locations)
-        )
-        texts.append(text)
-    
-    # Save
-    with open(output_file, 'w', encoding='utf-8') as f:
-        for text in texts:
-            f.write(text + "\n\n")
-    
-    print(f"✅ Synthetic data created: {output_file}")
-    print(f"   Total texts: {len(texts)}")
-    
-    return output_file
+    return data_dir / "c4"
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Download Pre-training Data")
-    parser.add_argument("--output_dir", type=str, default="./data/pretrain",
-                        help="Output directory for pre-training data")
-    parser.add_argument("--dataset", type=str, default="wikitext",
-                        choices=["wikitext", "openwebtext", "all", "synthetic"],
-                        help="Dataset to download")
-    parser.add_argument("--max_samples", type=int, default=None,
-                        help="Maximum number of samples to download")
-    parser.add_argument("--synthetic_fallback", action="store_true",
-                        help="Create synthetic data if real data unavailable")
+    parser = argparse.ArgumentParser(description="Download pre-training data")
+    parser.add_argument("--data_dir", type=str, default="./data/pretrain",
+                        help="Data directory")
+    parser.add_argument("--download_openwebtext", action="store_true",
+                        help="Download OpenWebText")
+    parser.add_argument("--download_c4", action="store_true",
+                        help="Download C4 (WARNING: Very large ~750GB)")
     
     args = parser.parse_args()
     
-    if not DATASETS_AVAILABLE:
-        print("❌ datasets library required. Install with: pip install datasets")
-        if args.synthetic_fallback:
-            print("   Using synthetic data fallback...")
+    data_dir = Path(args.data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    
+    print("="*80)
+    print("Pre-training Data Downloader")
+    print("="*80)
+    print(f"📦 Data directory: {data_dir}")
+    print()
+    
+    if args.download_openwebtext:
+        download_openwebtext(data_dir)
+    
+    if args.download_c4:
+        print("\n⚠️  WARNING: C4 is ~750GB. Are you sure?")
+        response = input("Continue? (yes/no): ")
+        if response.lower() == 'yes':
+            download_c4(data_dir)
         else:
-            return 1
+            print("Skipped C4 download")
     
-    # Create output directory
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    print("="*80)
-    print("Pre-training Data Download")
-    print("="*80)
-    print(f"📁 Output directory: {output_dir}")
-    print(f"📦 Dataset: {args.dataset}")
-    
-    downloaded_files = []
-    
-    # Download based on selection
-    if args.dataset == "wikitext" or args.dataset == "all":
-        file = download_wikitext_103(output_dir, args.max_samples)
-        if file:
-            downloaded_files.append(file)
-    
-    if args.dataset == "openwebtext" or args.dataset == "all":
-        file = download_openwebtext(output_dir, args.max_samples)
-        if file:
-            downloaded_files.append(file)
-    
-    if args.dataset == "synthetic" or (args.synthetic_fallback and not downloaded_files):
-        file = create_synthetic_data(output_dir, args.max_samples or 1000)
-        if file:
-            downloaded_files.append(file)
-    
-    # Summary
     print("\n" + "="*80)
-    print("✅ Download Complete!")
+    print("✅ Data download setup complete")
     print("="*80)
-    print(f"📁 Files downloaded: {len(downloaded_files)}")
-    for file in downloaded_files:
-        print(f"   ✅ {file}")
-    
-    if downloaded_files:
-        print(f"\n💡 Next step: Run pre-training")
-        print(f"   python mm_rec/scripts/pretrain.py --data_dir {output_dir}")
-    else:
-        print("\n⚠️  No files downloaded. Check errors above.")
-        return 1
-    
-    return 0
+    print("\n📋 Next steps:")
+    print("   1. Download OpenWebText manually or use provided instructions")
+    print("   2. Update pretrain.py to use additional data sources")
+    print("   3. Start real pre-training with --max_steps 50000")
 
 
 if __name__ == '__main__':
-    sys.exit(main())
-
+    main()

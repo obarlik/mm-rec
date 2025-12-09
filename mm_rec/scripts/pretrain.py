@@ -215,12 +215,12 @@ def main():
                         help="Directory containing pre-training data")
     parser.add_argument("--model_name", type=str, default="mmrec_100m",
                         help="Model name")
-    parser.add_argument("--max_steps", type=int, default=100000,
-                        help="Maximum training steps")
+    parser.add_argument("--max_steps", type=int, default=50000,
+                        help="Maximum training steps (50K for real pre-training)")
     parser.add_argument("--batch_size", type=int, default=4,
-                        help="Batch size")
+                        help="Batch size (4 for CPU, 8-16 for GPU)")
     parser.add_argument("--seq_len", type=int, default=2048,
-                        help="Sequence length")
+                        help="Sequence length (2048 for real pre-training)")
     parser.add_argument("--learning_rate", type=float, default=3e-4,
                         help="Learning rate")
     parser.add_argument("--warmup_steps", type=int, default=2000,
@@ -231,8 +231,10 @@ def main():
                         help="Gradient clipping norm")
     parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints_pretrain",
                         help="Checkpoint directory")
-    parser.add_argument("--checkpoint_interval", type=int, default=1000,
-                        help="Checkpoint interval (steps)")
+    parser.add_argument("--checkpoint_interval", type=int, default=5000,
+                        help="Checkpoint interval (steps, 5000 for real pre-training)")
+    parser.add_argument("--resume_from", type=str, default=None,
+                        help="Resume training from checkpoint path")
     parser.add_argument("--expert_dim", type=int, default=256,
                         help="Expert dimension")
     parser.add_argument("--num_layers", type=int, default=2,
@@ -444,7 +446,7 @@ def main():
         
         # Update metrics
         total_loss += loss.item()
-        avg_loss = total_loss / (step + 1)
+        avg_loss = total_loss / (step - start_step + 1)
         
         # Update progress bar
         lr = scheduler.get_last_lr()[0]
