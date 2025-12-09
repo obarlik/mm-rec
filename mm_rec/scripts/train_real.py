@@ -120,70 +120,33 @@ def load_chat_data(data_file: str):
 
 
 def create_chat_data_from_text(text_file: str, code_file: str, output_file: str, max_samples: int = 10000):
-    """Convert text/code data to chat format."""
+    """Convert text/code data to chat format using proper converter."""
+    from mm_rec.data.convert_to_chat import convert_all_to_chat
+    
     print(f"\n🔄 Converting to chat format...")
     
-    def load_texts(file_path):
-        texts = []
-        if Path(file_path).exists():
-            with open(file_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and len(line) > 50:
-                        try:
-                            text = json.loads(line)
-                            if isinstance(text, str):
-                                texts.append(text)
-                        except:
-                            texts.append(line)
-        return texts
+    data_dir = Path(text_file).parent.parent
+    num_convs = convert_all_to_chat(
+        data_dir=str(data_dir),
+        output_file=output_file,
+        max_samples=max_samples,
+        text_ratio=0.6
+    )
     
-    text_data = load_texts(text_file)
-    code_data = load_texts(code_file)
-    
-    print(f"   Text samples: {len(text_data)}")
-    print(f"   Code samples: {len(code_data)}")
-    
-    # Convert to chat format
+    # Load created conversations
     conversations = []
+    if Path(output_file).exists():
+        with open(output_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        conv = json.loads(line)
+                        if "messages" in conv:
+                            conversations.append(conv["messages"])
+                    except:
+                        continue
     
-    # Text conversations
-    for i, text in enumerate(text_data[:max_samples//2]):
-        # Simple Q&A format
-        if len(text) > 100:
-            # Split into question and answer
-            mid = len(text) // 2
-            question = text[:mid].strip()
-            answer = text[mid:].strip()
-            
-            conversations.append({
-                "messages": [
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": question[:500]},  # Limit length
-                    {"role": "assistant", "content": answer[:500]}
-                ]
-            })
-    
-    # Code conversations
-    for i, code in enumerate(code_data[:max_samples//2]):
-        if len(code) > 50:
-            conversations.append({
-                "messages": [
-                    {"role": "system", "content": "You are a coding assistant."},
-                    {"role": "user", "content": f"Explain this code: {code[:300]}"},
-                    {"role": "assistant", "content": f"This code demonstrates: {code[:300]}"}
-                ]
-            })
-    
-    # Save to JSONL
-    output_path = Path(output_file)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    with open(output_path, 'w', encoding='utf-8') as f:
-        for conv in conversations:
-            f.write(json.dumps(conv) + '\n')
-    
-    print(f"✅ Created {len(conversations)} chat conversations: {output_path}")
     return conversations
 
 
