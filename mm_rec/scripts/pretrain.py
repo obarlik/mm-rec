@@ -342,7 +342,9 @@ def main():
     print("\n" + "="*80)
     print("🚀 Starting Pre-training")
     print("="*80)
-    print(f"⚙️  C++ Optimizations: {'✅ ACTIVE' if cpp_available else '❌ INACTIVE (Python fallback)'}")
+    # cpp_available is defined above (line 299-305)
+    cpp_status_msg = "✅ ACTIVE" if cpp_available else "❌ INACTIVE (Python fallback)"
+    print(f"⚙️  C++ Optimizations: {cpp_status_msg}")
     print(f"🖥️  Device: {device}")
     print(f"📊 Steps: {args.max_steps}")
     print("="*80)
@@ -382,10 +384,12 @@ def main():
         
         # Update progress bar
         lr = scheduler.get_last_lr()[0]
+        cpp_status = "✅ C++" if cpp_available else "⚠️  Python"
         pbar.set_postfix({
             'loss': f'{loss.item():.4f}',
             'avg': f'{avg_loss:.4f}',
-            'lr': f'{lr:.2e}'
+            'lr': f'{lr:.2e}',
+            'opt': cpp_status
         })
         
         # Checkpoint
