@@ -111,6 +111,16 @@ class MMRecBlock(nn.Module):
         # Performance optimization flags
         self.use_gradient_checkpointing = False  # Can be enabled via config
         self.use_kernel_fusion = True  # Enable kernel fusion optimizations
+        
+        # C++ optimization flag (auto-detect if available)
+        self.use_cpp_optimization = False
+        try:
+            import mm_rec_cpp_cpu
+            self.use_cpp_optimization = True
+            print("✅ C++ optimizations available")
+        except ImportError:
+            self.use_cpp_optimization = False
+            # Silent fallback to Python
     
     def forward(
         self,

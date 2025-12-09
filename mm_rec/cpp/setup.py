@@ -8,7 +8,7 @@ Or install:
     pip install -e .
 """
 
-from setuptools import setup, Extension
+from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CppExtension
 import os
 
@@ -47,7 +47,7 @@ extensions = []
 
 # C++ only extensions (CPU fallback)
 cpp_extensions = [
-    Extension(
+    CppExtension(
         'mm_rec_cpp_cpu',
         sources=[
             'src/mm_rec_block_cpp.cpp',
