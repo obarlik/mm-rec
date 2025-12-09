@@ -79,12 +79,36 @@ class SFTTrainer:
         
         # Create labels (only predict assistant responses)
         if self.config.only_predict_assistant:
-            # Find where assistant response starts
-            assistant_token = self.chat_formatter.assistant_token
-            assistant_start = input_text.find(assistant_token)
+            # Tokenize full input to find assistant token position
+            full_input_ids = self.tokenizer.encode(
+                input_text,
+                max_length=self.config.max_length * 2,  # Allow longer to find position
+                truncation=False,
+                padding=False
+            )
             
-            if assistant_start >= 0:
-                # Tokenize target separately to get labels
+            # Tokenize assistant token to find its position
+            assistant_token = self.chat_formatter.assistant_token
+            assistant_token_ids = self.tokenizer.encode(
+                assistant_token,
+                max_length=10,
+                truncation=False,
+                padding=False
+            )
+            
+            # Find assistant token position in input
+            assistant_pos = -1
+            if len(assistant_token_ids) > 0:
+                for i in range(len(full_input_ids) - len(assistant_token_ids) + 1):
+                    if full_input_ids[i:i+len(assistant_token_ids)] == assistant_token_ids:
+                        assistant_pos = i + len(assistant_token_ids)  # Start after token
+                        break
+            
+            # Create labels: -100 for non-assistant tokens, token_ids for assistant
+            labels = [-100] * len(input_ids)
+            
+            if assistant_pos >= 0:
+                # Tokenize target (assistant response) separately
                 target_ids = self.tokenizer.encode(
                     target_text,
                     max_length=self.config.max_length,
@@ -92,14 +116,32 @@ class SFTTrainer:
                     padding=False
                 )
                 
-                # Create labels: -100 for non-assistant tokens, token_ids for assistant
-                labels = [-100] * len(input_ids)
-                # Replace with target_ids where assistant starts
-                # (simplified - in practice, need to find exact position)
-                if len(target_ids) <= len(input_ids):
-                    labels[-len(target_ids):] = target_ids
+                # Map assistant position to truncated input_ids
+                # Find where assistant starts in truncated input_ids
+                truncated_input_ids = input_ids[:len(input_ids)]
+                
+                # Simple approach: if assistant is in input, predict next tokens
+                # Find assistant token in truncated input
+                assistant_in_truncated = False
+                for i in range(len(truncated_input_ids) - len(assistant_token_ids) + 1):
+                    if list(truncated_input_ids[i:i+len(assistant_token_ids)]) == assistant_token_ids:
+                        assistant_start_idx = i + len(assistant_token_ids)
+                        # Set labels for assistant response (next tokens)
+                        remaining_len = len(input_ids) - assistant_start_idx
+                        if remaining_len > 0 and len(target_ids) > 0:
+                            # Use target_ids for labels
+                            label_len = min(remaining_len, len(target_ids))
+                            labels[assistant_start_idx:assistant_start_idx+label_len] = target_ids[:label_len]
+                            assistant_in_truncated = True
+                        break
+                
+                # Fallback: if assistant not found, predict last part
+                if not assistant_in_truncated and len(target_ids) > 0:
+                    label_len = min(len(input_ids), len(target_ids))
+                    labels[-label_len:] = target_ids[:label_len]
             else:
-                labels = [-100] * len(input_ids)
+                # No assistant token found, predict all tokens
+                labels = input_ids.copy()
         else:
             # Predict all tokens
             labels = input_ids.copy()

@@ -2,7 +2,7 @@
 MM-Rec 100M - Real Training
 ================================================================================
 🖥️  Device: cpu
-📅 Start time: 2025-12-09 18:42:22
+📅 Start time: 2025-12-09 18:48:37
 📦 Loading data from ./data/chat_data_real.jsonl... ✅ 1400 conversations
 
 🔤 Initializing tokenizer... ✅ (vocab=100277)
@@ -10,10 +10,40 @@ MM-Rec 100M - Real Training
 🎓 Initializing trainer... ✅
 
 🚀 Starting REAL training:
-   Steps: 100
+   Steps: 50
    Batch size: 1
    Max length: 256
    Learning rate: 1e-05
    Warmup steps: 500
 ================================================================================
-🚀 Training |                                                                                         | 0/100 [00:00<?] 
+🚀 Training |                                                                                          | 0/50 [00:00<?] 
+================================================================================
+📊 Training Started - Real-time Updates
+================================================================================
+
+
+🔄 Step 1/50 - Processing...
+✅ Step 1 completed: loss=0.0000, time=39.59s
+🚀 Training |                                | 0/50 [00:39<?] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.02e-06, spd=0.0/s                                                                                                                        🚀 Training |                                | 0/50 [00:39<?] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.02e-06, spd=0.0/s🚀 Training |▌                           | 1/50 [00:39<32:20] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.02e-06, spd=0.0/s📈 Step 1/50 | Loss: 0.0000 (avg: 0.0000) | PPL: 1.0 | LR: 1.02e-06 | Speed: 0.0 steps/s | Time: 39.6s (ETA: 32.3m)
+
+🔄 Step 2/50 - Processing...
+✅ Step 2 completed: loss=0.0000, time=46.59s
+🚀 Training |▌                           | 1/50 [01:26<32:20] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.04e-06, spd=0.0/s                                                                                                                        🚀 Training |▌                           | 1/50 [01:26<32:20] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.04e-06, spd=0.0/s🚀 Training |█                           | 2/50 [01:26<34:58] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.04e-06, spd=0.0/s📈 Step 2/50 | Loss: 0.0000 (avg: 0.0000) | PPL: 1.0 | LR: 1.04e-06 | Speed: 0.0 steps/s | Time: 1.4m (ETA: 37.3m)
+
+🔄 Step 3/50 - Processing...
+✅ Step 3 completed: loss=0.0000, time=40.01s
+🚀 Training |█                           | 2/50 [02:06<34:58] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.05e-06, spd=0.0/s                                                                                                                        🚀 Training |█                           | 2/50 [02:06<34:58] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.05e-06, spd=0.0/s🚀 Training |█▋                          | 3/50 [02:06<32:55] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.05e-06, spd=0.0/s📈 Step 3/50 | Loss: 0.0000 (avg: 0.0000) | PPL: 1.0 | LR: 1.05e-06 | Speed: 0.0 steps/s | Time: 2.1m (ETA: 31.3m)
+
+🔄 Step 4/50 - Processing...
+✅ Step 4 completed: loss=0.0000, time=25.98s
+🚀 Training |█▋                          | 3/50 [02:32<32:55] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.07e-06, spd=0.0/s                                                                                                                        🚀 Training |█▋                          | 3/50 [02:32<32:55] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.07e-06, spd=0.0/s🚀 Training |██▏                         | 4/50 [02:32<27:21] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.07e-06, spd=0.0/s📈 Step 4/50 | Loss: 0.0000 (avg: 0.0000) | PPL: 1.0 | LR: 1.07e-06 | Speed: 0.0 steps/s | Time: 2.5m (ETA: 19.9m)
+
+🔄 Step 5/50 - Processing...
+✅ Step 5 completed: loss=0.0000, time=35.54s
+🚀 Training |██▏                         | 4/50 [03:07<27:21] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.09e-06, spd=0.0/s                                                                                                                        🚀 Training |██▏                         | 4/50 [03:07<27:21] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.09e-06, spd=0.0/s🚀 Training |██▊                         | 5/50 [03:07<26:43] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.09e-06, spd=0.0/s📈 Step 5/50 | Loss: 0.0000 (avg: 0.0000) | PPL: 1.0 | LR: 1.09e-06 | Speed: 0.0 steps/s | Time: 3.1m (ETA: 26.7m)
+✅ Step 6 completed: loss=0.0000, time=36.46s
+🚀 Training |██▊                         | 5/50 [03:44<26:43] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.11e-06, spd=0.0/s                                                                                                                        🚀 Training |██▊                         | 5/50 [03:44<26:43] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.11e-06, spd=0.0/s🚀 Training |███▎                        | 6/50 [03:44<26:20] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.11e-06, spd=0.0/s📈 Step 6/50 | Loss: 0.0000 (avg: 0.0000) | PPL: 1.0 | LR: 1.11e-06 | Speed: 0.0 steps/s | Time: 3.7m (ETA: 26.7m)
+✅ Step 7 completed: loss=0.0000, time=45.27s
+🚀 Training |███▎                        | 6/50 [04:29<26:20] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.13e-06, spd=0.0/s                                                                                                                        🚀 Training |███▎                        | 6/50 [04:29<26:20] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.13e-06, spd=0.0/s🚀 Training |███▉                        | 7/50 [04:29<27:55] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.13e-06, spd=0.0/s📈 Step 7/50 | Loss: 0.0000 (avg: 0.0000) | PPL: 1.0 | LR: 1.13e-06 | Speed: 0.0 steps/s | Time: 4.5m (ETA: 32.4m)
+✅ Step 8 completed: loss=0.0000, time=39.37s
+🚀 Training |███▉                        | 7/50 [05:08<27:55] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.14e-06, spd=0.0/s                                                                                                                        🚀 Training |███▉                        | 7/50 [05:08<27:55] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.14e-06, spd=0.0/s🚀 Training |████▍                       | 8/50 [05:08<27:22] , loss=0.0000, avg=0.0000, ppl=1.0, lr=1.14e-06, spd=0.0/s
