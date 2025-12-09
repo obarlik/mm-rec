@@ -44,7 +44,8 @@ class DataDownloader:
         split: str = "train",
         text_column: str = "text",
         max_samples: Optional[int] = None,
-        data_type: str = "text"  # "text" or "code"
+        data_type: str = "text",  # "text" or "code"
+        config_name: Optional[str] = None  # Config name for datasets
     ) -> List[str]:
         """
         Download dataset from Hugging Face.
@@ -71,7 +72,10 @@ class DataDownloader:
         
         try:
             # Load dataset
-            dataset = load_dataset(dataset_name, split=split, streaming=False)
+            if config_name:
+                dataset = load_dataset(dataset_name, config_name, split=split, streaming=False)
+            else:
+                dataset = load_dataset(dataset_name, split=split, streaming=False)
             
             # Limit samples if specified
             if max_samples:
@@ -99,27 +103,30 @@ class DataDownloader:
             split="train",
             text_column="text",
             max_samples=max_samples,
-            data_type="text"
+            data_type="text",
+            config_name="wikitext-2-raw-v1"  # Specify config
         )
     
     def download_code_dataset(self, max_samples: int = 1000) -> List[str]:
         """Download code dataset (e.g., The Stack)."""
-        # Try multiple code datasets
+        # Try multiple code datasets (publicly available)
         datasets_to_try = [
-            ("bigcode/the-stack", "train", "content"),
-            ("bigcode/python_code", "train", "content"),
-            ("code_search_net", "train", "code"),
+            ("bigcode/python_code", "train", "content", None),
+            ("bigcode/the-stack-dedup", "train", "content", None),  # Public version
+            ("bigcode/starcoderdata", "train", "content", None),
+            ("bigcode/python_code", "train", "code", None),
         ]
         
         all_code = []
-        for dataset_name, split, column in datasets_to_try:
+        for dataset_name, split, column, config in datasets_to_try:
             try:
                 code = self.download_huggingface_dataset(
                     dataset_name,
                     split=split,
                     text_column=column,
                     max_samples=max_samples // len(datasets_to_try),
-                    data_type="code"
+                    data_type="code",
+                    config_name=config
                 )
                 all_code.extend(code)
                 if len(all_code) >= max_samples:
@@ -128,7 +135,29 @@ class DataDownloader:
                 print(f"⚠️ Could not download {dataset_name}: {e}")
                 continue
         
+        # If no code downloaded, create synthetic code samples
+        if len(all_code) == 0:
+            print("⚠️ No code datasets available, creating synthetic code samples...")
+            all_code = self._create_synthetic_code(max_samples)
+        
         return all_code[:max_samples]
+    
+    def _create_synthetic_code(self, num_samples: int) -> List[str]:
+        """Create synthetic code samples for training."""
+        code_templates = [
+            "def example_function(x, y):\n    return x + y\n",
+            "class ExampleClass:\n    def __init__(self, value):\n        self.value = value\n",
+            "import numpy as np\narr = np.array([1, 2, 3])\nresult = arr.sum()\n",
+            "for i in range(10):\n    print(i)\n",
+            "if condition:\n    do_something()\nelse:\n    do_other_thing()\n",
+        ]
+        
+        samples = []
+        for i in range(num_samples):
+            template = code_templates[i % len(code_templates)]
+            samples.append(template + f"# Sample {i+1}\n")
+        
+        return samples
     
     def download_from_url(self, url: str, output_file: Path) -> bool:
         """Download file from URL."""

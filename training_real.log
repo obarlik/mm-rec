@@ -1,0 +1,19 @@
+================================================================================
+MM-Rec 100M - Real Training
+================================================================================
+🖥️  Device: cpu
+📅 Start time: 2025-12-09 18:38:45
+📦 Loading data from ./data/chat_data_real.jsonl... ✅ 1400 conversations
+
+🔤 Initializing tokenizer... ✅ (vocab=100277)
+🤖 Initializing model... ✅ (148,788,480 params)
+🎓 Initializing trainer... ✅
+
+🚀 Starting REAL training:
+   Steps: 500
+   Batch size: 2
+   Max length: 512
+   Learning rate: 1e-05
+   Warmup steps: 500
+================================================================================
+Training:   0%|                                                             | 0/500 [00:00<?, ?it/s]

@@ -209,7 +209,19 @@ def convert_all_to_chat(
     # Convert text data
     if text_file.exists():
         text_samples = int(max_samples * text_ratio)
-        text_convs = convert_text_to_chat(text_file, output_path, max_samples=text_samples)
+        text_count = convert_text_to_chat(text_file, output_path, max_samples=text_samples)
+        # Load text conversations
+        text_convs = []
+        with open(output_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        conv = json.loads(line)
+                        if "messages" in conv:
+                            text_convs.append(conv["messages"])
+                    except:
+                        continue
         all_conversations.extend(text_convs)
     else:
         print(f"⚠️ Text file not found: {text_file}")
@@ -217,7 +229,19 @@ def convert_all_to_chat(
     # Convert code data
     if code_file.exists():
         code_samples = max_samples - len(all_conversations)
-        code_convs = convert_code_to_chat(code_file, output_path, max_samples=code_samples)
+        code_count = convert_code_to_chat(code_file, output_path, max_samples=code_samples)
+        # Load code conversations
+        code_convs = []
+        with open(output_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        conv = json.loads(line)
+                        if "messages" in conv:
+                            code_convs.append(conv["messages"])
+                    except:
+                        continue
         all_conversations.extend(code_convs)
     else:
         print(f"⚠️ Code file not found: {code_file}")
