@@ -10,6 +10,19 @@
 #include <vector>
 #include <iostream>
 
+// Include memory_state functions
+torch::Tensor update_memory_state_cpp(
+    torch::Tensor memory_bank,  // [batch, seq_len, mem_dim]
+    torch::Tensor new_values,   // [batch, mem_dim]
+    int64_t step
+) {
+    // In-place update at specific step
+    auto memory_slice = memory_bank.select(1, step);  // [batch, mem_dim]
+    memory_slice.copy_(new_values);
+    
+    return memory_bank;
+}
+
 /**
  * Optimized sequential forward pass for MM-Rec Block.
  * 
@@ -101,6 +114,13 @@ std::vector<torch::Tensor> mm_rec_block_forward_batch(
     );
 }
 
+// Forward declaration
+torch::Tensor update_memory_state_cpp(
+    torch::Tensor memory_bank,
+    torch::Tensor new_values,
+    int64_t step
+);
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("mm_rec_block_forward_sequential", 
           &mm_rec_block_forward_sequential,
@@ -109,5 +129,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("mm_rec_block_forward_batch",
           &mm_rec_block_forward_batch,
           "MM-Rec Block forward pass (C++ optimized batch)");
+    
+    m.def("update_memory_state_cpp",
+          &update_memory_state_cpp,
+          "Update memory state at specific step (C++ optimized)");
 }
 

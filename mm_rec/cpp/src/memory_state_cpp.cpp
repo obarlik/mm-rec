@@ -22,9 +22,6 @@ torch::Tensor update_memory_state_cpp(
     return memory_bank;
 }
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("update_memory_state_cpp",
-          &update_memory_state_cpp,
-          "Update memory state at specific step (C++ optimized)");
-}
+// Note: PYBIND11_MODULE is defined in mm_rec_block_cpp.cpp
+// This file provides additional functions that will be registered in the main module
 
