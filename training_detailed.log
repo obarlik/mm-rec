@@ -1,111 +1,0 @@
-================================================================================
-MM-Rec 100M - Real Training
-================================================================================
-🖥️  Device: cpu
-📅 Start time: 2025-12-09 18:58:33
-📦 Loading data from ./data/chat_data_real.jsonl... ✅ 1400 conversations
-
-🔤 Initializing tokenizer... ✅ (vocab=100277)
-🤖 Initializing model... ✅ (148,788,480 params)
-🎓 Initializing trainer... ✅
-
-🚀 Starting REAL training:
-   Steps: 10
-   Batch size: 1
-   Max length: 128
-   Learning rate: 1e-05
-   Warmup steps: 500
-================================================================================
-🚀 Training |                                                                                          | 0/10 [00:00<?] 
-================================================================================
-📊 Training Started - Real-time Updates
-================================================================================
-
-
-🔄 Step 1/10 - Processing...
-  📝 Preparing input...
-  ✅ Input prepared: shape=torch.Size([1, 128]), valid_labels=128/128
-  🔄 Running forward pass...
-  ✅ Forward done: logits shape=torch.Size([1, 128, 100277])
-  📊 Computing loss...
-  ✅ Loss computed: 11.595111
-  ⬅️  Running backward pass...
-  ✅ Backward done: grad_norm=11.4833, params_with_grad=967
-  ✅ Optimizer step completed
-✅ Step 1 completed: loss=11.5951, time=70.92s
-🚀 Training |                              | 0/10 [01:10<?] , loss=11.5951, avg=11.5951, ppl=inf, lr=1.02e-06, spd=0.0/s                                                                                                                        🚀 Training |                              | 0/10 [01:10<?] , loss=11.5951, avg=11.5951, ppl=inf, lr=1.02e-06, spd=0.0/s🚀 Training |██▌                       | 1/10 [01:10<10:38] , loss=11.5951, avg=11.5951, ppl=inf, lr=1.02e-06, spd=0.0/s📈 Step 1/10 | Loss: 11.5951 (avg: 11.5951) | PPL: inf | LR: 1.02e-06 | Speed: 0.0 steps/s | Time: 1.2m (ETA: 10.6m)
-
-🔄 Step 2/10 - Processing...
-  📝 Preparing input...
-  ✅ Input prepared: shape=torch.Size([1, 128]), valid_labels=128/128
-  🔄 Running forward pass...
-  ✅ Forward done: logits shape=torch.Size([1, 128, 100277])
-  📊 Computing loss...
-  ✅ Loss computed: 11.629010
-  ⬅️  Running backward pass...
-  ✅ Backward done: grad_norm=7.8857, params_with_grad=967
-  ✅ Optimizer step completed
-✅ Step 2 completed: loss=11.6290, time=67.67s
-🚀 Training |██▌                       | 1/10 [02:18<10:38] , loss=11.6290, avg=11.6121, ppl=inf, lr=1.04e-06, spd=0.0/s                                                                                                                        🚀 Training |██▌                       | 1/10 [02:18<10:38] , loss=11.6290, avg=11.6121, ppl=inf, lr=1.04e-06, spd=0.0/s🚀 Training |█████▏                    | 2/10 [02:18<09:12] , loss=11.6290, avg=11.6121, ppl=inf, lr=1.04e-06, spd=0.0/s📈 Step 2/10 | Loss: 11.6290 (avg: 11.6121) | PPL: inf | LR: 1.04e-06 | Speed: 0.0 steps/s | Time: 2.3m (ETA: 9.0m)
-
-🔄 Step 3/10 - Processing...
-  📝 Preparing input...
-  ✅ Input prepared: shape=torch.Size([1, 128]), valid_labels=128/128
-  🔄 Running forward pass...
-  ✅ Forward done: logits shape=torch.Size([1, 128, 100277])
-  📊 Computing loss...
-  ✅ Loss computed: 11.457298
-  ⬅️  Running backward pass...
-  ✅ Backward done: grad_norm=19.4180, params_with_grad=967
-  ✅ Optimizer step completed
-✅ Step 3 completed: loss=11.4573, time=57.81s
-🚀 Training |█████▏                    | 2/10 [03:16<09:12] , loss=11.4573, avg=11.5605, ppl=inf, lr=1.05e-06, spd=0.0/s                                                                                                                        🚀 Training |█████▏                    | 2/10 [03:16<09:12] , loss=11.4573, avg=11.5605, ppl=inf, lr=1.05e-06, spd=0.0/s🚀 Training |███████▊                  | 3/10 [03:16<07:27] , loss=11.4573, avg=11.5605, ppl=inf, lr=1.05e-06, spd=0.0/s📈 Step 3/10 | Loss: 11.4573 (avg: 11.5605) | PPL: inf | LR: 1.05e-06 | Speed: 0.0 steps/s | Time: 3.3m (ETA: 6.7m)
-
-🔄 Step 4/10 - Processing...
-  📝 Preparing input...
-  ✅ Input prepared: shape=torch.Size([1, 128]), valid_labels=128/128
-  🔄 Running forward pass...
-  ✅ Forward done: logits shape=torch.Size([1, 128, 100277])
-  📊 Computing loss...
-  ✅ Loss computed: 11.376825
-  ⬅️  Running backward pass...
-  ✅ Backward done: grad_norm=24.2206, params_with_grad=967
-  ✅ Optimizer step completed
-✅ Step 4 completed: loss=11.3768, time=59.80s
-🚀 Training |███████▊                  | 3/10 [04:16<07:27] , loss=11.3768, avg=11.5146, ppl=inf, lr=1.07e-06, spd=0.0/s                                                                                                                        🚀 Training |███████▊                  | 3/10 [04:16<07:27] , loss=11.3768, avg=11.5146, ppl=inf, lr=1.07e-06, spd=0.0/s🚀 Training |██████████▍               | 4/10 [04:16<06:13] , loss=11.3768, avg=11.5146, ppl=inf, lr=1.07e-06, spd=0.0/s📈 Step 4/10 | Loss: 11.3768 (avg: 11.5146) | PPL: inf | LR: 1.07e-06 | Speed: 0.0 steps/s | Time: 4.3m (ETA: 6.0m)
-
-🔄 Step 5/10 - Processing...
-  📝 Preparing input...
-  ✅ Input prepared: shape=torch.Size([1, 128]), valid_labels=128/128
-  🔄 Running forward pass...
-  ✅ Forward done: logits shape=torch.Size([1, 128, 100277])
-  📊 Computing loss...
-  ✅ Loss computed: 11.437911
-  ⬅️  Running backward pass...
-  ✅ Backward done: grad_norm=19.3589, params_with_grad=967
-  ✅ Optimizer step completed
-✅ Step 5 completed: loss=11.4379, time=92.50s
-🚀 Training |██████████▍               | 4/10 [05:48<06:13] , loss=11.4379, avg=11.4992, ppl=inf, lr=1.09e-06, spd=0.0/s                                                                                                                        🚀 Training |██████████▍               | 4/10 [05:48<06:13] , loss=11.4379, avg=11.4992, ppl=inf, lr=1.09e-06, spd=0.0/s                                                                                                                        🚀 Training |██████████▍               | 4/10 [05:50<06:13] , loss=11.4379, avg=11.4992, ppl=inf, lr=1.09e-06, spd=0.0/s🚀 Training |█████████████             | 5/10 [05:50<06:09] , loss=11.4379, avg=11.4992, ppl=inf, lr=1.09e-06, spd=0.0/s  📝 Preparing input...
-  ✅ Input prepared: shape=torch.Size([1, 128]), valid_labels=128/128
-  🔄 Running forward pass...
-  ✅ Forward done: logits shape=torch.Size([1, 128, 100277])
-  📊 Computing loss...
-  ✅ Loss computed: 11.438311
-  ⬅️  Running backward pass...
-  ✅ Backward done: grad_norm=13.0906, params_with_grad=967
-  ✅ Optimizer step completed
-📈 Step 5/10 | Loss: 11.4379 (avg: 11.4992) | PPL: inf | LR: 1.09e-06 | Speed: 0.0 steps/s | Time: 5.8m (ETA: 7.7m)
-
-💾 Checkpoint 5 saved!
-   Loss: 11.4379 | Avg Loss: 11.4992 | Min Loss: 11.3768
-   Avg PPL: inf | Steps/sec: 0.01
-   File: checkpoints_real/checkpoint_step_5.pt
-
-✅ Step 6 completed: loss=11.4383, time=56.77s
-🚀 Training |█████████████             | 5/10 [06:47<06:09] , loss=11.4383, avg=11.4891, ppl=inf, lr=1.11e-06, spd=0.0/s                                                                                                                        🚀 Training |█████████████             | 5/10 [06:47<06:09] , loss=11.4383, avg=11.4891, ppl=inf, lr=1.11e-06, spd=0.0/s🚀 Training |███████████████▌          | 6/10 [06:47<04:32] , loss=11.4383, avg=11.4891, ppl=inf, lr=1.11e-06, spd=0.0/s  📝 Preparing input...
-  ✅ Input prepared: shape=torch.Size([1, 128]), valid_labels=128/128
-  🔄 Running forward pass...
-  ✅ Forward done: logits shape=torch.Size([1, 128, 100277])
-  📊 Computing loss...
-  ✅ Loss computed: 11.290895
-  ⬅️  Running backward pass...
