@@ -27,20 +27,25 @@ torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
 rpath_flag = f'-Wl,-rpath,{torch_lib}'
 library_dirs = [torch_lib] if os.path.exists(torch_lib) else []
 
-# Modern CPU optimizations
+# Modern CPU optimizations - MAXIMUM PERFORMANCE
 cxx_args = [
     '-O3',                    # Maximum optimization
     '-std=c++17',             # C++17 standard
-    '-march=native',          # Use native CPU architecture (auto-detect)
+    '-march=native',          # Use native CPU architecture (auto-detect AVX-512, AVX2, etc.)
     '-mtune=native',          # Tune for native CPU
     '-fopenmp',               # OpenMP support for parallel processing
     '-mavx',                  # AVX instructions
-    '-mavx2',                 # AVX2 instructions (if available)
+    '-mavx2',                 # AVX2 instructions (8 floats)
+    # AVX-512 flags - only if CPU supports (will fail gracefully if not)
+    # '-mavx512f',              # AVX-512 foundation (16 floats) - optional
+    # '-mavx512cd',             # AVX-512 conflict detection - optional
     '-mfma',                  # FMA (Fused Multiply-Add) instructions
     '-msse4.2',               # SSE4.2 instructions
     '-funroll-loops',         # Loop unrolling
     '-ffast-math',            # Fast math (with care for numerical stability)
     '-fno-math-errno',        # Don't set errno for math functions
+    '-flto',                  # Link-time optimization
+    '-fno-strict-aliasing',   # Allow type punning (careful!)
     rpath_flag
 ]
 nvcc_args = ['-O3', '--use_fast_math']
@@ -83,10 +88,30 @@ cpp_extensions = [
         'mm_rec_scan_cpu',
         sources=[
             'src/associative_scan_cpu.cpp',
+            'src/core/exp_log_simd.cpp',
+            'src/core/blelloch_scan_parallel.cpp',
+            'src/core/fast_math_asm.cpp',  # Assembly optimizations
+            'src/core/log_exp_conversion_simd.cpp',  # SIMD log/exp conversion
         ],
         extra_compile_args=cxx_args,
         extra_link_args=['-fopenmp', rpath_flag] if 'rpath_flag' in locals() else ['-fopenmp'],
         library_dirs=library_dirs if 'library_dirs' in locals() else [],
+        include_dirs=['src'],  # For header includes
+        language='c++'
+    ),
+    CppExtension(
+        'mm_rec_blocks_cpu',
+        sources=[
+            'src/core/exp_log_simd.cpp',  # SIMD functions needed
+            'src/blocks/core_recurrence_fused.cpp',
+            'src/blocks/mdi_cpu_optimized.cpp',
+            'src/bindings/python_bindings.cpp',
+            'src/core/blas_wrapper.cpp',  # BLAS wrapper (MKL/OpenBLAS or manual)
+        ],
+        extra_compile_args=cxx_args,
+        extra_link_args=['-fopenmp', rpath_flag] if 'rpath_flag' in locals() else ['-fopenmp'],
+        library_dirs=library_dirs if 'library_dirs' in locals() else [],
+        include_dirs=['src'],  # For header includes
         language='c++'
     )
 ]

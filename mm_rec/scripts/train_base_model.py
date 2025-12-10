@@ -36,6 +36,7 @@ from mm_rec.data.text_data_loader import (
     create_data_loaders,
     create_sample_text_corpus,
     load_texts_from_directory,
+    load_text_from_file,
     SimpleCharacterTokenizer
 )
 from mm_rec.training.evaluation import evaluate_model, print_evaluation_metrics
@@ -181,6 +182,11 @@ def train_base_model(
     
     # Data loading - Gerçek text data veya sample corpus
     print("📚 Preparing data...")
+    # If data_dir is provided, always use real dataset (override use_sample_corpus)
+    if data_dir is not None:
+        use_sample_corpus = False
+        print(f"📂 Data directory provided: {data_dir} - using real dataset")
+    
     if use_sample_corpus or data_dir is None:
         # Create sample corpus for testing
         output_path = Path(output_dir)
@@ -193,14 +199,33 @@ def train_base_model(
         print(f"✅ Using sample corpus: {sample_file}")
     else:
         # Load from directory
-        all_texts = load_texts_from_directory(data_dir)
-        # Split train/val
-        split_idx = int(len(all_texts) * (1 - val_split))
-        train_texts = all_texts[:split_idx]
-        val_texts = all_texts[split_idx:] if len(all_texts) > split_idx else None
-        print(f"✅ Loaded {len(train_texts)} training texts")
-        if val_texts:
-            print(f"✅ Loaded {len(val_texts)} validation texts")
+        data_path = Path(data_dir)
+        
+        # Check if train.txt and val.txt exist (pre-split dataset)
+        train_file = data_path / "train.txt"
+        val_file = data_path / "val.txt"
+        
+        if train_file.exists():
+            # Load pre-split dataset
+            print(f"📂 Loading pre-split dataset from {data_dir}")
+            train_texts = [load_text_from_file(str(train_file))]
+            if val_file.exists():
+                val_texts = [load_text_from_file(str(val_file))]
+            else:
+                val_texts = None
+            print(f"✅ Loaded train.txt: {len(train_texts[0]):,} characters")
+            if val_texts:
+                print(f"✅ Loaded val.txt: {len(val_texts[0]):,} characters")
+        else:
+            # Load all text files and split
+            all_texts = load_texts_from_directory(data_dir)
+            # Split train/val
+            split_idx = int(len(all_texts) * (1 - val_split))
+            train_texts = all_texts[:split_idx]
+            val_texts = all_texts[split_idx:] if len(all_texts) > split_idx else None
+            print(f"✅ Loaded {len(train_texts)} training texts")
+            if val_texts:
+                print(f"✅ Loaded {len(val_texts)} validation texts")
     
     # Create data loaders
     train_loader, val_loader, tokenizer = create_data_loaders(
@@ -523,8 +548,8 @@ def main():
                        help='Epochs per stage (for progressive training)')
     parser.add_argument('--data-dir', type=str, default=None,
                        help='Data directory (if None, uses sample corpus)')
-    parser.add_argument('--use-sample-corpus', action='store_true', default=True,
-                       help='Use sample corpus for testing')
+    parser.add_argument('--use-sample-corpus', action='store_true', default=None,
+                       help='Use sample corpus for testing (default: False if --data-dir provided, True otherwise)')
     parser.add_argument('--val-split', type=float, default=0.1,
                        help='Validation split ratio')
     parser.add_argument('--early-stopping-patience', type=int, default=5,
@@ -546,6 +571,9 @@ def main():
             warmup_steps=args.warmup_steps
         )
     else:
+        # Determine use_sample_corpus: False if data_dir provided, True otherwise
+        use_sample_corpus = args.use_sample_corpus if args.use_sample_corpus is not None else (args.data_dir is None)
+        
         train_base_model(
             config_name=args.config,
             output_dir=args.output_dir,
@@ -556,7 +584,7 @@ def main():
             warmup_steps=args.warmup_steps,
             resume_from=args.resume_from,
             data_dir=args.data_dir,
-            use_sample_corpus=args.use_sample_corpus,
+            use_sample_corpus=use_sample_corpus,
             val_split=args.val_split,
             early_stopping_patience=args.early_stopping_patience,
             save_best_model=args.save_best_model
