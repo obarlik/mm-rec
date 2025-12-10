@@ -47,6 +47,9 @@ class MMRecModel(nn.Module):
         # HEM Parameters
         use_hem: bool = False,           # Enable HEM (Fused Kernel) mechanism
         pe_dim: Optional[int] = None,    # Positional encoding dimension (default: model_dim)
+        # DPG Parameters
+        use_dpg: bool = False,           # Enable DPG (Dynamic Projection Gating) mechanism
+        dpg_rank: int = 128,             # Low-rank projection dimension (D -> 128 -> D)
         # UBÖO Parameters
         use_uboo: bool = False,          # Enable UBÖO mechanism
         lambda_P: float = 0.1            # Scaling factor for auxiliary loss
@@ -65,6 +68,10 @@ class MMRecModel(nn.Module):
         # HEM Configuration
         self.use_hem = use_hem
         self.pe_dim = pe_dim if pe_dim is not None else model_dim
+        
+        # DPG Configuration
+        self.use_dpg = use_dpg
+        self.dpg_rank = dpg_rank
         
         # UBÖO Configuration
         self.use_uboo = use_uboo
@@ -102,7 +109,7 @@ class MMRecModel(nn.Module):
         }
         
         # MM-Rec blocks (24 layers as per spec)
-        # Pass HEM and UBÖO flags to blocks
+        # Pass HEM, DPG, and UBÖO flags to blocks
         self.blocks = nn.ModuleList([
             MMRecBlock(
                 model_dim=model_dim,
@@ -112,7 +119,9 @@ class MMRecModel(nn.Module):
                 ffn_dim=self.ffn_dim,
                 dropout=dropout,
                 use_hem=use_hem,
-                pe_dim=self.pe_dim
+                pe_dim=self.pe_dim,
+                use_dpg=use_dpg,
+                dpg_rank=dpg_rank
             )
             for _ in range(num_layers)
         ])

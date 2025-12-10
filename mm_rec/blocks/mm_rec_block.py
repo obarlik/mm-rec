@@ -62,7 +62,10 @@ class MMRecBlock(nn.Module):
         dropout: float = 0.1,
         # HEM Parameters
         use_hem: bool = False,           # Enable HEM (Fused Kernel) mechanism
-        pe_dim: Optional[int] = None      # Positional encoding dimension (default: model_dim)
+        pe_dim: Optional[int] = None,    # Positional encoding dimension (default: model_dim)
+        # DPG Parameters
+        use_dpg: bool = False,           # Enable DPG (Dynamic Projection Gating) mechanism
+        dpg_rank: int = 128             # Low-rank projection dimension (D -> 128 -> D)
     ):
         super().__init__()
         self.model_dim = model_dim
@@ -76,6 +79,10 @@ class MMRecBlock(nn.Module):
         # HEM Configuration
         self.use_hem = use_hem
         self.pe_dim = pe_dim if pe_dim is not None else model_dim
+        
+        # DPG Configuration
+        self.use_dpg = use_dpg
+        self.dpg_rank = dpg_rank  # Low-rank dimension: 128
         
         # ========================================================================
         # HEM: Fused Kernel - Single Large Weight Matrix
@@ -149,6 +156,56 @@ class MMRecBlock(nn.Module):
         # Normalization layers
         self.norm1 = RMSNorm(model_dim)
         self.norm2 = RMSNorm(model_dim)
+        
+        # ========================================================================
+        # DPG: Dynamic Projection Gating - Low-Rank Projeksiyonlar
+        # ========================================================================
+        # DPG mekanizması için low-rank projeksiyonlar:
+        # γ_t = σ(W_γ,up · ReLU(W_γ,down · z_t))
+        # 
+        # Boyutlar:
+        # - W_γ,down: [model_dim, dpg_rank] = [4096, 128] (down-projection)
+        # - W_γ,up:   [dpg_rank, model_dim] = [128, 4096] (up-projection)
+        # 
+        # Bu low-rank yapı sayesinde:
+        # - Parametre sayısı: 4096×128 + 128×4096 = 1,048,576 (full: 4096×4096 = 16,777,216)
+        # - 16x parametre tasarrufu
+        # - Daha hızlı hesaplama
+        # ========================================================================
+        
+        if self.use_dpg:
+            # W_γ,down: Down-projection (D -> 128)
+            # Input: z_t [batch, seq_len, model_dim]
+            # Output: [batch, seq_len, dpg_rank]
+            self.W_gamma_down = nn.Linear(
+                in_features=model_dim,
+                out_features=dpg_rank,
+                bias=True  # Bias term for flexibility
+            )
+            
+            # W_γ,up: Up-projection (128 -> D)
+            # Input: [batch, seq_len, dpg_rank]
+            # Output: [batch, seq_len, model_dim]
+            self.W_gamma_up = nn.Linear(
+                in_features=dpg_rank,
+                out_features=model_dim,
+                bias=True  # Bias term for flexibility
+            )
+            
+            # Activation: ReLU between down and up projections
+            # This adds non-linearity and ensures non-negative intermediate values
+            self.dpg_activation = nn.ReLU()
+            
+            # Final activation: Sigmoid to ensure γ_t ∈ [0, 1]
+            # Applied after up-projection
+            self.dpg_sigmoid = nn.Sigmoid()
+        else:
+            # Fallback: Use full-rank projection (original MDI approach)
+            # This is kept for backward compatibility
+            self.W_gamma_down = None
+            self.W_gamma_up = None
+            self.dpg_activation = None
+            self.dpg_sigmoid = None
         
         # MDI (Memory Decay/Integration)
         # Note: use_uboo will be passed from model level
@@ -272,6 +329,58 @@ class MMRecBlock(nn.Module):
             # Store initialized weights
             self.W_fused.weight.data = fused_weight
             self.W_fused.bias.data = fused_bias
+    
+    def compute_dpg_gamma(
+        self,
+        z_t: torch.Tensor,
+        context: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        DPG mekanizması ile dinamik γ_t hesaplama.
+        
+        Formül: γ_t = σ(W_γ,up · ReLU(W_γ,down · z_t))
+        
+        Args:
+            z_t: Input tensor [batch, seq_len, model_dim] or [batch, model_dim]
+            context: Optional context for modulation (future extension)
+        
+        Returns:
+            gamma: Decay coefficient [batch, seq_len, model_dim] or [batch, model_dim]
+        """
+        if not self.use_dpg:
+            # Fallback to original MDI approach
+            return self.mdi.compute_decay_only(z_t, context)
+        
+        # Step 1: Down-projection (D -> 128)
+        # z_t: [batch, seq_len, model_dim]
+        # W_γ,down: [model_dim, dpg_rank]
+        # Output: [batch, seq_len, dpg_rank]
+        z_projected_down = self.W_gamma_down(z_t)
+        
+        # Step 2: ReLU activation (non-linearity + non-negativity)
+        z_activated = self.dpg_activation(z_projected_down)
+        # z_activated: [batch, seq_len, dpg_rank]
+        
+        # Step 3: Up-projection (128 -> D)
+        # W_γ,up: [dpg_rank, model_dim]
+        # Output: [batch, seq_len, model_dim]
+        z_projected_up = self.W_gamma_up(z_activated)
+        
+        # Step 4: Sigmoid activation (ensure γ_t ∈ [0, 1])
+        gamma = self.dpg_sigmoid(z_projected_up)
+        # gamma: [batch, seq_len, model_dim]
+        
+        # Step 5: Clamp to prevent numerical issues
+        # Range: [1e-6, 1-1e-6] to avoid extreme values
+        gamma = torch.clamp(gamma, min=1e-6, max=1.0 - 1e-6)
+        
+        # Optional: Context modulation (if provided)
+        if context is not None:
+            # Future extension: context-dependent modulation
+            # For now, just return gamma
+            pass
+        
+        return gamma
     
     def forward(
         self,
@@ -407,25 +516,59 @@ class MMRecBlock(nn.Module):
             # Get h_{t-1} from previous iteration
             h_prev_expanded = h_prev  # [batch, 1, model_dim]
             
-            # OPTIMIZATION: Use checkpointing for MDI if enabled (memory efficiency)
-            if self.use_gradient_checkpointing:
-                # Gradient checkpointing: recompute activations during backward
-                # This trades compute for memory (recomputes forward during backward)
-                mdi_fn = lambda z, h, ctx: self.mdi(z, h, context=ctx, return_auxiliary_loss=return_auxiliary_loss)
-                mdi_result = checkpoint(mdi_fn, z_t, h_prev_expanded, k_t, use_reentrant=False)
-                if isinstance(mdi_result, tuple) and len(mdi_result) == 3:
-                    h_new_t, gamma_new_t, L_Aux_t = mdi_result
+            # ====================================================================
+            # DPG: Dynamic γ_t Computation
+            # ====================================================================
+            # DPG mekanizması ile dinamik decay coefficient hesaplama
+            # γ_t = σ(W_γ,up · ReLU(W_γ,down · z_t))
+            # ====================================================================
+            
+            if self.use_dpg:
+                # Use DPG for dynamic gamma computation
+                gamma_new_t = self.compute_dpg_gamma(z_t, context=k_t)
+                # gamma_new_t: [batch, 1, model_dim]
+                
+                # For MDI, we still need h_new_t (use simplified version or full MDI)
+                # We'll use a simplified version that still computes h_new_t
+                # but uses DPG gamma instead of MDI gamma
+                if self.use_gradient_checkpointing:
+                    mdi_fn = lambda z, h, ctx: self.mdi(z, h, context=ctx, return_auxiliary_loss=return_auxiliary_loss)
+                    mdi_result = checkpoint(mdi_fn, z_t, h_prev_expanded, k_t, use_reentrant=False)
+                    if isinstance(mdi_result, tuple) and len(mdi_result) == 3:
+                        h_new_t, _, L_Aux_t = mdi_result
+                    else:
+                        h_new_t, _ = mdi_result
+                        L_Aux_t = None
                 else:
-                    h_new_t, gamma_new_t = mdi_result
-                    L_Aux_t = None
+                    mdi_result = self.mdi(z_t, h_prev_expanded, context=k_t, return_auxiliary_loss=return_auxiliary_loss)
+                    if isinstance(mdi_result, tuple) and len(mdi_result) == 3:
+                        h_new_t, _, L_Aux_t = mdi_result
+                    else:
+                        h_new_t, _ = mdi_result
+                        L_Aux_t = None
+                
+                # Replace MDI gamma with DPG gamma
+                # gamma_new_t is already computed via DPG above
             else:
-                # Standard forward pass
-                mdi_result = self.mdi(z_t, h_prev_expanded, context=k_t, return_auxiliary_loss=return_auxiliary_loss)
-                if isinstance(mdi_result, tuple) and len(mdi_result) == 3:
-                    h_new_t, gamma_new_t, L_Aux_t = mdi_result
+                # Original MDI approach (use MDI's gamma computation)
+                if self.use_gradient_checkpointing:
+                    # Gradient checkpointing: recompute activations during backward
+                    # This trades compute for memory (recomputes forward during backward)
+                    mdi_fn = lambda z, h, ctx: self.mdi(z, h, context=ctx, return_auxiliary_loss=return_auxiliary_loss)
+                    mdi_result = checkpoint(mdi_fn, z_t, h_prev_expanded, k_t, use_reentrant=False)
+                    if isinstance(mdi_result, tuple) and len(mdi_result) == 3:
+                        h_new_t, gamma_new_t, L_Aux_t = mdi_result
+                    else:
+                        h_new_t, gamma_new_t = mdi_result
+                        L_Aux_t = None
                 else:
-                    h_new_t, gamma_new_t = mdi_result
-                    L_Aux_t = None
+                    # Standard forward pass
+                    mdi_result = self.mdi(z_t, h_prev_expanded, context=k_t, return_auxiliary_loss=return_auxiliary_loss)
+                    if isinstance(mdi_result, tuple) and len(mdi_result) == 3:
+                        h_new_t, gamma_new_t, L_Aux_t = mdi_result
+                    else:
+                        h_new_t, gamma_new_t = mdi_result
+                        L_Aux_t = None
             
             # Collect auxiliary loss for this timestep
             if return_auxiliary_loss and L_Aux_t is not None:
