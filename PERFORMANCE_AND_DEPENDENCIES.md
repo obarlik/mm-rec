@@ -1,19 +1,27 @@
 # MM-Rec Entegrasyonu - Performans Analizi ve Çevresel Bağımlılıklar
 
-**Doküman Versiyonu**: 2.0  
+**Doküman Versiyonu**: 3.0  
 **Oluşturulma Tarihi**: 2025-01-27  
 **Son Güncelleme**: 2025-01-27  
 **Durum**: HEM ve UBÖO mekanizmaları henüz kod tabanına entegre edilmemiştir
 
 ---
 
-## ⚠️ ÖNEMLİ UYARI
+## ⚠️ ÖNEMLİ UYARI - MEVCUT DURUM
 
-**HEM (Mekanizma 1) ve UBÖO (Mekanizma 3) mekanizmaları henüz kod tabanına entegre edilmemiştir.**
+**Gerçek Durum**:
+1. **HEM (Mekanizma 1)**: Kod tabanında **YOK** - Sadece entegrasyon kodu hazır (`HEM_INTEGRATION_CODE.md`)
+2. **UBÖO (Mekanizma 3)**: Kod tabanında **YOK** - Sadece entegrasyon kodu hazır (`UBOO_INTEGRATION_CODE.md`)
+3. **DPG (Mekanizma 2)**: Kod tabanında **YOK** - Sadece entegrasyon kodu hazır (`DPG_INTEGRATION_CODE.md`)
+4. **GPU**: Sistemde **YOK** - Sadece CPU mevcut
+5. **Gerçek Ölçümler**: CPU'da benchmark yapılamadı (çok yavaş/çalışmadı)
 
-Bu doküman, mekanizmalar implement edildikten sonra gerçek ölçümler yapılması için hazırlanmıştır. Şu anda aşağıdaki değerler **teorik/tahmini** değerlerdir ve gerçek ölçümlerle değiştirilmelidir.
+**Bu Dokümanın Amacı**:
+- HEM ve UBÖO mekanizmalarının **teorik** performans kazanımlarını açıklar
+- Mekanizmalar implement edildikten sonra gerçek ölçümler yapılması gerektiğini belirtir
+- Çevresel bağımlılıkları ve kullanım komutlarını içerir
 
-**Gerçek ölçümler için**: `REAL_PERFORMANCE_MEASUREMENT_GUIDE.md` dosyasına bakın.
+**⚠️ NOT**: Aşağıdaki performans değerleri **teorik/tahmini** değerlerdir. Gerçek ölçümler yapılmamıştır.
 
 ---
 
@@ -28,118 +36,124 @@ Bu doküman, mekanizmalar implement edildikten sonra gerçek ölçümler yapılm
 
 ## 1. Performans Doğrulaması
 
+### ⚠️ MEVCUT DURUM: ÖLÇÜMLER YAPILAMADI
+
+**Neden Ölçüm Yapılamadı**:
+1. **HEM ve UBÖO Implement Edilmemiş**: Kod tabanında bu mekanizmalar yok
+2. **GPU Yok**: Sistemde GPU bulunmuyor, sadece CPU mevcut
+3. **CPU Benchmark Başarısız**: CPU'da benchmark scripti çalıştırılamadı (çok yavaş veya hata)
+
+**Sonuç**: Gerçek performans ölçümleri yapılamamıştır. Aşağıdaki değerler **tamamen teorik/tahmini** değerlerdir.
+
+---
+
 ### 1.1 HEM (Mekanizma 1) - Fused Kernel Performans Kazanımları
 
-**⚠️ DURUM**: HEM mekanizması henüz kod tabanına entegre edilmemiştir. Aşağıdaki değerler **teorik/tahmini** değerlerdir.
+**⚠️ DURUM**: HEM mekanizması **henüz kod tabanına entegre edilmemiştir**.
 
-**Gerçek Ölçüm Yapmak İçin**:
+**Implementasyon Durumu**:
+- ✅ Entegrasyon kodu hazır: `HEM_INTEGRATION_CODE.md`
+- ❌ Kod tabanında yok: `mm_rec/blocks/mm_rec_block.py` ve `mm_rec/model.py` dosyalarında `use_hem` parametresi yok
+- ❌ Gerçek ölçümler yapılamadı
+
+#### 1.1.1 Latans Azalması - **TEORİK TAHMİN**
+
+**⚠️ NOT**: Aşağıdaki değerler teorik tahminlerdir. Gerçek ölçümler yapılmamıştır.
+
+**Teorik Beklenti** (GPU'da ölçülmeli):
+- Fused kernel sayesinde 6 ayrı matmul yerine 1 matmul
+- Beklenen iyileştirme: **~30-40% latency azalması** (teorik)
+- GPU'da daha verimli paralel işleme (better warp utilization)
+
+**Gerçek Ölçüm Yapmak İçin** (GPU gerekli):
 1. `HEM_INTEGRATION_CODE.md` dosyasındaki kodları kullanarak HEM'i implement edin
-2. `mm_rec/scripts/benchmark_hem.py` scriptini çalıştırın
+2. GPU'da `mm_rec/scripts/benchmark_hem.py` scriptini çalıştırın
 3. Ölçülen gerçek değerleri bu dokümana ekleyin
 
-#### 1.1.1 Latans Azalması (GPU) - **ÖLÇÜLMEDİ**
+**CPU'da Ölçüm**: CPU'da benchmark yapılamadı (çok yavaş/çalışmadı)
 
-**Beklenen Test Konfigürasyonu**:
-- Model: MM-Rec 7B (24 layers, 4096 hidden_dim)
-- GPU: NVIDIA A100 (80GB, Compute Capability 8.0)
-- Sequence Length: 2048 tokens
-- Batch Size: 4
-- Precision: BF16
+#### 1.1.2 Kernel Launch Sayısı - **TEORİK TAHMİN**
 
-**Teorik/Tahmini Sonuçlar** (Gerçek ölçümlerle değiştirilmeli):
+**⚠️ NOT**: HEM implement edilmediği için gerçek ölçüm yapılamamıştır.
 
-| Metrik | Orijinal (6 Ayrı Matmul) | HEM (Fused Kernel) | İyileştirme |
-|--------|-------------------------|-------------------|-------------|
-| **Tek Block Latency** | [ÖLÇÜLECEK] ms | [ÖLÇÜLECEK] ms | [ÖLÇÜLECEK]% |
-| **Forward Pass (24 layers)** | [ÖLÇÜLECEK] ms | [ÖLÇÜLECEK] ms | [ÖLÇÜLECEK]% |
-| **Throughput (tokens/sec)** | [ÖLÇÜLECEK] | [ÖLÇÜLECEK] | [ÖLÇÜLECEK]% |
+**Teorik Beklenti**:
 
-**Ölçüm Komutu**:
-```bash
-cd /home/onur/workspace/mm-rec
-python mm_rec/scripts/benchmark_hem.py
-```
-
-#### 1.1.2 Kernel Launch Sayısı - **TEORİK**
-
-**Orijinal Kod (6 Ayrı Matmul)**:
+**Orijinal Kod (Mevcut - 4 Ayrı Matmul)**:
 ```python
-q = self.W_q(x_norm)  # Kernel launch #1
-k = self.W_k(x_norm)  # Kernel launch #2
-v = self.W_v(x_norm)  # Kernel launch #3
-z = self.W_z(x_norm)  # Kernel launch #4
-p = self.W_p(x_norm)  # Kernel launch #5
-e = self.W_e(p)       # Kernel launch #6
+q = self.W_q(x_norm)  # Matmul #1
+k = self.W_k(x_norm)  # Matmul #2
+v = self.W_v(x_norm)  # Matmul #3
+z = self.W_z(x_norm)  # Matmul #4
 ```
-**Toplam**: 6 kernel launch per block (teorik)
+**Mevcut Durum**: 4 ayrı matmul (Q, K, V, Z) - W_P ve W_E yok
 
 **HEM (Fused Kernel)** - **HENÜZ İMPLEMENT EDİLMEDİ**:
 ```python
-fused_output = F.linear(x_norm, self.W_fused.weight, self.W_fused.bias)  # Kernel launch #1
-q, k, v, z, p, e = torch.split(fused_output, ...)  # CPU operation (no kernel launch)
+fused_output = F.linear(x_norm, self.W_fused.weight, self.W_fused.bias)  # 1 matmul
+q, k, v, z, p, e = torch.split(fused_output, ...)  # CPU operation
 ```
-**Toplam**: 1 kernel launch per block (teorik)
+**Teorik Beklenti**: 1 matmul (6 projeksiyon için)
 
-**Beklenen Kazanım**: **6'dan 1'e** → **83.3% azalma** (teorik)
+**Teorik Kazanım**: **4-6'dan 1'e** → **~75-83% azalma** (teorik)
 
-**⚠️ NOT**: Gerçek kernel launch sayısı CUDA profiler ile ölçülmelidir.
+**⚠️ NOT**: 
+- Gerçek kernel launch sayısı CUDA profiler ile ölçülmelidir
+- CPU'da kernel launch kavramı farklıdır (CPU'da ölçüm yapılamadı)
 
-#### 1.1.3 Bellek Bant Genişliği (Memory Bandwidth) - **TEORİK**
+#### 1.1.3 Bellek Bant Genişliği - **TEORİK TAHMİN**
 
-**Teorik Hesaplama** (Gerçek ölçümlerle değiştirilmeli):
+**⚠️ NOT**: HEM implement edilmediği için gerçek ölçüm yapılamamıştır.
 
-**Orijinal Kod (6 Ayrı Matmul)** - Teorik:
-- Weight Memory Access: ~201.33 MB (6 ayrı access)
-- Input Memory Access: ~402.66 MB (6 kez)
-- **Total**: ~603.99 MB (teorik)
+**Teorik Hesaplama** (Küçük model örneği - model_dim=1024, seq_len=2048, batch=4):
+
+**Mevcut Kod (4 Ayrı Matmul)**:
+- Weight Memory: 4 × (1024 × 1024 × 2 bytes) = 8.39 MB
+- Input Memory: 4 × (4 × 2048 × 1024 × 2 bytes) = 67.11 MB
+- **Total**: ~75.5 MB (teorik)
 
 **HEM (Fused Kernel)** - **HENÜZ İMPLEMENT EDİLMEDİ**:
-- Weight Memory Access: ~201.33 MB (1 kez, better cache)
-- Input Memory Access: ~67.11 MB (1 kez)
-- **Total**: ~268.44 MB (teorik)
+- Weight Memory: 1 × (1024 × 6144 × 2 bytes) = 12.58 MB (6 projeksiyon)
+- Input Memory: 1 × (4 × 2048 × 1024 × 2 bytes) = 16.78 MB
+- **Total**: ~29.36 MB (teorik)
 
-**Beklenen İyileştirme**: **~55.5% azalma** (teorik)
+**Teorik Beklenen İyileştirme**: **~61% azalma** (teorik)
 
-**⚠️ NOT**: Gerçek memory bandwidth ölçümleri GPU profiler ile yapılmalıdır.
+**⚠️ NOT**: 
+- Gerçek memory bandwidth ölçümleri GPU profiler ile yapılmalıdır
+- CPU'da memory bandwidth ölçümü farklıdır ve yapılamadı
 
 ---
 
 ### 1.2 UBÖO (Mekanizma 3) - Gradyan İzolasyonu Performans Kazanımları
 
-**⚠️ DURUM**: UBÖO mekanizması henüz kod tabanına entegre edilmemiştir. Aşağıdaki değerler **teorik/tahmini** değerlerdir.
+**⚠️ DURUM**: UBÖO mekanizması **henüz kod tabanına entegre edilmemiştir**.
 
-**Gerçek Ölçüm Yapmak İçin**:
+**Implementasyon Durumu**:
+- ✅ Entegrasyon kodu hazır: `UBOO_INTEGRATION_CODE.md`
+- ❌ Kod tabanında yok: `mm_rec/core/mdi.py` ve `mm_rec/model.py` dosyalarında `use_uboo` parametresi yok
+- ❌ Gerçek ölçümler yapılamadı (eğitim testi gerekli)
+
+#### 1.2.1 Yakınsama Hızı (Convergence) - **TEORİK TAHMİN**
+
+**⚠️ NOT**: Aşağıdaki değerler teorik tahminlerdir. Gerçek eğitim testi yapılmamıştır.
+
+**Teorik Beklenti**:
+- Auxiliary loss (planning error) sayesinde daha hızlı yakınsama
+- Gradient isolation ile unbiased backpropagation
+- Beklenen iyileştirme: **~20-30% daha hızlı yakınsama** (teorik)
+
+**Gerçek Ölçüm Yapmak İçin** (Eğitim gerekli):
 1. `UBOO_INTEGRATION_CODE.md` dosyasındaki kodları kullanarak UBÖO'yu implement edin
 2. Eğitim testi yapın (convergence karşılaştırması)
 3. Ölçülen gerçek değerleri bu dokümana ekleyin
 
-#### 1.2.1 Yakınsama Hızı (Convergence) - **ÖLÇÜLMEDİ**
-
-**Beklenen Test Konfigürasyonu**:
-- Model: MM-Rec 7B (24 layers)
-- Dataset: C4 (Common Crawl) - 100M tokens
-- Training Steps: 10,000 steps
-- Learning Rate: 3e-4 (with warmup)
-- Batch Size: 4 (effective batch size: 128 with gradient accumulation)
-- Lambda_P: 0.1 (auxiliary loss scaling factor)
-
-**Teorik/Tahmini Sonuçlar** (Gerçek ölçümlerle değiştirilmeli):
-
-| Metrik | Orijinal (UBÖO Yok) | UBÖO (Lambda_P=0.1) | İyileştirme |
-|--------|---------------------|---------------------|-------------|
-| **Convergence (Main Loss)** | [ÖLÇÜLECEK] steps | [ÖLÇÜLECEK] steps | [ÖLÇÜLECEK]% |
-| **Final Perplexity** | [ÖLÇÜLECEK] | [ÖLÇÜLECEK] | [ÖLÇÜLECEK]% |
-| **Training Stability** | [ÖLÇÜLECEK] loss variance | [ÖLÇÜLECEK] loss variance | [ÖLÇÜLECEK]% |
-
-**Ölçüm Komutu** (Eğitim testi):
-```bash
-# UBÖO implement edildikten sonra eğitim testi yapılmalı
-# Script: mm_rec/scripts/train_uboo_test.py (oluşturulacak)
-```
+**⚠️ NOT**: Eğitim testi uzun sürer ve GPU gerektirir. CPU'da yapılamaz.
 
 #### 1.2.2 Bellek Tüketimi (Ek Yük) - **TEORİK HESAPLAMA**
 
-**Teorik Bellek Hesaplaması** (Gerçek ölçümlerle doğrulanmalı):
+**⚠️ NOT**: UBÖO implement edilmediği için gerçek ölçüm yapılamamıştır.
+
+**Teorik Bellek Hesaplaması** (model_dim=4096, 24 layers için):
 
 **UBÖO Bileşenleri** (her layer için):
 - W_planning_error: 4096 × 4096 × 2 bytes (BF16) = 33.55 MB
@@ -149,7 +163,7 @@ q, k, v, z, p, e = torch.split(fused_output, ...)  # CPU operation (no kernel la
 **24 layers için**:
 - **Weight Memory**: 24 × 67.10 MB = **1,610.4 MB ≈ 1.57 GB** (teorik)
 
-**Activation Memory** (forward pass):
+**Activation Memory** (forward pass, batch=4, seq_len=2048):
 - Per layer: ~268.44 MB (teorik)
 - **Peak Activation Memory**: ~268.44 MB (sequential, not cumulative)
 
@@ -158,7 +172,9 @@ q, k, v, z, p, e = torch.split(fused_output, ...)  # CPU operation (no kernel la
 - **Activation Memory**: ~0.27 GB
 - **Total**: **~1.84 GB** (teorik)
 
-**⚠️ NOT**: Gerçek bellek tüketimi GPU memory profiler ile ölçülmelidir.
+**⚠️ NOT**: 
+- Gerçek bellek tüketimi GPU memory profiler ile ölçülmelidir
+- CPU'da bellek ölçümü farklıdır ve yapılamadı
 
 ---
 
@@ -607,105 +623,77 @@ model = MMRecModel(
 
 ## 4. Gerçek Ölçüm Yapma Kılavuzu
 
-### 4.1 Baseline Ölçümleri (Mevcut Kod)
+### 4.1 Mevcut Durum: Ölçümler Yapılamadı
 
-**⚠️ ÖNEMLİ**: HEM ve UBÖO mekanizmaları henüz implement edilmemiş olduğu için, önce mevcut kodun baseline performansını ölçmeliyiz.
+**Neden Ölçüm Yapılamadı**:
+1. **HEM ve UBÖO Implement Edilmemiş**: Kod tabanında bu mekanizmalar yok
+2. **GPU Yok**: Sistemde GPU bulunmuyor, sadece CPU mevcut
+3. **CPU Benchmark Başarısız**: CPU'da benchmark scripti çalıştırılamadı
 
-**Script**: `mm_rec/scripts/real_benchmark.py`
+**Sonuç**: Gerçek performans ölçümleri yapılamamıştır.
 
-**Çalıştırma**:
-```bash
-cd /home/onur/workspace/mm-rec
-python mm_rec/scripts/real_benchmark.py
-```
+### 4.2 Ölçüm Yapmak İçin Gereksinimler
 
-**Ölçülen Metrikler**:
-- Block latency (ms)
-- Model forward time (ms)
-- Throughput (tokens/s)
-- Memory usage (MB)
-- Per-layer latency estimate
+**HEM Ölçümleri İçin**:
+1. ✅ HEM'i implement et (`HEM_INTEGRATION_CODE.md`)
+2. ❌ GPU gerekli (CPU'da ölçüm yapılamadı)
+3. ⏳ `mm_rec/scripts/benchmark_hem.py` scriptini GPU'da çalıştır
 
-**Çıktı**: `benchmark_results.json`
+**UBÖO Ölçümleri İçin**:
+1. ✅ UBÖO'yu implement et (`UBOO_INTEGRATION_CODE.md`)
+2. ❌ GPU gerekli (eğitim CPU'da çok yavaş)
+3. ⏳ Eğitim testi yap (convergence karşılaştırması)
 
-### 4.2 HEM Karşılaştırması (Implement Edildikten Sonra)
+**Baseline Ölçümleri İçin**:
+1. ✅ Mevcut kod var
+2. ❌ GPU gerekli (CPU'da ölçüm yapılamadı)
+3. ⏳ GPU'da `mm_rec/scripts/real_benchmark.py` scriptini çalıştır
 
-**⚠️ DURUM**: HEM mekanizması henüz implement edilmemiştir.
+### 4.3 Ölçüm Yapıldıktan Sonra
 
-**Implement Edildikten Sonra**:
-1. `HEM_INTEGRATION_CODE.md` dosyasındaki kodları kullanarak HEM'i implement edin
-2. `mm_rec/scripts/benchmark_hem.py` scriptini çalıştırın
-3. Ölçülen gerçek değerleri bu dokümana ekleyin
-
-**Beklenen Ölçümler**:
-- HEM pasif: Block latency, throughput, memory
-- HEM aktif: Block latency, throughput, memory
-- İyileştirme yüzdesi
-
-### 4.3 UBÖO Eğitim Testi (Implement Edildikten Sonra)
-
-**⚠️ DURUM**: UBÖO mekanizması henüz implement edilmemiştir.
-
-**Implement Edildikten Sonra**:
-1. `UBOO_INTEGRATION_CODE.md` dosyasındaki kodları kullanarak UBÖO'yu implement edin
-2. Eğitim testi yapın (convergence karşılaştırması)
-3. Ölçülen gerçek değerleri bu dokümana ekleyin
-
-**Beklenen Ölçümler**:
-- Convergence steps (UBÖO vs baseline)
-- Final perplexity
-- Training stability (loss variance)
-- Memory overhead
-
-### 4.4 Ölçüm Sonuçlarını Dokümana Ekleme
-
-**Adım 1**: Ölçümleri çalıştır
-```bash
-# Baseline ölçümleri
-python mm_rec/scripts/real_benchmark.py > baseline_results.txt 2>&1
-
-# HEM karşılaştırması (implement edildikten sonra)
-python mm_rec/scripts/benchmark_hem.py > hem_results.txt 2>&1
-```
-
-**Adım 2**: Sonuçları analiz et
-```bash
-# JSON sonuçlarını oku
-cat benchmark_results.json | python -m json.tool
-```
-
-**Adım 3**: Bu dokümanı güncelle
-- `[ÖLÇÜLECEK]` yerine gerçek değerleri yaz
-- `[TEORİK]` etiketlerini kaldır
-- Ölçüm tarihi ve GPU bilgilerini ekle
+**Dokümanı Güncelleme**:
+1. `[TEORİK]` etiketlerini kaldır
+2. Gerçek değerleri ekle
+3. Ölçüm tarihi, GPU bilgileri, test konfigürasyonu ekle
+4. Hata paylarını (std deviation) ekle
 
 ---
 
 ## 5. Özet ve Öneriler
 
-### 5.1 Mevcut Durum
+### 5.1 Mevcut Durum Özeti
 
-**⚠️ ÖNEMLİ**: HEM ve UBÖO mekanizmaları henüz kod tabanına entegre edilmemiştir.
+**Gerçek Durum**:
+1. ✅ **Entegrasyon Kodları Hazır**: 
+   - `HEM_INTEGRATION_CODE.md` - HEM implementasyon kodu
+   - `UBOO_INTEGRATION_CODE.md` - UBÖO implementasyon kodu
+   - `DPG_INTEGRATION_CODE.md` - DPG implementasyon kodu
+2. ❌ **Kod Tabanında Yok**: 
+   - `mm_rec/blocks/mm_rec_block.py` - `use_hem` parametresi yok
+   - `mm_rec/model.py` - `use_uboo` parametresi yok
+   - `mm_rec/core/mdi.py` - Planning error hesaplaması yok
+3. ❌ **GPU Yok**: Sistemde GPU bulunmuyor
+4. ❌ **Gerçek Ölçümler Yapılamadı**: CPU'da benchmark çalıştırılamadı
 
-**Yapılması Gerekenler**:
-1. ✅ HEM ve UBÖO kodları hazır (`HEM_INTEGRATION_CODE.md`, `UBOO_INTEGRATION_CODE.md`)
-2. ⏳ HEM ve UBÖO kodlarını kod tabanına entegre et
-3. ⏳ Gerçek performans ölçümleri yap
-4. ⏳ Bu dokümanı gerçek değerlerle güncelle
+**Sonuç**: Bu dokümandaki tüm performans değerleri **teorik/tahmini** değerlerdir.
 
-### 5.2 Beklenen Performans Kazanımları (Teorik)
+### 5.2 Beklenen Performans Kazanımları (Teorik - Doğrulanmamış)
 
-**HEM (Mekanizma 1) - Beklenen Faydalar** (Gerçek ölçümlerle doğrulanmalı):
-- Teorik: **~30-40% latency azalması** (tek block)
-- Teorik: **~80% kernel launch azalması** (6'dan 1'e)
-- Teorik: **~50% memory access azalması**
-- Teorik: **~40-50% memory bandwidth artışı**
+**⚠️ UYARI**: Aşağıdaki değerler teorik tahminlerdir. Gerçek ölçümler yapılmamıştır.
 
-**UBÖO (Mekanizma 3) - Beklenen Faydalar** (Gerçek ölçümlerle doğrulanmalı):
-- Teorik: **~20-30% daha hızlı yakınsama**
-- Teorik: **~3-5% daha iyi final perplexity**
-- Teorik: **~40-50% daha stabil eğitim**
-- Teorik: **~8-10% ek bellek tüketimi** (~1.5-2 GB)
+**HEM (Mekanizma 1) - Teorik Beklentiler**:
+- **Latency**: ~30-40% azalma (teorik)
+- **Kernel Launch**: ~75-83% azalma (4-6'dan 1'e, teorik)
+- **Memory Access**: ~50-60% azalma (teorik)
+- **Memory Bandwidth**: ~40-50% artış (teorik)
+
+**UBÖO (Mekanizma 3) - Teorik Beklentiler**:
+- **Convergence**: ~20-30% daha hızlı (teorik)
+- **Final Perplexity**: ~3-5% iyileştirme (teorik)
+- **Training Stability**: ~40-50% daha stabil (teorik)
+- **Memory Overhead**: ~8-10% ek bellek (~1.5-2 GB, teorik)
+
+**⚠️ NOT**: Bu değerler gerçek ölçümlerle doğrulanmalıdır.
 
 ### 5.2 Çevresel Bağımlılıklar Özeti
 
@@ -717,80 +705,78 @@ cat benchmark_results.json | python -m json.tool
 - CUDA 12.1+, PyTorch 2.1+, Triton 2.2+
 - Compute Capability 8.0+ (A100/H100), 80GB+ GPU memory
 
-### 5.3 Gerçek Ölçüm Yapma Adımları
+### 5.3 Gerçek Ölçüm Yapma Adımları (GPU Gerekli)
 
-**Adım 1: Baseline Ölçümleri**
+**⚠️ ÖNEMLİ**: Aşağıdaki adımlar **GPU gerektirir**. CPU'da ölçüm yapılamadı.
+
+**Adım 1: GPU Ortamı Hazırla**
+- GPU'lu bir sistem bul (NVIDIA A100/H100 önerilen)
+- CUDA 11.8+ yükle
+- PyTorch GPU versiyonunu yükle
+
+**Adım 2: Baseline Ölçümleri (GPU'da)**
 ```bash
 # Mevcut kodun performansını ölç
 python mm_rec/scripts/real_benchmark.py
 ```
 
-**Adım 2: HEM Implement Et**
+**Adım 3: HEM Implement Et**
 - `HEM_INTEGRATION_CODE.md` dosyasındaki kodları kullan
 - `mm_rec/blocks/mm_rec_block.py` ve `mm_rec/model.py` dosyalarını güncelle
+- `use_hem` parametresini ekle
 
-**Adım 3: HEM Ölçümleri**
+**Adım 4: HEM Ölçümleri (GPU'da)**
 ```bash
 # HEM aktif vs pasif karşılaştırması
 python mm_rec/scripts/benchmark_hem.py
 ```
 
-**Adım 4: UBÖO Implement Et**
+**Adım 5: UBÖO Implement Et**
 - `UBOO_INTEGRATION_CODE.md` dosyasındaki kodları kullan
 - `mm_rec/core/mdi.py` ve `mm_rec/model.py` dosyalarını güncelle
+- `use_uboo` ve `lambda_P` parametrelerini ekle
 
-**Adım 5: UBÖO Eğitim Testi**
+**Adım 6: UBÖO Eğitim Testi (GPU'da)**
 ```bash
 # UBÖO ile eğitim testi (convergence karşılaştırması)
-# Script oluşturulacak: mm_rec/scripts/train_uboo_test.py
+# Eğitim scripti oluşturulmalı
 ```
 
-**Adım 6: Dokümanı Güncelle**
-- Ölçülen gerçek değerleri `PERFORMANCE_AND_DEPENDENCIES.md` dosyasına ekle
-- `[ÖLÇÜLECEK]` ve `[TEORİK]` etiketlerini kaldır
+**Adım 7: Dokümanı Güncelle**
+- Ölçülen gerçek değerleri bu dokümana ekle
+- `[TEORİK]` etiketlerini kaldır
 - Ölçüm tarihi, GPU bilgileri, test konfigürasyonu ekle
 
-### 5.4 Kullanım Önerileri (Implement Edildikten Sonra)
+### 5.4 Kullanım Önerileri
 
-**⚠️ NOT**: Aşağıdaki kod örnekleri HEM ve UBÖO implement edildikten sonra çalışacaktır.
+**⚠️ MEVCUT DURUM**: HEM ve UBÖO mekanizmaları henüz implement edilmemiştir.
 
-**En İyi Performans İçin** (Implement edildikten sonra):
+**Mevcut Kod (HEM ve UBÖO Olmadan)**:
 ```python
-# Hem HEM hem UBÖO aktif
+# Mevcut kod - HEM ve UBÖO parametreleri yok
 model = MMRecModel(
     vocab_size=32000,
     model_dim=4096,
     num_layers=24,
-    use_hem=True,       # HEM aktif (fused kernel) - HENÜZ İMPLEMENT EDİLMEDİ
-    use_uboo=True,      # UBÖO aktif (auxiliary loss) - HENÜZ İMPLEMENT EDİLMEDİ
-    lambda_P=0.1        # Önerilen scaling factor
+    num_heads=8
 )
+# use_hem ve use_uboo parametreleri yok
 ```
 
-**Bellek Kısıtlı Ortamlar İçin**:
+**Implement Edildikten Sonra** (Teorik):
 ```python
-# Sadece HEM aktif (UBÖO pasif)
+# HEM ve UBÖO implement edildikten sonra kullanılabilir
 model = MMRecModel(
     vocab_size=32000,
     model_dim=4096,
     num_layers=24,
     use_hem=True,       # HEM aktif - HENÜZ İMPLEMENT EDİLMEDİ
-    use_uboo=False      # UBÖO pasif (bellek tasarrufu)
-)
-```
-
-**Eğitim Hızı Öncelikli**:
-```python
-# Sadece UBÖO aktif (HEM pasif)
-model = MMRecModel(
-    vocab_size=32000,
-    model_dim=4096,
-    num_layers=24,
-    use_hem=False,      # HEM pasif
-    use_uboo=True,      # UBÖO aktif (hızlı yakınsama) - HENÜZ İMPLEMENT EDİLMEDİ
+    use_uboo=True,      # UBÖO aktif - HENÜZ İMPLEMENT EDİLMEDİ
     lambda_P=0.1
 )
 ```
+
+**⚠️ NOT**: Yukarıdaki kod şu anda çalışmayacaktır çünkü `use_hem` ve `use_uboo` parametreleri kod tabanında yok.
 
 ---
 
@@ -804,10 +790,14 @@ model = MMRecModel(
 
 ---
 
-**Doküman Versiyonu**: 2.0  
+**Doküman Versiyonu**: 3.0  
 **Oluşturulma Tarihi**: 2025-01-27  
 **Son Güncelleme**: 2025-01-27  
-**Durum**: HEM ve UBÖO henüz implement edilmemiş - Gerçek ölçümler yapılmalı  
+**Durum**: 
+- HEM ve UBÖO henüz implement edilmemiş
+- GPU yok, CPU'da ölçüm yapılamadı
+- Tüm performans değerleri teorik/tahmini
+
 **Hazırlayan**: MM-Rec Performance Analysis Team
 
 

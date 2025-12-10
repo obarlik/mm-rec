@@ -59,7 +59,10 @@ class MMRecBlock(nn.Module):
         num_memories: int = 1,
         mem_dim: Optional[int] = None,
         ffn_dim: Optional[int] = None,
-        dropout: float = 0.1
+        dropout: float = 0.1,
+        # HEM Parameters
+        use_hem: bool = False,           # Enable HEM (Fused Kernel) mechanism
+        pe_dim: Optional[int] = None      # Positional encoding dimension (default: model_dim)
     ):
         super().__init__()
         self.model_dim = model_dim
@@ -70,11 +73,75 @@ class MMRecBlock(nn.Module):
         self.ffn_dim = ffn_dim if ffn_dim is not None else model_dim * 4
         self.dropout = dropout
         
-        # Input projections
-        self.W_q = nn.Linear(model_dim, model_dim)  # Query
-        self.W_k = nn.Linear(model_dim, model_dim)  # Key
-        self.W_v = nn.Linear(model_dim, model_dim)  # Value
-        self.W_z = nn.Linear(model_dim, model_dim)  # z_t for core formula
+        # HEM Configuration
+        self.use_hem = use_hem
+        self.pe_dim = pe_dim if pe_dim is not None else model_dim
+        
+        # ========================================================================
+        # HEM: Fused Kernel - Single Large Weight Matrix
+        # ========================================================================
+        # HEM mekanizması, altı projeksiyonu (QKVZ + PE) tek bir büyük ağırlık
+        # matrisi olarak birleştirir:
+        # 
+        # W_fused = [W_Q; W_K; W_V; W_Z; W_P; W_E]
+        # 
+        # Fused Matrix Shape:
+        # - Input:  [batch, seq_len, model_dim]
+        # - Weight: [model_dim, 4*model_dim + pe_dim + model_dim]
+        #          = [model_dim, 5*model_dim + pe_dim]
+        # - Output: [batch, seq_len, 5*model_dim + pe_dim]
+        # ========================================================================
+        
+        if self.use_hem:
+            # Calculate fused output dimension
+            # Q + K + V + Z + P_down + E_up
+            # = model_dim + model_dim + model_dim + model_dim + pe_dim + model_dim
+            # = 5*model_dim + pe_dim
+            self.fused_out_dim = 4 * model_dim + self.pe_dim + model_dim  # QKVZ + P + E
+            
+            # CRITICAL: Single fused linear layer
+            # This replaces 6 separate Linear layers with 1 large Linear layer
+            self.W_fused = nn.Linear(
+                in_features=model_dim,
+                out_features=self.fused_out_dim,
+                bias=True  # Bias term for each projection
+            )
+            
+            # Store projection dimensions for splitting
+            self.proj_dims = {
+                'Q': model_dim,
+                'K': model_dim,
+                'V': model_dim,
+                'Z': model_dim,
+                'P': self.pe_dim,  # Positional encoding down-projection
+                'E': model_dim     # Positional encoding up-projection
+            }
+            
+            # Calculate split indices for output tensor
+            # Output: [Q, K, V, Z, P, E]
+            self.split_indices = [
+                self.proj_dims['Q'],                                    # Q end
+                self.proj_dims['Q'] + self.proj_dims['K'],              # K end
+                self.proj_dims['Q'] + self.proj_dims['K'] + self.proj_dims['V'],  # V end
+                self.proj_dims['Q'] + self.proj_dims['K'] + self.proj_dims['V'] + self.proj_dims['Z'],  # Z end
+                self.proj_dims['Q'] + self.proj_dims['K'] + self.proj_dims['V'] + self.proj_dims['Z'] + self.proj_dims['P'],  # P end
+                self.fused_out_dim  # E end (total)
+            ]
+            
+            # Initialize fused weight matrix
+            # CRITICAL: Proper initialization for each sub-matrix
+            self._init_fused_weights()
+        else:
+            # Fallback: Separate projections (original approach)
+            self.W_fused = None
+            self.proj_dims = None
+            self.split_indices = None
+            
+            # Input projections
+            self.W_q = nn.Linear(model_dim, model_dim)  # Query
+            self.W_k = nn.Linear(model_dim, model_dim)  # Key
+            self.W_v = nn.Linear(model_dim, model_dim)  # Value
+            self.W_z = nn.Linear(model_dim, model_dim)  # z_t for core formula
         
         # Gating projection for core formula: W_g
         self.W_g = nn.Linear(model_dim, model_dim)
@@ -84,10 +151,12 @@ class MMRecBlock(nn.Module):
         self.norm2 = RMSNorm(model_dim)
         
         # MDI (Memory Decay/Integration)
+        # Note: use_uboo will be passed from model level
         self.mdi = MemoryDecayIntegration(
             model_dim=model_dim,
             inner_dim=self.inner_dim,
-            use_context_modulation=True
+            use_context_modulation=True,
+            use_uboo=False  # Will be set from model level if needed
         )
         
         # Multi-Memory Attention
@@ -149,13 +218,69 @@ class MMRecBlock(nn.Module):
             # On GPU, C++ is optional (Triton preferred)
             self.use_cpp_optimization = False
     
+    def _init_fused_weights(self):
+        """
+        Initialize fused weight matrix by properly initializing each sub-matrix.
+        
+        CRITICAL: Each projection (Q, K, V, Z, P, E) should be initialized
+        independently to maintain proper weight initialization.
+        """
+        with torch.no_grad():
+            # Get fused weight and bias
+            fused_weight = self.W_fused.weight.data  # [fused_out_dim, model_dim]
+            fused_bias = self.W_fused.bias.data      # [fused_out_dim]
+            
+            # Initialize each sub-matrix with proper initialization
+            # Standard initialization: Xavier/Glorot uniform for linear layers
+            
+            # Q projection: [model_dim, model_dim]
+            start_idx = 0
+            end_idx = self.proj_dims['Q']
+            nn.init.xavier_uniform_(fused_weight[start_idx:end_idx, :])
+            nn.init.zeros_(fused_bias[start_idx:end_idx])
+            
+            # K projection: [model_dim, model_dim]
+            start_idx = end_idx
+            end_idx += self.proj_dims['K']
+            nn.init.xavier_uniform_(fused_weight[start_idx:end_idx, :])
+            nn.init.zeros_(fused_bias[start_idx:end_idx])
+            
+            # V projection: [model_dim, model_dim]
+            start_idx = end_idx
+            end_idx += self.proj_dims['V']
+            nn.init.xavier_uniform_(fused_weight[start_idx:end_idx, :])
+            nn.init.zeros_(fused_bias[start_idx:end_idx])
+            
+            # Z projection: [model_dim, model_dim]
+            start_idx = end_idx
+            end_idx += self.proj_dims['Z']
+            nn.init.xavier_uniform_(fused_weight[start_idx:end_idx, :])
+            nn.init.zeros_(fused_bias[start_idx:end_idx])
+            
+            # P projection (down): [pe_dim, model_dim]
+            start_idx = end_idx
+            end_idx += self.proj_dims['P']
+            nn.init.xavier_uniform_(fused_weight[start_idx:end_idx, :])
+            nn.init.zeros_(fused_bias[start_idx:end_idx])
+            
+            # E projection (up): [model_dim, pe_dim]
+            start_idx = end_idx
+            end_idx = self.fused_out_dim
+            nn.init.xavier_uniform_(fused_weight[start_idx:end_idx, :])
+            nn.init.zeros_(fused_bias[start_idx:end_idx])
+            
+            # Store initialized weights
+            self.W_fused.weight.data = fused_weight
+            self.W_fused.bias.data = fused_bias
+    
     def forward(
         self,
         x: torch.Tensor,
         state: MemoryState,
         hds: Optional[HierarchicalDataStructure] = None,
-        use_checkpointing: Optional[bool] = None
-    ) -> Tuple[torch.Tensor, MemoryState]:
+        use_checkpointing: Optional[bool] = None,
+        return_auxiliary_loss: bool = False
+    ) -> Tuple[torch.Tensor, MemoryState, Optional[torch.Tensor]]:
         """
         Forward pass through MM-Rec block with sequential state updates.
         
@@ -199,23 +324,70 @@ class MMRecBlock(nn.Module):
         h_prev = torch.zeros(batch_size, 1, self.model_dim, 
                             dtype=x.dtype, device=x.device)
         
-        # OPTIMIZATION: Pre-compute all QKVZ projections for entire sequence
-        # This reduces CPU-GPU synchronization and enables better kernel fusion
-        if self.use_kernel_fusion:
-            # Batch all projections at once (more efficient)
+        # ========================================================================
+        # HEM: Fused Kernel - Single Matmul for QKVZ + PE
+        # ========================================================================
+        if self.use_hem:
+            # Step 1: Normalize input
             x_norm_all = self.norm1(x)  # [batch, seq_len, model_dim]
             
-            # Fused QKVZ projections (single batch operation instead of seq_len operations)
-            q_all = self.W_q(x_norm_all)  # [batch, seq_len, model_dim]
-            k_all = self.W_k(x_norm_all)  # [batch, seq_len, model_dim]
-            v_all = self.W_v(x_norm_all)  # [batch, seq_len, model_dim]
-            z_all = self.W_z(x_norm_all)  # [batch, seq_len, model_dim]
+            # Step 2: CRITICAL - Single fused matmul
+            # This replaces 6 separate matmul operations with 1
+            import torch.nn.functional as F
+            fused_output = F.linear(
+                x_norm_all,
+                self.W_fused.weight,  # [fused_out_dim, model_dim]
+                self.W_fused.bias      # [fused_out_dim]
+            )
+            # fused_output: [batch, seq_len, fused_out_dim]
+            
+            # Step 3: Split fused output into individual projections
+            q_all, k_all, v_all, z_all, p_all, e_all = torch.split(
+                fused_output,
+                split_size_or_sections=[
+                    self.proj_dims['Q'],
+                    self.proj_dims['K'],
+                    self.proj_dims['V'],
+                    self.proj_dims['Z'],
+                    self.proj_dims['P'],
+                    self.proj_dims['E']
+                ],
+                dim=-1
+            )
+            # q_all, k_all, v_all, z_all: [batch, seq_len, model_dim]
+            # p_all: [batch, seq_len, pe_dim]
+            # e_all: [batch, seq_len, model_dim]
+            
+            # Step 4: Add positional encoding to input
+            x_with_pe = x_norm_all + e_all  # [batch, seq_len, model_dim]
+        else:
+            # OPTIMIZATION: Pre-compute all QKVZ projections for entire sequence
+            # This reduces CPU-GPU synchronization and enables better kernel fusion
+            if self.use_kernel_fusion:
+                # Batch all projections at once (more efficient)
+                x_norm_all = self.norm1(x)  # [batch, seq_len, model_dim]
+                
+                # Fused QKVZ projections (single batch operation instead of seq_len operations)
+                q_all = self.W_q(x_norm_all)  # [batch, seq_len, model_dim]
+                k_all = self.W_k(x_norm_all)  # [batch, seq_len, model_dim]
+                v_all = self.W_v(x_norm_all)  # [batch, seq_len, model_dim]
+                z_all = self.W_z(x_norm_all)  # [batch, seq_len, model_dim]
+                
+                x_with_pe = x_norm_all  # No positional encoding in non-HEM mode
         
         # Sequential processing: Loop over sequence steps
         for t in range(seq_len):
             # Get current timestep input
-            if self.use_kernel_fusion:
-                # Use pre-computed projections (faster, less CPU-GPU sync)
+            if self.use_hem:
+                # Use pre-computed fused projections (HEM mode)
+                x_t = x[:, t:t+1, :]  # [batch, 1, model_dim]
+                x_t_norm = x_norm_all[:, t:t+1, :]  # [batch, 1, model_dim]
+                q_t = q_all[:, t:t+1, :]  # [batch, 1, model_dim]
+                k_t = k_all[:, t:t+1, :]  # [batch, 1, model_dim]
+                v_t = v_all[:, t:t+1, :]  # [batch, 1, model_dim]
+                z_t = z_all[:, t:t+1, :]  # [batch, 1, model_dim]
+            elif self.use_kernel_fusion:
+                # Use pre-computed projections (non-HEM mode, but with kernel fusion)
                 x_t = x[:, t:t+1, :]  # [batch, 1, model_dim]
                 x_t_norm = x_norm_all[:, t:t+1, :]  # [batch, 1, model_dim]
                 q_t = q_all[:, t:t+1, :]  # [batch, 1, model_dim]
@@ -239,11 +411,27 @@ class MMRecBlock(nn.Module):
             if self.use_gradient_checkpointing:
                 # Gradient checkpointing: recompute activations during backward
                 # This trades compute for memory (recomputes forward during backward)
-                mdi_fn = lambda z, h, ctx: self.mdi(z, h, context=ctx)
-                h_new_t, gamma_new_t = checkpoint(mdi_fn, z_t, h_prev_expanded, k_t, use_reentrant=False)
+                mdi_fn = lambda z, h, ctx: self.mdi(z, h, context=ctx, return_auxiliary_loss=return_auxiliary_loss)
+                mdi_result = checkpoint(mdi_fn, z_t, h_prev_expanded, k_t, use_reentrant=False)
+                if isinstance(mdi_result, tuple) and len(mdi_result) == 3:
+                    h_new_t, gamma_new_t, L_Aux_t = mdi_result
+                else:
+                    h_new_t, gamma_new_t = mdi_result
+                    L_Aux_t = None
             else:
                 # Standard forward pass
-                h_new_t, gamma_new_t = self.mdi(z_t, h_prev_expanded, context=k_t)
+                mdi_result = self.mdi(z_t, h_prev_expanded, context=k_t, return_auxiliary_loss=return_auxiliary_loss)
+                if isinstance(mdi_result, tuple) and len(mdi_result) == 3:
+                    h_new_t, gamma_new_t, L_Aux_t = mdi_result
+                else:
+                    h_new_t, gamma_new_t = mdi_result
+                    L_Aux_t = None
+            
+            # Collect auxiliary loss for this timestep
+            if return_auxiliary_loss and L_Aux_t is not None:
+                if not hasattr(self, '_auxiliary_losses'):
+                    self._auxiliary_losses = []
+                self._auxiliary_losses.append(L_Aux_t)
             
             # Step 4: Associative Scan - Compute cumulative exponential product
             # For sequential processing, we need cumulative product up to step t
@@ -352,5 +540,16 @@ class MMRecBlock(nn.Module):
         hds.reset_cache()
         hds.construct_hierarchy(state)
         
-        return output, state
+        # Collect auxiliary loss for this block
+        L_Aux_block = None
+        if return_auxiliary_loss and hasattr(self, '_auxiliary_losses') and len(self._auxiliary_losses) > 0:
+            # Average auxiliary losses over sequence
+            L_Aux_block = torch.stack(self._auxiliary_losses).mean()
+            # Clear for next forward pass
+            self._auxiliary_losses = []
+        
+        if return_auxiliary_loss:
+            return output, state, L_Aux_block
+        else:
+            return output, state
 

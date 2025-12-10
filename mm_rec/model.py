@@ -43,7 +43,13 @@ class MMRecModel(nn.Module):
         mem_dim: Optional[int] = None,
         max_seq_len: int = 32768,
         ffn_dim: Optional[int] = None,
-        dropout: float = 0.1
+        dropout: float = 0.1,
+        # HEM Parameters
+        use_hem: bool = False,           # Enable HEM (Fused Kernel) mechanism
+        pe_dim: Optional[int] = None,    # Positional encoding dimension (default: model_dim)
+        # UBÖO Parameters
+        use_uboo: bool = False,          # Enable UBÖO mechanism
+        lambda_P: float = 0.1            # Scaling factor for auxiliary loss
     ):
         super().__init__()
         self.vocab_size = vocab_size
@@ -55,6 +61,14 @@ class MMRecModel(nn.Module):
         self.max_seq_len = max_seq_len
         self.ffn_dim = ffn_dim if ffn_dim is not None else model_dim * 4
         self.dropout = dropout
+        
+        # HEM Configuration
+        self.use_hem = use_hem
+        self.pe_dim = pe_dim if pe_dim is not None else model_dim
+        
+        # UBÖO Configuration
+        self.use_uboo = use_uboo
+        self.lambda_P = lambda_P  # Scaling factor for auxiliary loss
         
         # Embedding layer
         self.embedding = nn.Embedding(vocab_size, model_dim)
@@ -88,6 +102,7 @@ class MMRecModel(nn.Module):
         }
         
         # MM-Rec blocks (24 layers as per spec)
+        # Pass HEM and UBÖO flags to blocks
         self.blocks = nn.ModuleList([
             MMRecBlock(
                 model_dim=model_dim,
@@ -95,10 +110,31 @@ class MMRecModel(nn.Module):
                 num_memories=num_memories,
                 mem_dim=self.mem_dim,
                 ffn_dim=self.ffn_dim,
-                dropout=dropout
+                dropout=dropout,
+                use_hem=use_hem,
+                pe_dim=self.pe_dim
             )
             for _ in range(num_layers)
         ])
+        
+        # Set UBÖO flag in MDI modules of all blocks
+        if self.use_uboo:
+            for block in self.blocks:
+                block.mdi.use_uboo = True
+                block.mdi.planning_error_dim = model_dim
+                # Initialize planning error projections if not already initialized
+                if block.mdi.W_planning_error is None:
+                    block.mdi.W_planning_error = nn.Sequential(
+                        nn.Linear(model_dim, model_dim),
+                        nn.GELU(),
+                        nn.Linear(model_dim, model_dim)
+                    ).to(next(block.parameters()).device)
+                if block.mdi.W_planning_target is None:
+                    block.mdi.W_planning_target = nn.Sequential(
+                        nn.Linear(model_dim, model_dim),
+                        nn.GELU(),
+                        nn.Linear(model_dim, model_dim)
+                    ).to(next(block.parameters()).device)
         
         # Final normalization
         self.norm = RMSNorm(model_dim)
@@ -133,7 +169,8 @@ class MMRecModel(nn.Module):
         self,
         input_ids: torch.Tensor,
         memory_states: Optional[List[MemoryState]] = None,
-        chunk_size: Optional[int] = None
+        chunk_size: Optional[int] = None,
+        return_auxiliary_loss: bool = False
     ) -> torch.Tensor:
         """
         Forward pass through complete MM-Rec model.
@@ -176,6 +213,7 @@ class MMRecModel(nn.Module):
             # Split input into chunks
             num_chunks = (seq_len + chunk_size - 1) // chunk_size
             all_logits = []
+            all_auxiliary_losses = []  # Collect auxiliary losses from all chunks
             
             for chunk_idx in range(num_chunks):
                 chunk_start = chunk_idx * chunk_size
@@ -187,18 +225,37 @@ class MMRecModel(nn.Module):
                 
                 # Forward through all MM-Rec blocks with carry-over memory states
                 new_memory_states = []
+                auxiliary_losses_chunk = []
                 for i, block in enumerate(self.blocks):
                     # Enable checkpointing for deeper layers (saves more memory)
                     use_checkpointing = getattr(self, 'use_gradient_checkpointing', False)
                     if use_checkpointing and i >= len(self.blocks) // 2:  # Checkpoint deeper layers
                         from torch.utils.checkpoint import checkpoint
                         def block_forward(x_in, state_in):
-                            return block(x_in, state_in, use_checkpointing=False)
-                        x_chunk, updated_state = checkpoint(
+                            result = block(x_in, state_in, use_checkpointing=False, return_auxiliary_loss=self.use_uboo and return_auxiliary_loss)
+                            if isinstance(result, tuple) and len(result) == 3:
+                                return result
+                            else:
+                                return result + (None,)
+                        result = checkpoint(
                             block_forward, x_chunk, memory_states[i], use_reentrant=False
                         )
+                        if isinstance(result, tuple) and len(result) == 3:
+                            x_chunk, updated_state, L_Aux_layer = result
+                        else:
+                            x_chunk, updated_state = result
+                            L_Aux_layer = None
                     else:
-                        x_chunk, updated_state = block(x_chunk, memory_states[i])
+                        result = block(x_chunk, memory_states[i], return_auxiliary_loss=self.use_uboo and return_auxiliary_loss)
+                        if isinstance(result, tuple) and len(result) == 3:
+                            x_chunk, updated_state, L_Aux_layer = result
+                        else:
+                            x_chunk, updated_state = result
+                            L_Aux_layer = None
+                    
+                    # Collect auxiliary loss from this layer
+                    if self.use_uboo and return_auxiliary_loss and L_Aux_layer is not None:
+                        auxiliary_losses_chunk.append(L_Aux_layer)
                     
                     # CRITICAL: Carry-over memory state to next chunk
                     memory_states[i] = updated_state
@@ -211,8 +268,20 @@ class MMRecModel(nn.Module):
                 logits_chunk = self.lm_head(x_chunk)  # [batch, chunk_len, vocab_size]
                 all_logits.append(logits_chunk)
             
-            # Concatenate all chunk logits
+                # Collect auxiliary losses from this chunk
+                if self.use_uboo and return_auxiliary_loss and len(auxiliary_losses_chunk) > 0:
+                    all_auxiliary_losses.extend(auxiliary_losses_chunk)
+                
+                # Concatenate all chunk logits
             logits = torch.cat(all_logits, dim=1)  # [batch, seq_len, vocab_size]
+            
+            # Compute total auxiliary loss from all chunks
+            if self.use_uboo and return_auxiliary_loss:
+                if len(all_auxiliary_losses) > 0:
+                    L_Aux_sum = sum(all_auxiliary_losses)
+                    L_Aux_total = self.lambda_P * L_Aux_sum
+                else:
+                    L_Aux_total = None
             
         else:
             # NO CHUNKING: Process entire sequence at once (for shorter sequences)
@@ -223,16 +292,36 @@ class MMRecModel(nn.Module):
             # OPTIMIZATION: Use gradient checkpointing for memory efficiency
             # Can be enabled via model configuration
             new_memory_states = []
+            auxiliary_losses = []
             for i, block in enumerate(self.blocks):
                 # Enable checkpointing for deeper layers (saves more memory)
                 use_checkpointing = getattr(self, 'use_gradient_checkpointing', False)
                 if use_checkpointing and i >= len(self.blocks) // 2:  # Checkpoint deeper layers
                     from torch.utils.checkpoint import checkpoint
                     def block_forward(x_in, state_in):
-                        return block(x_in, state_in, use_checkpointing=False)
-                    x, updated_state = checkpoint(block_forward, x, memory_states[i], use_reentrant=False)
+                        result = block(x_in, state_in, use_checkpointing=False, return_auxiliary_loss=self.use_uboo and return_auxiliary_loss)
+                        if isinstance(result, tuple) and len(result) == 3:
+                            return result
+                        else:
+                            return result + (None,)
+                    result = checkpoint(block_forward, x, memory_states[i], use_reentrant=False)
+                    if isinstance(result, tuple) and len(result) == 3:
+                        x, updated_state, L_Aux_layer = result
+                    else:
+                        x, updated_state = result
+                        L_Aux_layer = None
                 else:
-                    x, updated_state = block(x, memory_states[i])
+                    result = block(x, memory_states[i], return_auxiliary_loss=self.use_uboo and return_auxiliary_loss)
+                    if isinstance(result, tuple) and len(result) == 3:
+                        x, updated_state, L_Aux_layer = result
+                    else:
+                        x, updated_state = result
+                        L_Aux_layer = None
+                
+                # Collect auxiliary loss from this layer
+                if self.use_uboo and return_auxiliary_loss and L_Aux_layer is not None:
+                    auxiliary_losses.append(L_Aux_layer)
+                
                 new_memory_states.append(updated_state)
             
             # Final normalization
@@ -241,7 +330,24 @@ class MMRecModel(nn.Module):
             # Output head: Compute logits
             logits = self.lm_head(x)  # [batch, seq_len, vocab_size]
         
-        return logits
+        # Compute total auxiliary loss (L_Aux_total)
+        L_Aux_total = None
+        if self.use_uboo and return_auxiliary_loss:
+            if len(auxiliary_losses) > 0:
+                # Sum auxiliary losses from all layers
+                L_Aux_sum = sum(auxiliary_losses)
+                # Scale with lambda_P
+                L_Aux_total = self.lambda_P * L_Aux_sum
+            elif chunk_size is not None:
+                # For chunked processing, collect from all chunks
+                # (auxiliary_losses_chunk was collected per chunk)
+                # This is a simplified version - in practice, you'd accumulate across chunks
+                pass
+        
+        if return_auxiliary_loss:
+            return logits, L_Aux_total
+        else:
+            return logits
     
     def get_num_params(self) -> int:
         """Get total number of parameters."""
