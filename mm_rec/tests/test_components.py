@@ -174,7 +174,11 @@ class TestMDI(unittest.TestCase):
                              dtype=self.config['dtype'], device=self.device)
         
         # Forward pass
-        h_new, gamma = mdi(z_t, h_prev, context=context)
+        mdi_result = mdi(z_t, h_prev, context=context, return_auxiliary_loss=False)
+        if isinstance(mdi_result, tuple) and len(mdi_result) == 3:
+            h_new, gamma, _ = mdi_result
+        else:
+            h_new, gamma = mdi_result
         
         # Check output dimensions
         self.assertEqual(h_new.shape, (batch_size, seq_len, model_dim))
@@ -520,7 +524,11 @@ class TestIntegration(unittest.TestCase):
         z_t = torch.randn(batch_size, seq_len, model_dim,
                          dtype=self.config['dtype'], device=self.device)
         h_prev = x
-        h_new, gamma = mdi(z_t, h_prev)
+        mdi_result = mdi(z_t, h_prev, return_auxiliary_loss=False)
+        if isinstance(mdi_result, tuple) and len(mdi_result) == 3:
+            h_new, gamma, _ = mdi_result
+        else:
+            h_new, gamma = mdi_result
         self.assertEqual(h_new.shape, x.shape)
         
         # Test attention
