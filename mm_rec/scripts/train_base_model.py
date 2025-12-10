@@ -32,38 +32,16 @@ from mm_rec.configs.base_model_configs import (
     PROGRESSIVE_TRAINING_SEQUENCE
 )
 from mm_rec.utils.model_upscaling import upscale_model
+from mm_rec.data.text_data_loader import (
+    create_data_loaders,
+    create_sample_text_corpus,
+    load_texts_from_directory,
+    SimpleCharacterTokenizer
+)
+from mm_rec.training.evaluation import evaluate_model, print_evaluation_metrics
 
 
-class SimpleDataLoader:
-    """Basit data loader (gerçek data yerine simüle edilmiş)"""
-    
-    def __init__(self, vocab_size: int, batch_size: int, seq_len: int, num_batches: int, device: torch.device):
-        self.vocab_size = vocab_size
-        self.batch_size = batch_size
-        self.seq_len = seq_len
-        self.num_batches = num_batches
-        self.device = device
-        self.current_batch = 0
-    
-    def __iter__(self):
-        self.current_batch = 0
-        return self
-    
-    def __next__(self):
-        if self.current_batch >= self.num_batches:
-            raise StopIteration
-        
-        # Simüle edilmiş data
-        input_ids = torch.randint(0, self.vocab_size, (self.batch_size, self.seq_len), device=self.device)
-        # Labels = input_ids shifted by 1
-        labels = torch.roll(input_ids, shifts=-1, dims=1)
-        labels[:, -1] = -100  # Ignore last token
-        
-        self.current_batch += 1
-        return {'input_ids': input_ids, 'labels': labels}
-    
-    def __len__(self):
-        return self.num_batches
+# SimpleDataLoader kaldırıldı - artık gerçek text data loader kullanıyoruz
 
 
 def train_step(
@@ -123,7 +101,12 @@ def train_base_model(
     warmup_steps: int = 100,
     max_steps: Optional[int] = None,
     device: Optional[torch.device] = None,
-    resume_from: Optional[str] = None
+    resume_from: Optional[str] = None,
+    data_dir: Optional[str] = None,
+    use_sample_corpus: bool = True,
+    val_split: float = 0.1,
+    early_stopping_patience: int = 5,
+    save_best_model: bool = True
 ):
     """
     Base model eğitimi.
@@ -196,15 +179,47 @@ def train_base_model(
     print(f"💾 Memory (FP16): {num_params * 2 / (1024**2):.2f} MB")
     print()
     
-    # Data loader
-    num_batches_per_epoch = 100  # Simüle edilmiş
-    dataloader = SimpleDataLoader(
+    # Data loading - Gerçek text data veya sample corpus
+    print("📚 Preparing data...")
+    if use_sample_corpus or data_dir is None:
+        # Create sample corpus for testing
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        sample_file = output_path / "sample_corpus.txt"
+        if not sample_file.exists():
+            create_sample_text_corpus(str(sample_file), num_samples=1000)
+        train_texts = [open(sample_file, 'r', encoding='utf-8').read()]
+        val_texts = None
+        print(f"✅ Using sample corpus: {sample_file}")
+    else:
+        # Load from directory
+        all_texts = load_texts_from_directory(data_dir)
+        # Split train/val
+        split_idx = int(len(all_texts) * (1 - val_split))
+        train_texts = all_texts[:split_idx]
+        val_texts = all_texts[split_idx:] if len(all_texts) > split_idx else None
+        print(f"✅ Loaded {len(train_texts)} training texts")
+        if val_texts:
+            print(f"✅ Loaded {len(val_texts)} validation texts")
+    
+    # Create data loaders
+    train_loader, val_loader, tokenizer = create_data_loaders(
+        train_texts=train_texts,
+        val_texts=val_texts,
+        tokenizer=None,  # Will create SimpleCharacterTokenizer
         vocab_size=config.vocab_size,
-        batch_size=batch_size,
         seq_len=min(seq_len, config.max_seq_len),
-        num_batches=num_batches_per_epoch,
-        device=device
+        batch_size=batch_size,
+        train_stride=None,  # No overlap for training
+        val_stride=None,  # No overlap for validation
+        num_workers=0
     )
+    
+    # Update vocab_size if tokenizer built different vocab
+    if hasattr(tokenizer, 'next_id') and tokenizer.next_id > config.vocab_size:
+        print(f"⚠️  Warning: Tokenizer built vocab of size {tokenizer.next_id}, but config has {config.vocab_size}")
+        print(f"   Using tokenizer vocab size: {tokenizer.next_id}")
+        # Note: Model already created with config.vocab_size, this is just a warning
     
     # Optimizer
     optimizer = optim.AdamW(
@@ -216,7 +231,7 @@ def train_base_model(
     
     # Scheduler
     if max_steps is None:
-        max_steps = num_epochs * len(dataloader)
+        max_steps = num_epochs * len(train_loader)
     
     warmup_scheduler = LinearLR(optimizer, start_factor=0.1, total_iters=warmup_steps)
     cosine_scheduler = CosineAnnealingLR(optimizer, T_max=max_steps - warmup_steps, eta_min=learning_rate * 0.1)
@@ -229,12 +244,16 @@ def train_base_model(
     print("🚀 Training started...")
     print()
     
+    # Early stopping
+    best_val_loss = float('inf')
+    patience_counter = 0
+    
     global_step = start_step
     for epoch in range(start_epoch, num_epochs):
         model.train()
         epoch_losses = []
         
-        progress_bar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}")
+        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}")
         for batch in progress_bar:
             metrics = train_step(model, batch, optimizer, criterion, device, use_uboo=config.use_uboo)
             scheduler.step()
@@ -280,7 +299,67 @@ def train_base_model(
                 }, checkpoint_path)
         
         avg_loss = sum(epoch_losses) / len(epoch_losses)
-        print(f"Epoch {epoch+1} completed - Avg Loss: {avg_loss:.4f}")
+        print(f"\n📊 Epoch {epoch+1} completed - Avg Loss: {avg_loss:.4f}")
+        
+        # Validation
+        if val_loader:
+            val_metrics = evaluate_model(
+                model=model,
+                data_loader=val_loader,
+                criterion=criterion,
+                device=device,
+                use_uboo=config.use_uboo,
+                max_batches=50  # Limit validation batches for speed
+            )
+            print_evaluation_metrics(val_metrics, prefix="Validation")
+            
+            # Early stopping check
+            val_loss = val_metrics['loss']
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                patience_counter = 0
+                
+                # Save best model
+                if save_best_model:
+                    best_checkpoint_path = Path(output_dir) / config_name / "best_model.pt"
+                    best_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+                    torch.save({
+                        'epoch': epoch,
+                        'step': global_step,
+                        'model_state_dict': model.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'scheduler_state_dict': scheduler.state_dict(),
+                        'model_config': {
+                            'vocab_size': config.vocab_size,
+                            'model_dim': config.model_dim,
+                            'num_layers': config.num_layers,
+                            'num_heads': config.num_heads,
+                            'num_memories': config.num_memories,
+                            'mem_dim': config.mem_dim,
+                            'ffn_dim': config.ffn_dim,
+                            'max_seq_len': config.max_seq_len,
+                            'dropout': config.dropout,
+                            'use_hem': config.use_hem,
+                            'use_dpg': config.use_dpg,
+                            'use_uboo': config.use_uboo,
+                            'dpg_rank': config.dpg_rank,
+                            'lambda_P': config.lambda_P
+                        },
+                        'loss': avg_loss,
+                        'val_loss': val_loss,
+                        'val_perplexity': val_metrics['perplexity'],
+                        'val_accuracy': val_metrics['accuracy'],
+                    }, best_checkpoint_path)
+                    print(f"💾 Best model saved: {best_checkpoint_path}")
+            else:
+                patience_counter += 1
+                if patience_counter >= early_stopping_patience:
+                    print(f"\n⏹️  Early stopping triggered (patience: {early_stopping_patience})")
+                    print(f"   Best validation loss: {best_val_loss:.4f}")
+                    break
+        else:
+            print("⚠️  No validation set - skipping evaluation")
+        
         print()
     
     # Final checkpoint
@@ -442,6 +521,16 @@ def main():
                        help='End config for progressive training')
     parser.add_argument('--epochs-per-stage', type=int, default=5,
                        help='Epochs per stage (for progressive training)')
+    parser.add_argument('--data-dir', type=str, default=None,
+                       help='Data directory (if None, uses sample corpus)')
+    parser.add_argument('--use-sample-corpus', action='store_true', default=True,
+                       help='Use sample corpus for testing')
+    parser.add_argument('--val-split', type=float, default=0.1,
+                       help='Validation split ratio')
+    parser.add_argument('--early-stopping-patience', type=int, default=5,
+                       help='Early stopping patience (epochs)')
+    parser.add_argument('--save-best-model', action='store_true', default=True,
+                       help='Save best model based on validation loss')
     
     args = parser.parse_args()
     
@@ -465,7 +554,12 @@ def main():
             seq_len=args.seq_len,
             learning_rate=args.lr,
             warmup_steps=args.warmup_steps,
-            resume_from=args.resume_from
+            resume_from=args.resume_from,
+            data_dir=args.data_dir,
+            use_sample_corpus=args.use_sample_corpus,
+            val_split=args.val_split,
+            early_stopping_patience=args.early_stopping_patience,
+            save_best_model=args.save_best_model
         )
 
 
