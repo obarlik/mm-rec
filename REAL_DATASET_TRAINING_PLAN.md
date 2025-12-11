@@ -234,3 +234,5 @@ python mm_rec/scripts/train_base_model.py \
 
 **Tarih**: 2025-01-27  
 **Durum**: ✅ Hazır - Gerçek dataset ile eğitim başlatılabilir
+
+

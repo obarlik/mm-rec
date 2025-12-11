@@ -268,26 +268,26 @@ class TestCPPLibraryComplete(unittest.TestCase):
             self.skipTest("C++ blocks extension not available")
         
         batch, seq_len, hidden_dim = 2, 128, 256
-        h_t = torch.randn(batch, seq_len, hidden_dim, dtype=torch.float32)
-        M_old = torch.randn(batch, hidden_dim, dtype=torch.float32)
-        decay_coeff = torch.rand(batch, hidden_dim, dtype=torch.float32) * 0.5 + 0.5
+        h_new = torch.randn(batch, seq_len, hidden_dim, dtype=torch.float32)
+        h_old = torch.randn(batch, seq_len, hidden_dim, dtype=torch.float32)
+        gamma = torch.rand(batch, seq_len, hidden_dim, dtype=torch.float32) * 0.5 + 0.5
+        gate = torch.rand(batch, seq_len, hidden_dim, dtype=torch.float32) * 0.5 + 0.5
         
         # Reference: PyTorch
-        gate = torch.sigmoid(h_t.mean(dim=1))  # Simplified gate
-        ref = gate.unsqueeze(1) * h_t.mean(dim=1, keepdim=True) + (1 - gate.unsqueeze(1)) * M_old.unsqueeze(1) * decay_coeff.unsqueeze(1)
+        # MDI formula: h_updated = gate ⊙ h_new + (1 - gate) ⊙ h_old + γ ⊙ h_old
+        ref = gate * h_new + (1 - gate) * h_old + gamma * h_old
         
-        # C++ implementation (if available)
-        # Note: MDI function signature may vary
+        # C++ implementation
         try:
-            result = mm_rec_blocks_cpu.mdi_update(h_t, M_old, decay_coeff)
+            result = mm_rec_blocks_cpu.mdi_update_fused(h_new, h_old, gamma, gate)
             max_diff = torch.max(torch.abs(ref - result)).item()
             self.assertTrue(
                 torch.allclose(ref, result, rtol=self.rtol, atol=self.atol),
                 f"MDI doğruluk hatası: max_diff={max_diff:.6e}"
             )
             print(f"✅ MDI doğruluk: max_diff={max_diff:.6e}")
-        except AttributeError:
-            self.skipTest("MDI function not available in C++ extension")
+        except AttributeError as e:
+            self.skipTest(f"MDI function not available in C++ extension: {e}")
     
     # ========================================================================
     # 4. BLAS Wrapper Tests
@@ -416,3 +416,5 @@ def run_all_tests():
 
 if __name__ == '__main__':
     sys.exit(run_all_tests())
+
+

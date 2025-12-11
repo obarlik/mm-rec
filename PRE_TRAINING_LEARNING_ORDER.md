@@ -367,3 +367,5 @@
 
 **Tarih**: 2025-01-27  
 **Durum**: Pre-training öğrenme sırası belirlendi
+
+
