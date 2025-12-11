@@ -37,33 +37,72 @@ blas_link_args = []
 blas_libraries = []
 blas_include_dirs = []
 
-# Check for MKL via pkg-config
-try:
-    result = subprocess.run(['pkg-config', '--exists', 'mkl'], 
-                          capture_output=True, timeout=2)
-    if result.returncode == 0:
-        mkl_available = True
-        blas_compile_args.append('-DUSE_MKL')
+# Check for MKL via pkg-config (try different MKL package names)
+# Prefer dynamic over static (easier linking)
+mkl_pkg_names = ['mkl-dynamic-lp64-seq', 'mkl-static-lp64-seq', 'mkl', 'mkl-sdl-lp64']
+mkl_pkg_found = None
+for pkg_name in mkl_pkg_names:
+    try:
+        result = subprocess.run(['pkg-config', '--exists', pkg_name], 
+                              capture_output=True, timeout=2)
+        if result.returncode == 0:
+            mkl_pkg_found = pkg_name
+            break
+    except:
+        continue
+
+# Also check if MKL headers exist directly
+if not mkl_pkg_found and os.path.exists('/usr/include/mkl/mkl.h'):
+    mkl_pkg_found = 'direct'  # Use direct path detection
+
+if mkl_pkg_found and mkl_pkg_found != 'direct':
+    try:
+        result = subprocess.run(['pkg-config', '--exists', mkl_pkg_found], 
+                              capture_output=True, timeout=2)
+        if result.returncode == 0:
+            mkl_available = True
+            blas_compile_args.append('-DUSE_MKL')
         # Get MKL paths
-        result = subprocess.run(['pkg-config', '--cflags', 'mkl'], 
+        result = subprocess.run(['pkg-config', '--cflags', mkl_pkg_found], 
                               capture_output=True, text=True, timeout=2)
         if result.returncode == 0:
             flags = result.stdout.strip().split()
             for flag in flags:
                 if flag.startswith('-I'):
                     blas_include_dirs.append(flag[2:])
-        result = subprocess.run(['pkg-config', '--libs', 'mkl'], 
+        result = subprocess.run(['pkg-config', '--libs', mkl_pkg_found], 
                               capture_output=True, text=True, timeout=2)
         if result.returncode == 0:
-            libs = result.stdout.strip().split()
+            # For dynamic MKL, just use the full libs string as link args
+            # This ensures proper linking order and flags
+            libs_str = result.stdout.strip()
+            # Split and process
+            libs = libs_str.split()
             for lib in libs:
                 if lib.startswith('-l'):
                     blas_libraries.append(lib[2:])
                 elif lib.startswith('-L'):
                     library_dirs.append(lib[2:])
-        print("✅ MKL bulundu (pkg-config)")
-except:
-    pass
+                elif lib.startswith('-Wl'):
+                    # Handle linker flags like -Wl,--start-group
+                    blas_link_args.append(lib)
+                elif lib.endswith('.so') or lib.endswith('.a'):
+                    # Library file - add to link args directly
+                    blas_link_args.append(lib)
+        print(f"✅ MKL bulundu (pkg-config: {mkl_pkg_found})")
+        mkl_available = True
+    except:
+        pass
+
+# Also check if MKL headers exist directly (fallback)
+if not mkl_available and os.path.exists('/usr/include/mkl/mkl.h'):
+    mkl_available = True
+    blas_compile_args.append('-DUSE_MKL')
+    blas_include_dirs.append('/usr/include/mkl')
+    # MKL static libraries
+    blas_libraries.extend(['mkl_intel_lp64', 'mkl_sequential', 'mkl_core'])
+    library_dirs.append('/usr/lib/x86_64-linux-gnu')
+    print("✅ MKL bulundu (direct path: /usr/include/mkl)")
 
 # Check for OpenBLAS if MKL not found
 if not mkl_available:
@@ -211,7 +250,7 @@ cpp_extensions = [
             'src/core/blas_wrapper.cpp',  # BLAS wrapper (MKL/OpenBLAS or manual)
         ],
         extra_compile_args=cxx_args + blas_compile_args,
-        extra_link_args=['-fopenmp', rpath_flag] if 'rpath_flag' in locals() else ['-fopenmp'],
+        extra_link_args=(['-fopenmp', rpath_flag] if 'rpath_flag' in locals() else ['-fopenmp']) + blas_link_args + (['-Wl,-rpath,/usr/lib/x86_64-linux-gnu'] if mkl_available else []),
         library_dirs=library_dirs if 'library_dirs' in locals() else [],
         libraries=blas_libraries if blas_libraries else [],
         include_dirs=['src'] + blas_include_dirs,  # For header includes

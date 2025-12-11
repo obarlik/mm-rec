@@ -17,12 +17,7 @@
 #include <cmath>
 #include <algorithm>
 
-// PyTorch headers for MKL access
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/native/cpu/Loops.h>
-
-// Include BLAS wrapper header
+// Include BLAS wrapper header (MKL/OpenBLAS or manual SIMD)
 #include "core/blas_wrapper.h"
 
 // OPTIMIZED Manual BLAS with SIMD and cache optimization (fallback)
@@ -153,26 +148,29 @@ void core_recurrence_fused_cpu(
                     int base_idx = b * seq_len * hidden_dim + t * hidden_dim;
                     
                     // 1. Matrix-vector multiply: g = h_prev @ W_g.t()
-                    // Use PyTorch's optimized MKL-backed matmul for maximum performance
-                    // Create temporary tensors and use PyTorch's matmul
-                    at::Tensor h_prev_tensor = at::from_blob(
-                        const_cast<float*>(&h_prev[base_idx]), 
-                        {hidden_dim}, 
-                        at::kFloat
+                    // Use optimized BLAS (MKL/OpenBLAS) if available, otherwise manual loop
+                    #ifdef BLAS_AVAILABLE
+                    // Use BLAS: g = W_g.t() @ h_prev
+                    optimized_sgemv(
+                        hidden_dim, hidden_dim,  // m, n
+                        1.0f,                    // alpha
+                        W_g, hidden_dim,         // A, lda
+                        &h_prev[base_idx], 1,    // x, incx
+                        0.0f,                    // beta
+                        gate, 1                  // y, incy (output)
                     );
-                    at::Tensor W_g_tensor = at::from_blob(
-                        const_cast<float*>(W_g), 
-                        {hidden_dim, hidden_dim}, 
-                        at::kFloat
-                    );
-                    at::Tensor gate_tensor = at::from_blob(
-                        gate, 
-                        {hidden_dim}, 
-                        at::kFloat
-                    );
-                    
-                    // h_prev @ W_g.t() using PyTorch's optimized MKL matmul
-                    gate_tensor.copy_(h_prev_tensor.matmul(W_g_tensor.t()));
+                    #else
+                    // Manual loop fallback (no PyTorch overhead)
+                    for (int j = 0; j < hidden_dim; j++) {
+                        float sum = 0.0f;
+                        for (int i = 0; i < hidden_dim; i++) {
+                            // h_prev @ W_g.t(): gate[j] = sum_i(h_prev[i] * W_g[j, i])
+                            // For row-major W_g: W_g[j, i] is at index j * hidden_dim + i
+                            sum += h_prev[base_idx + i] * W_g[j * hidden_dim + i];
+                        }
+                        gate[j] = sum;
+                    }
+                    #endif
                     
                     // 2. Vectorized sigmoid: σ(g) = 1 / (1 + exp(-g))
                     #if defined(__AVX512F__) && defined(__AVX512DQ__)
@@ -260,7 +258,7 @@ void core_recurrence_fused_cpu(
                 int base_idx = b * seq_len * hidden_dim + t * hidden_dim;
                 
                 // 1. Matrix-vector multiply: g = h_prev @ W_g.t()
-                // Use optimized BLAS (MKL/OpenBLAS) if available, otherwise PyTorch matmul
+                // Use optimized BLAS (MKL/OpenBLAS) if available, otherwise manual SIMD
                 #ifdef BLAS_AVAILABLE
                 // Use BLAS: g = W_g.t() @ h_prev
                 optimized_sgemv(
@@ -272,25 +270,16 @@ void core_recurrence_fused_cpu(
                     gate, 1                  // y, incy (output)
                 );
                 #else
-                // Fallback: Use PyTorch's optimized MKL-backed matmul
-                at::Tensor h_prev_tensor = at::from_blob(
-                    const_cast<float*>(&h_prev[base_idx]), 
-                    {hidden_dim}, 
-                    at::kFloat
-                );
-                at::Tensor W_g_tensor = at::from_blob(
-                    const_cast<float*>(W_g), 
-                    {hidden_dim, hidden_dim}, 
-                    at::kFloat
-                );
-                at::Tensor gate_tensor = at::from_blob(
-                    gate, 
-                    {hidden_dim}, 
-                    at::kFloat
-                );
-                
-                // h_prev @ W_g.t() using PyTorch's optimized MKL matmul
-                gate_tensor.copy_(h_prev_tensor.matmul(W_g_tensor.t()));
+                // Manual SIMD fallback (no PyTorch overhead)
+                for (int j = 0; j < hidden_dim; j++) {
+                    float sum = 0.0f;
+                    for (int i = 0; i < hidden_dim; i++) {
+                        // h_prev @ W_g.t(): gate[j] = sum_i(h_prev[i] * W_g[j, i])
+                        // For row-major W_g: W_g[j, i] is at index j * hidden_dim + i
+                        sum += h_prev[base_idx + i] * W_g[j * hidden_dim + i];
+                    }
+                    gate[j] = sum;
+                }
                 #endif
                 
                 // 2. Vectorized sigmoid: σ(g) = 1 / (1 + exp(-g))
