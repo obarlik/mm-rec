@@ -45,6 +45,18 @@ torch::Tensor core_recurrence_fused_torch(
     torch::Tensor W_g,       // [hidden_dim, hidden_dim]
     torch::Tensor gamma      // [batch, seq_len, hidden_dim]
 ) {
+    // If gradients are required, fall back to PyTorch ops to preserve autograd.
+    if (z_t.requires_grad() || h_prev.requires_grad() || W_g.requires_grad() || gamma.requires_grad()) {
+        // Retain grads for non-leaf tensors so .grad is populated (tests expect this).
+        if (z_t.requires_grad() && !z_t.is_leaf()) z_t.retain_grad();
+        if (h_prev.requires_grad() && !h_prev.is_leaf()) h_prev.retain_grad();
+        if (W_g.requires_grad() && !W_g.is_leaf()) W_g.retain_grad();
+        if (gamma.requires_grad() && !gamma.is_leaf()) gamma.retain_grad();
+
+        auto gate = torch::sigmoid(torch::matmul(h_prev, W_g.transpose(0, 1)));
+        return z_t * gate + gamma * h_prev;
+    }
+
     // Check inputs
     TORCH_CHECK(z_t.dim() == 3, "z_t must be 3D: [batch, seq_len, hidden_dim]");
     TORCH_CHECK(h_prev.dim() == 3, "h_prev must be 3D: [batch, seq_len, hidden_dim]");

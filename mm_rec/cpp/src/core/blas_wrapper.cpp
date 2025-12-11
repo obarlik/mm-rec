@@ -22,11 +22,12 @@ __attribute__((visibility("default")))
             float beta,
             float* y, int incy
         ) {
-            // Compute: y = alpha * A.t() * x + beta * y
-            // For h_prev @ W_g.t(), we need W_g.t() @ h_prev
+            // Compute: y = alpha * A * x + beta * y
+            // Reference uses h_prev @ W_g.t(), which is row-dot with W_g rows.
+            // With row-major layout this corresponds to NoTrans.
             cblas_sgemv(
                 CblasRowMajor,
-                CblasTrans,  // Transpose A to compute A.t() @ x
+                CblasNoTrans,  // Row-major, no transpose
                 m, n,
                 alpha,
                 A, lda,
@@ -45,11 +46,12 @@ __attribute__((visibility("default")))
             float beta,
             float* y, int incy
         ) {
-            // Compute: y = alpha * A.t() * x + beta * y
-            // For h_prev @ W_g.t(), we need W_g.t() @ h_prev
+            // Compute: y = alpha * A * x + beta * y
+            // Reference uses h_prev @ W_g.t(), which is row-dot with W_g rows.
+            // With row-major layout this corresponds to NoTrans.
             cblas_sgemv(
                 CblasRowMajor,
-                CblasTrans,  // Transpose A to compute A.t() @ x
+                CblasNoTrans,  // Row-major, no transpose
                 m, n,
                 alpha,
                 A, lda,

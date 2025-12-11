@@ -148,10 +148,8 @@ void core_recurrence_fused_cpu(
                     int base_idx = b * seq_len * hidden_dim + t * hidden_dim;
                     
                     // 1. Matrix-vector multiply: g = h_prev @ W_g.t()
-                    // Use optimized BLAS (MKL/OpenBLAS) if available, otherwise manual loop
-                    #ifdef BLAS_AVAILABLE
-                    // Use BLAS: g = W_g.t() @ h_prev
-                    optimized_sgemv(
+                    // Use manual row-major sgemv (deterministic, avoids BLAS layout surprises)
+                    manual_sgemv_rowmajor(
                         hidden_dim, hidden_dim,  // m, n
                         1.0f,                    // alpha
                         W_g, hidden_dim,         // A, lda
@@ -159,18 +157,6 @@ void core_recurrence_fused_cpu(
                         0.0f,                    // beta
                         gate, 1                  // y, incy (output)
                     );
-                    #else
-                    // Manual loop fallback (no PyTorch overhead)
-                    for (int j = 0; j < hidden_dim; j++) {
-                        float sum = 0.0f;
-                        for (int i = 0; i < hidden_dim; i++) {
-                            // h_prev @ W_g.t(): gate[j] = sum_i(h_prev[i] * W_g[j, i])
-                            // For row-major W_g: W_g[j, i] is at index j * hidden_dim + i
-                            sum += h_prev[base_idx + i] * W_g[j * hidden_dim + i];
-                        }
-                        gate[j] = sum;
-                    }
-                    #endif
                     
                     // 2. Vectorized sigmoid: σ(g) = 1 / (1 + exp(-g))
                     #if defined(__AVX512F__) && defined(__AVX512DQ__)
@@ -258,10 +244,7 @@ void core_recurrence_fused_cpu(
                 int base_idx = b * seq_len * hidden_dim + t * hidden_dim;
                 
                 // 1. Matrix-vector multiply: g = h_prev @ W_g.t()
-                // Use optimized BLAS (MKL/OpenBLAS) if available, otherwise manual SIMD
-                #ifdef BLAS_AVAILABLE
-                // Use BLAS: g = W_g.t() @ h_prev
-                optimized_sgemv(
+                manual_sgemv_rowmajor(
                     hidden_dim, hidden_dim,  // m, n
                     1.0f,                    // alpha
                     W_g, hidden_dim,         // A, lda
@@ -269,18 +252,6 @@ void core_recurrence_fused_cpu(
                     0.0f,                    // beta
                     gate, 1                  // y, incy (output)
                 );
-                #else
-                // Manual SIMD fallback (no PyTorch overhead)
-                for (int j = 0; j < hidden_dim; j++) {
-                    float sum = 0.0f;
-                    for (int i = 0; i < hidden_dim; i++) {
-                        // h_prev @ W_g.t(): gate[j] = sum_i(h_prev[i] * W_g[j, i])
-                        // For row-major W_g: W_g[j, i] is at index j * hidden_dim + i
-                        sum += h_prev[base_idx + i] * W_g[j * hidden_dim + i];
-                    }
-                    gate[j] = sum;
-                }
-                #endif
                 
                 // 2. Vectorized sigmoid: σ(g) = 1 / (1 + exp(-g))
                 #if defined(__AVX512F__) && defined(__AVX512DQ__)

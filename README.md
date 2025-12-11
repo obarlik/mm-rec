@@ -4,35 +4,71 @@ Bu repository, MM-Rec (Multi-Memory Recurrence) mimarisinin PyTorch/JAX framewor
 
 ## Dokümantasyon Yapısı
 
-### 1. [ENGINEERING_OUTPUTS.md](./ENGINEERING_OUTPUTS.md)
+### 1. [ENGINEERING_OUTPUTS.md](./docs/analysis/ENGINEERING_OUTPUTS.md)
 **Ana Çıktı Dokümanı** - Tüm kritik mühendislik çıktılarının detaylı checklist'i. Her implementasyon adımı için spesifik dosya isimleri, class'lar ve metodlar belirtilmiştir.
 
 **Kullanım**: Implementasyon sırasında referans olarak kullanılacak ana doküman.
 
-### 2. [CORE_FORMULA_SPEC.md](./CORE_FORMULA_SPEC.md)
+### 2. [CORE_FORMULA_SPEC.md](./docs/architecture/CORE_FORMULA_SPEC.md)
 **Çekirdek Formül Spesifikasyonu** - MM-Rec'in temel recurrence formülü (`h_t = z_t ⊙ σ(W_g h_{t-1}) + γ ⊙ h_{t-1}`) ve Log-Sum-Exp implementasyonu.
 
 **Kullanım**: Core recurrence formula implementasyonu için kritik rehber.
 
-### 3. [TECHNICAL_REQUIREMENTS.md](./TECHNICAL_REQUIREMENTS.md)
+### 3. [TECHNICAL_REQUIREMENTS.md](./docs/architecture/TECHNICAL_REQUIREMENTS.md)
 **Teknik Gereksinimler** - Yüksek seviye teknik gereksinimler, tensor layout'ları, CUDA kernel spesifikasyonları, distributed training gereksinimleri.
 
 **Kullanım**: Mimari kararlar ve teknik tasarım için referans.
 
-### 4. [IMPLEMENTATION_SPEC.md](./IMPLEMENTATION_SPEC.md)
+### 4. [IMPLEMENTATION_SPEC.md](./docs/architecture/IMPLEMENTATION_SPEC.md)
 **Implementasyon Spesifikasyonu** - Kritik algoritmik bileşenlerin (Associative Scan, HDS, MDI) detaylı matematiksel tanımları ve implementasyon detayları.
 
 **Kullanım**: Algoritma implementasyonu için detaylı rehber.
 
-### 5. [CODE_STRUCTURE.md](./CODE_STRUCTURE.md)
+### 5. [CODE_STRUCTURE.md](./docs/architecture/CODE_STRUCTURE.md)
 **Kod Yapısı ve API Tasarımı** - Proje dizin yapısı, tüm API'lerin tam kod örnekleri, kullanım örnekleri.
 
 **Kullanım**: Kod yazmaya başlamak için doğrudan kullanılabilir template'ler.
 
-### 6. [KERNEL_AND_TRAINING_REQUIREMENTS.md](./KERNEL_AND_TRAINING_REQUIREMENTS.md)
+### 6. [KERNEL_AND_TRAINING_REQUIREMENTS.md](./docs/architecture/KERNEL_AND_TRAINING_REQUIREMENTS.md)
 **Kernel Geliştirme ve Büyük Ölçekli Eğitim Gereksinimleri** - Özel CUDA/Triton kernel gereksinimleri, BF16/FP16 stabilizasyon önlemleri, HDS long-term memory yönetimi.
 
 **Kullanım**: Kernel geliştirme ve distributed training setup için doğrudan uygulanabilir checklist.
+
+### Ortam Kurulumu (venv + bağımlılıklar)
+
+```bash
+# 1) Sanal ortam
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+
+# 2) PyTorch (GPU varsa uygun teker seç)
+pip install torch --index-url https://download.pytorch.org/whl/cu118  # GPU
+# veya sadece: pip install torch                                     # CPU
+
+# 3) Opsiyonel Triton (GPU hızlandırma)
+pip install triton
+
+# 4) Proje bağımlılıkları
+pip install -r requirements.txt
+pip install -r requirements_cpu.txt  # veri indirme/izleme için
+
+# 5) C++ eklentisi (BLAS otomatik tespit; MKL/OpenBLAS varsa hızlanır)
+cd mm_rec/cpp
+python setup.py build_ext --inplace
+cd ../..
+
+# 6) Hızlı doğrulama
+python quick_test.py
+python - <<'PY'
+import torch
+print(torch.__version__, torch.cuda.is_available())
+from mm_rec.core import adaptive_learning
+print("✓ mm_rec import OK")
+PY
+```
+
+MKL/OpenBLAS kurulumu ve ortam değişkenleri için: `docs/install/MKL_INSTALLATION_GUIDE.md`.
 
 ## Kritik Bileşenler
 
