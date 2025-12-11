@@ -7,6 +7,8 @@
 #include <algorithm>
 
 // Export function for linking
+#include "blas_wrapper.h"
+
 __attribute__((visibility("default")))
 
 #if BLAS_AVAILABLE
@@ -20,9 +22,11 @@ __attribute__((visibility("default")))
             float beta,
             float* y, int incy
         ) {
+            // Compute: y = alpha * A.t() * x + beta * y
+            // For h_prev @ W_g.t(), we need W_g.t() @ h_prev
             cblas_sgemv(
                 CblasRowMajor,
-                CblasNoTrans,
+                CblasTrans,  // Transpose A to compute A.t() @ x
                 m, n,
                 alpha,
                 A, lda,
@@ -41,9 +45,11 @@ __attribute__((visibility("default")))
             float beta,
             float* y, int incy
         ) {
+            // Compute: y = alpha * A.t() * x + beta * y
+            // For h_prev @ W_g.t(), we need W_g.t() @ h_prev
             cblas_sgemv(
                 CblasRowMajor,
-                CblasNoTrans,
+                CblasTrans,  // Transpose A to compute A.t() @ x
                 m, n,
                 alpha,
                 A, lda,

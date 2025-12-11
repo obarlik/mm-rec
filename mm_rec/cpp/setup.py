@@ -23,9 +23,111 @@ except:
 # Get PyTorch library path for rpath and library paths
 import torch
 import os
+import subprocess
 torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
+torch_include = os.path.join(os.path.dirname(torch.__file__), 'include')
 rpath_flag = f'-Wl,-rpath,{torch_lib}'
 library_dirs = [torch_lib] if os.path.exists(torch_lib) else []
+
+# MKL/OpenBLAS detection
+mkl_available = False
+openblas_available = False
+blas_compile_args = []
+blas_link_args = []
+blas_libraries = []
+blas_include_dirs = []
+
+# Check for MKL via pkg-config
+try:
+    result = subprocess.run(['pkg-config', '--exists', 'mkl'], 
+                          capture_output=True, timeout=2)
+    if result.returncode == 0:
+        mkl_available = True
+        blas_compile_args.append('-DUSE_MKL')
+        # Get MKL paths
+        result = subprocess.run(['pkg-config', '--cflags', 'mkl'], 
+                              capture_output=True, text=True, timeout=2)
+        if result.returncode == 0:
+            flags = result.stdout.strip().split()
+            for flag in flags:
+                if flag.startswith('-I'):
+                    blas_include_dirs.append(flag[2:])
+        result = subprocess.run(['pkg-config', '--libs', 'mkl'], 
+                              capture_output=True, text=True, timeout=2)
+        if result.returncode == 0:
+            libs = result.stdout.strip().split()
+            for lib in libs:
+                if lib.startswith('-l'):
+                    blas_libraries.append(lib[2:])
+                elif lib.startswith('-L'):
+                    library_dirs.append(lib[2:])
+        print("✅ MKL bulundu (pkg-config)")
+except:
+    pass
+
+# Check for OpenBLAS if MKL not found
+if not mkl_available:
+    try:
+        result = subprocess.run(['pkg-config', '--exists', 'openblas'], 
+                              capture_output=True, timeout=2)
+        if result.returncode == 0:
+            openblas_available = True
+            blas_compile_args.append('-DUSE_OPENBLAS')
+            # Get OpenBLAS paths
+            result = subprocess.run(['pkg-config', '--cflags', 'openblas'], 
+                                  capture_output=True, text=True, timeout=2)
+            if result.returncode == 0:
+                flags = result.stdout.strip().split()
+                for flag in flags:
+                    if flag.startswith('-I'):
+                        blas_include_dirs.append(flag[2:])
+            result = subprocess.run(['pkg-config', '--libs', 'openblas'], 
+                                  capture_output=True, text=True, timeout=2)
+            if result.returncode == 0:
+                libs = result.stdout.strip().split()
+                for lib in libs:
+                    if lib.startswith('-l'):
+                        blas_libraries.append(lib[2:])
+                    elif lib.startswith('-L'):
+                        library_dirs.append(lib[2:])
+            print("✅ OpenBLAS bulundu (pkg-config)")
+    except:
+        pass
+
+# Fallback: Check common system paths
+if not mkl_available and not openblas_available:
+    # Check for MKL in common locations
+    mkl_paths = [
+        '/opt/intel/oneapi/mkl/latest',
+        '/opt/intel/mkl',
+        '/usr/lib/x86_64-linux-gnu',
+    ]
+    for mkl_path in mkl_paths:
+        if os.path.exists(os.path.join(mkl_path, 'include', 'mkl.h')):
+            mkl_available = True
+            blas_compile_args.append('-DUSE_MKL')
+            blas_include_dirs.append(os.path.join(mkl_path, 'include'))
+            lib_path = os.path.join(mkl_path, 'lib', 'intel64')
+            if os.path.exists(lib_path):
+                library_dirs.append(lib_path)
+            blas_libraries.extend(['mkl_intel_lp64', 'mkl_core', 'mkl_gnu_thread'])
+            print(f"✅ MKL bulundu: {mkl_path}")
+            break
+    
+    # Check for OpenBLAS in common locations
+    if not mkl_available:
+        openblas_paths = ['/usr/include', '/usr/local/include']
+        for path in openblas_paths:
+            if os.path.exists(os.path.join(path, 'cblas.h')):
+                openblas_available = True
+                blas_compile_args.append('-DUSE_OPENBLAS')
+                blas_include_dirs.append(path)
+                blas_libraries.append('openblas')
+                print(f"✅ OpenBLAS bulundu: {path}")
+                break
+
+if not mkl_available and not openblas_available:
+    print("⚠️  MKL/OpenBLAS bulunamadı, manuel SIMD fallback kullanılacak")
 
 # Modern CPU optimizations - MAXIMUM PERFORMANCE
 cxx_args = [
@@ -108,10 +210,11 @@ cpp_extensions = [
             'src/bindings/python_bindings.cpp',
             'src/core/blas_wrapper.cpp',  # BLAS wrapper (MKL/OpenBLAS or manual)
         ],
-        extra_compile_args=cxx_args,
+        extra_compile_args=cxx_args + blas_compile_args,
         extra_link_args=['-fopenmp', rpath_flag] if 'rpath_flag' in locals() else ['-fopenmp'],
         library_dirs=library_dirs if 'library_dirs' in locals() else [],
-        include_dirs=['src'],  # For header includes
+        libraries=blas_libraries if blas_libraries else [],
+        include_dirs=['src'] + blas_include_dirs,  # For header includes
         language='c++'
     )
 ]
