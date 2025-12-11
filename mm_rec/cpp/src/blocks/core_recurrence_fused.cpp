@@ -180,36 +180,16 @@ void core_recurrence_fused_cpu(
                         gate[d] = 1.0f / (1.0f + std::exp(-gate[d]));
                     }
                     #elif defined(__AVX2__)
-                    // AVX2 processes 8 elements at once
-                    // Fix: Use <= instead of < to handle hidden_dim=8 correctly
-                    // CRITICAL FIX: vectorized_exp_avx2 only works for [-20, 0] range
-                    // For sigmoid: gate = 1 / (1 + exp(-g))
-                    // If g > 0: -g < 0, use exp(-g) directly
-                    // If g <= 0: -g >= 0, use stable sigmoid: exp(g) / (1 + exp(g))
-                    for (int d = 0; d <= hidden_dim - 8; d += 8) {
-                        __m256 vg = _mm256_loadu_ps(&gate[d]);
-                        __m256 vzero = _mm256_setzero_ps();
-                        __m256 vone = _mm256_set1_ps(1.0f);
-                        
-                        // Check if g > 0 or g <= 0
-                        __m256 g_positive_mask = _mm256_cmp_ps(vg, vzero, _CMP_GT_OQ);
-                        
-                        // For g > 0: sigmoid = 1 / (1 + exp(-g))
-                        __m256 vneg = _mm256_mul_ps(vg, _mm256_set1_ps(-1.0f));
-                        __m256 vexp_neg = vectorized_exp_avx2(vneg);  // Works because -g < 0
-                        __m256 vsigmoid_positive = _mm256_div_ps(vone, _mm256_add_ps(vone, vexp_neg));
-                        
-                        // For g <= 0: sigmoid = exp(g) / (1 + exp(g))
-                        // But exp(g) for g <= 0: use exp(g) = 1 / exp(-g)
-                        __m256 vexp_g = vectorized_exp_avx2(vg);  // Works because g <= 0
-                        __m256 vsigmoid_negative = _mm256_div_ps(vexp_g, _mm256_add_ps(vone, vexp_g));
-                        
-                        // Blend based on sign
-                        __m256 vsigmoid = _mm256_blendv_ps(vsigmoid_negative, vsigmoid_positive, g_positive_mask);
-                        _mm256_storeu_ps(&gate[d], vsigmoid);
-                    }
-                    for (int d = (hidden_dim / 8) * 8; d < hidden_dim; d++) {
-                        gate[d] = 1.0f / (1.0f + std::exp(-gate[d]));
+                    // AVX2: Use std::exp for accuracy (polynomial approximation is inaccurate for small values)
+                    // Performance: std::exp is fast enough for sigmoid, and accuracy is critical
+                    for (int d = 0; d < hidden_dim; d++) {
+                        // Stable sigmoid: use std::exp for accuracy
+                        if (gate[d] > 0.0f) {
+                            gate[d] = 1.0f / (1.0f + std::exp(-gate[d]));
+                        } else {
+                            float exp_g = std::exp(gate[d]);
+                            gate[d] = exp_g / (1.0f + exp_g);
+                        }
                     }
                     #else
                     for (int d = 0; d < hidden_dim; d++) {
@@ -298,23 +278,28 @@ void core_recurrence_fused_cpu(
                 for (int d = (hidden_dim / 16) * 16; d < hidden_dim; d++) {
                     gate[d] = 1.0f / (1.0f + std::exp(-gate[d]));
                 }
-                #elif defined(__AVX2__)
-                // AVX2 processes 8 elements at once
-                // Fix: Use <= instead of < to handle hidden_dim=8 correctly
-                for (int d = 0; d <= hidden_dim - 8; d += 8) {
-                    __m256 vg = _mm256_loadu_ps(&gate[d]);
-                    __m256 vneg = _mm256_mul_ps(vg, _mm256_set1_ps(-1.0f));
-                    __m256 vexp = vectorized_exp_avx2(vneg);
-                    __m256 vone = _mm256_set1_ps(1.0f);
-                    __m256 vsigmoid = _mm256_div_ps(vone, _mm256_add_ps(vone, vexp));
-                    _mm256_storeu_ps(&gate[d], vsigmoid);
-                }
-                for (int d = (hidden_dim / 8) * 8; d < hidden_dim; d++) {
-                    gate[d] = 1.0f / (1.0f + std::exp(-gate[d]));
-                }
+                    #elif defined(__AVX2__)
+                    // AVX2: Use std::exp for accuracy (polynomial approximation is inaccurate for small values)
+                    // Performance: std::exp is fast enough for sigmoid, and accuracy is critical
+                    for (int d = 0; d < hidden_dim; d++) {
+                        // Stable sigmoid: use std::exp for accuracy
+                        if (gate[d] > 0.0f) {
+                            gate[d] = 1.0f / (1.0f + std::exp(-gate[d]));
+                        } else {
+                            float exp_g = std::exp(gate[d]);
+                            gate[d] = exp_g / (1.0f + exp_g);
+                        }
+                    }
                 #else
+                // Scalar: Use std::exp for accuracy
                 for (int d = 0; d < hidden_dim; d++) {
-                    gate[d] = 1.0f / (1.0f + std::exp(-gate[d]));
+                    // Stable sigmoid: use std::exp for accuracy
+                    if (gate[d] > 0.0f) {
+                        gate[d] = 1.0f / (1.0f + std::exp(-gate[d]));
+                    } else {
+                        float exp_g = std::exp(gate[d]);
+                        gate[d] = exp_g / (1.0f + exp_g);
+                    }
                 }
                 #endif
                 
