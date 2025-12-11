@@ -7,6 +7,13 @@ MM-Rec (Multi-Memory Recurrence) is a novel LLM architecture that overcomes Tran
 - Memory Decay/Integration (MDI) mechanism
 - Core recurrence formula: h_t = z_t ⊙ σ(W_g h_{t-1}) + γ ⊙ h_{t-1}
 
+## Workspace Hygiene (avoid clutter)
+- Place new Markdown docs under `docs/` in the appropriate folder (architecture/performance/training/testing/install/cpp/integration/plans/status/analysis/mlops/misc); do not leave new .md files in the repo root.
+- Put scripts/utilities under `scripts/`; installation scripts belong in `scripts/install/`.
+- Keep temporary outputs/experimental notes in `tmp/` or other `.gitignore`d locations; avoid committing artifacts.
+- If doc paths change, update README or other references that point to them.
+- Before committing, ensure `git status` is clean; if adding new root-level files, align them with these rules first.
+
 ## Critical Architecture Requirements
 
 ### Core Formula (Efficiency Kernel)
