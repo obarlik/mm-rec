@@ -26,6 +26,7 @@ extern void optimized_sgemv(
 );
 
 // OPTIMIZED Manual BLAS with SIMD and cache optimization (fallback)
+// Computes: y = alpha * A @ x + beta * y (row-major A)
 inline void manual_sgemv_rowmajor(
     int m, int n, float alpha,
     const float* A, int lda,
@@ -151,13 +152,19 @@ void core_recurrence_fused_cpu(
                 for (int t = 0; t < seq_len; t++) {
                     int base_idx = b * seq_len * hidden_dim + t * hidden_dim;
                     
-                    // 1. Matrix-vector multiply: g = W_g @ h_prev
-                    manual_sgemv_rowmajor(
-                        hidden_dim, hidden_dim, 1.0f,
-                        W_g, hidden_dim,
-                        &h_prev[base_idx], 1,
-                        0.0f, gate, 1
-                    );
+                    // 1. Matrix-vector multiply: g = h_prev @ W_g.t()
+                    // PyTorch: h_prev @ W_g.t() means for each output j: g[j] = sum_i(h_prev[i] * W_g[j, i])
+                    // For row-major W_g: W_g[j, i] is at index j * hidden_dim + i
+                    // So: g[j] = sum_i(h_prev[i] * W_g[j * hidden_dim + i])
+                    for (int j = 0; j < hidden_dim; j++) {
+                        float sum = 0.0f;
+                        for (int i = 0; i < hidden_dim; i++) {
+                            // h_prev @ W_g.t(): g[j] = sum_i(h_prev[i] * W_g[j, i])
+                            // For row-major W_g: W_g[j, i] is at index j * hidden_dim + i
+                            sum += h_prev[base_idx + i] * W_g[j * hidden_dim + i];
+                        }
+                        gate[j] = sum;
+                    }
                     
                     // 2. Vectorized sigmoid: σ(g) = 1 / (1 + exp(-g))
                     #if defined(__AVX512F__) && defined(__AVX512DQ__)
@@ -173,12 +180,32 @@ void core_recurrence_fused_cpu(
                         gate[d] = 1.0f / (1.0f + std::exp(-gate[d]));
                     }
                     #elif defined(__AVX2__)
-                    for (int d = 0; d < hidden_dim - 7; d += 8) {
+                    // AVX2 processes 8 elements at once
+                    // Fix: Use <= instead of < to handle hidden_dim=8 correctly
+                    // CRITICAL FIX: vectorized_exp_avx2 only works for [-20, 0] range
+                    // For sigmoid: gate = 1 / (1 + exp(-g))
+                    // If g > 0: -g < 0, use exp(-g) directly
+                    // If g <= 0: -g >= 0, use stable sigmoid: exp(g) / (1 + exp(g))
+                    for (int d = 0; d <= hidden_dim - 8; d += 8) {
                         __m256 vg = _mm256_loadu_ps(&gate[d]);
-                        __m256 vneg = _mm256_mul_ps(vg, _mm256_set1_ps(-1.0f));
-                        __m256 vexp = vectorized_exp_avx2(vneg);
+                        __m256 vzero = _mm256_setzero_ps();
                         __m256 vone = _mm256_set1_ps(1.0f);
-                        __m256 vsigmoid = _mm256_div_ps(vone, _mm256_add_ps(vone, vexp));
+                        
+                        // Check if g > 0 or g <= 0
+                        __m256 g_positive_mask = _mm256_cmp_ps(vg, vzero, _CMP_GT_OQ);
+                        
+                        // For g > 0: sigmoid = 1 / (1 + exp(-g))
+                        __m256 vneg = _mm256_mul_ps(vg, _mm256_set1_ps(-1.0f));
+                        __m256 vexp_neg = vectorized_exp_avx2(vneg);  // Works because -g < 0
+                        __m256 vsigmoid_positive = _mm256_div_ps(vone, _mm256_add_ps(vone, vexp_neg));
+                        
+                        // For g <= 0: sigmoid = exp(g) / (1 + exp(g))
+                        // But exp(g) for g <= 0: use exp(g) = 1 / exp(-g)
+                        __m256 vexp_g = vectorized_exp_avx2(vg);  // Works because g <= 0
+                        __m256 vsigmoid_negative = _mm256_div_ps(vexp_g, _mm256_add_ps(vone, vexp_g));
+                        
+                        // Blend based on sign
+                        __m256 vsigmoid = _mm256_blendv_ps(vsigmoid_negative, vsigmoid_positive, g_positive_mask);
                         _mm256_storeu_ps(&gate[d], vsigmoid);
                     }
                     for (int d = (hidden_dim / 8) * 8; d < hidden_dim; d++) {
@@ -209,7 +236,9 @@ void core_recurrence_fused_cpu(
                                             gamma[base_idx + d] * h_prev[base_idx + d];
                     }
                     #elif defined(__AVX2__)
-                    for (int d = 0; d < hidden_dim - 7; d += 8) {
+                    // AVX2 processes 8 elements at once
+                    // Fix: Use <= instead of < to handle hidden_dim=8 correctly
+                    for (int d = 0; d <= hidden_dim - 8; d += 8) {
                         __m256 vz = _mm256_loadu_ps(&z_t[base_idx + d]);
                         __m256 vg = _mm256_loadu_ps(&gate[d]);
                         __m256 vh = _mm256_loadu_ps(&h_prev[base_idx + d]);
@@ -242,13 +271,19 @@ void core_recurrence_fused_cpu(
             for (int t = 0; t < seq_len; t++) {
                 int base_idx = b * seq_len * hidden_dim + t * hidden_dim;
                 
-                // 1. Matrix-vector multiply: g = W_g @ h_prev
-                optimized_sgemv(
-                    hidden_dim, hidden_dim, 1.0f,
-                    W_g, hidden_dim,
-                    &h_prev[base_idx], 1,
-                    0.0f, gate, 1
-                );
+                // 1. Matrix-vector multiply: g = h_prev @ W_g.t()
+                // PyTorch: h_prev @ W_g.t() = (hidden_dim,) @ (hidden_dim, hidden_dim) = (hidden_dim,)
+                // For row-major W_g: gate[j] = sum_i(h_prev[i] * W_g[j, i])
+                // Compute manually for correctness
+                for (int j = 0; j < hidden_dim; j++) {
+                    float sum = 0.0f;
+                    for (int i = 0; i < hidden_dim; i++) {
+                        // h_prev @ W_g.t(): gate[j] = sum_i(h_prev[i] * W_g[j, i])
+                        // For row-major W_g: W_g[j, i] is at index j * hidden_dim + i
+                        sum += h_prev[base_idx + i] * W_g[j * hidden_dim + i];
+                    }
+                    gate[j] = sum;
+                }
                 
                 // 2. Vectorized sigmoid: σ(g) = 1 / (1 + exp(-g))
                 #if defined(__AVX512F__) && defined(__AVX512DQ__)
@@ -264,7 +299,9 @@ void core_recurrence_fused_cpu(
                     gate[d] = 1.0f / (1.0f + std::exp(-gate[d]));
                 }
                 #elif defined(__AVX2__)
-                for (int d = 0; d < hidden_dim - 7; d += 8) {
+                // AVX2 processes 8 elements at once
+                // Fix: Use <= instead of < to handle hidden_dim=8 correctly
+                for (int d = 0; d <= hidden_dim - 8; d += 8) {
                     __m256 vg = _mm256_loadu_ps(&gate[d]);
                     __m256 vneg = _mm256_mul_ps(vg, _mm256_set1_ps(-1.0f));
                     __m256 vexp = vectorized_exp_avx2(vneg);
@@ -300,7 +337,9 @@ void core_recurrence_fused_cpu(
                                         gamma[base_idx + d] * h_prev[base_idx + d];
                 }
                 #elif defined(__AVX2__)
-                for (int d = 0; d < hidden_dim - 7; d += 8) {
+                // AVX2 processes 8 elements at once
+                // Fix: Use <= instead of < to handle hidden_dim=8 correctly
+                for (int d = 0; d <= hidden_dim - 8; d += 8) {
                     __m256 vz = _mm256_loadu_ps(&z_t[base_idx + d]);
                     __m256 vg = _mm256_loadu_ps(&gate[d]);
                     __m256 vh = _mm256_loadu_ps(&h_prev[base_idx + d]);
