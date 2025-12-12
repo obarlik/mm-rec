@@ -19,10 +19,14 @@ def verify_mm_rec_model():
         "num_heads": 4,
         "num_memories": 1,
         "mem_dim": 32,
-        "max_seq_len": 128,
+        "max_seq_len": 64,     # Multiple of 16
         "dropout": 0.0,
         "use_hem": False,      # Keep it simple first
-        "use_dpg": False
+        "use_dpg": False,
+        # Sparse Config
+        "use_sparse": True,
+        "sparse_chunk_size": 16, # Small chunk for testing
+        "num_experts": 4
     }
     
     print(f"📋 Model Config: {config}")
@@ -34,7 +38,7 @@ def verify_mm_rec_model():
         
         # 2. Create Dummy Input
         batch_size = 2
-        seq_len = 32
+        seq_len = 64
         input_ids = torch.randint(0, config["vocab_size"], (batch_size, seq_len))
         print(f"🔹 Input Shape: {input_ids.shape}")
         

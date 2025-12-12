@@ -52,7 +52,11 @@ class MMRecModel(nn.Module):
         dpg_rank: int = 128,             # Low-rank projection dimension (D -> 128 -> D)
         # UBÖO Parameters
         use_uboo: bool = False,          # Enable UBÖO mechanism
-        lambda_P: float = 0.1            # Scaling factor for auxiliary loss
+        lambda_P: float = 0.1,           # Scaling factor for auxiliary loss
+        # Sparse FFN Parameters
+        use_sparse: bool = False,
+        sparse_chunk_size: int = 128,
+        num_experts: int = 64
     ):
         super().__init__()
         self.vocab_size = vocab_size
@@ -76,6 +80,11 @@ class MMRecModel(nn.Module):
         # UBÖO Configuration
         self.use_uboo = use_uboo
         self.lambda_P = lambda_P  # Scaling factor for auxiliary loss
+
+        # Sparse Configuration
+        self.use_sparse = use_sparse
+        self.sparse_chunk_size = sparse_chunk_size
+        self.num_experts = num_experts
         
         # Embedding layer
         self.embedding = nn.Embedding(vocab_size, model_dim)
@@ -120,8 +129,13 @@ class MMRecModel(nn.Module):
                 dropout=dropout,
                 use_hem=use_hem,
                 pe_dim=self.pe_dim,
+                # DPG
                 use_dpg=use_dpg,
-                dpg_rank=dpg_rank
+                dpg_rank=dpg_rank,
+                # Sparse
+                use_sparse=self.use_sparse,
+                sparse_chunk_size=self.sparse_chunk_size,
+                num_experts=self.num_experts
             )
             for _ in range(num_layers)
         ])
@@ -179,8 +193,15 @@ class MMRecModel(nn.Module):
         input_ids: torch.Tensor,
         memory_states: Optional[List[MemoryState]] = None,
         chunk_size: Optional[int] = None,
-        return_auxiliary_loss: bool = False
+        return_auxiliary_loss: bool = False,
+        router_threshold: float = 0.0
     ) -> torch.Tensor:
+        """
+        ...
+        router_threshold: Confidence threshold for Sparse LSH Router (default: 0.0).
+                          Values > 0.0 enable "Strict Mode".
+                          Values <= 0.0 enable "Creative Mode".
+        """
         """
         Forward pass through complete MM-Rec model.
         
@@ -319,8 +340,14 @@ class MMRecModel(nn.Module):
                     else:
                         x, updated_state = result
                         L_Aux_layer = None
+                        L_Aux_layer = None
                 else:
-                    result = block(x, memory_states[i], return_auxiliary_loss=self.use_uboo and return_auxiliary_loss)
+                    result = block(
+                        x, 
+                        memory_states[i], 
+                        return_auxiliary_loss=self.use_uboo and return_auxiliary_loss,
+                        router_threshold=router_threshold
+                    )
                     if isinstance(result, tuple) and len(result) == 3:
                         x, updated_state, L_Aux_layer = result
                     else:
