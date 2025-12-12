@@ -1,0 +1,11 @@
+{
+    "job_name": "stage1_gpu_training",
+    "model_dim": 64,
+    "num_layers": 2,
+    "num_heads": 2,
+    "ffn_dim": 128,
+    "num_epochs": 10,
+    "batch_size": 16,
+    "learning_rate": 0.001,
+    "max_length": 256
+}
