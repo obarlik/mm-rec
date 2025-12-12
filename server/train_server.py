@@ -281,4 +281,4 @@ if __name__ == "__main__":
     print("🚀 Starting MM-Rec Training Server...")
     print(f"📁 Workspace: {WORKSPACE_DIR.absolute()}")
     print(f"💾 Checkpoints: {CHECKPOINTS_DIR.absolute()}")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
