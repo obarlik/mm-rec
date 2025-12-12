@@ -63,7 +63,8 @@ class TrainingJob:
             
             # Import training modules
             import sys
-            sys.path.insert(0, str(WORKSPACE_DIR / "mm-rec"))
+            # Code is extracted to workspace root
+            sys.path.insert(0, str(WORKSPACE_DIR))
             
             from mm_rec.model import MMRecModel
             from mm_rec.tokenizers.openai_tokenizer import get_tokenizer
