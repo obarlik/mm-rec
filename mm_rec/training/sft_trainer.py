@@ -6,7 +6,7 @@ Handles chat format, loss masking, and OpenAI API compatibility
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Union
 from dataclasses import dataclass
 
 from ..data.chat_format import ChatFormatter, ChatMessage
@@ -456,7 +456,8 @@ class ChatCompletionAPI:
                     break
                     
                 # Append and Yield
-                generated = torch.cat([generated, next_token.unsqueeze(0)], dim=1)\n                token_text = self.tokenizer.decode([next_token.item()])
+                generated = torch.cat([generated, next_token.unsqueeze(0)], dim=1)
+                token_text = self.tokenizer.decode([next_token.item()])
                 
                 # Check stop sequences
                 should_stop = False
