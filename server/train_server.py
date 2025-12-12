@@ -76,7 +76,7 @@ class TrainingJob:
             tokenizer = get_tokenizer(vocab_size=100256)
             
             # Load data
-            data_path = WORKSPACE_DIR / "mm-rec" / "data" / "phase1" / "train.json"
+            data_path = WORKSPACE_DIR / "data" / "phase1" / "train.json"
             with open(data_path) as f:
                 data = json.load(f)[:5000]  # Limit for testing
             
