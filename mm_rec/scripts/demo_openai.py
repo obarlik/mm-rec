@@ -95,12 +95,47 @@ def main():
     except Exception as e:
         print(f"⚠️ Forward pass failed: {e}")
     
+    print("\n🌊 Testing Streaming & Explainability...")
+    try:
+        # Create API Interface
+        api = ChatCompletionAPI(model, tokenizer)
+        
+        # 1. Standard Request with Explainability
+        print("   Testing Standard Request (with Confidence):")
+        response = api.create(
+            messages=[{"role": "user", "content": "Explain quantum physics"}],
+            max_tokens=10,
+            device=device
+        )
+        conf = response["choices"][0]["logprobs"]["average_token_confidence"]
+        print(f"   ✅ Response: {response['choices'][0]['message']['content']}")
+        print(f"   📊 Confidence (Explainability): {conf}")
+        
+        # 2. Streaming Request
+        print("\n   Testing Streaming Request:")
+        stream = api.create(
+            messages=[{"role": "user", "content": "Count to 10"}],
+            max_tokens=10,
+            device=device,
+            stream=True
+        )
+        
+        print("   Stream Output: ", end="", flush=True)
+        for chunk in stream:
+            delta = chunk["choices"][0]["delta"]
+            if "content" in delta:
+                print(delta["content"], end="", flush=True)
+        print("\n   ✅ Stream completed!")
+        
+    except Exception as e:
+        print(f"⚠️ API Test failed: {e}")
+
     print("\n" + "="*80)
     print("✅ Demo completed successfully!")
     print("\n💡 Next steps:")
     print("   1. Install tiktoken: pip install tiktoken")
     print("   2. Run full training: python3 -m mm_rec.scripts.train_openai --create_sample_data")
-    print("   3. See OPENAI_COMPATIBILITY.md for details")
+    print("   3. System now supports streaming (yield) and confidence scores!")
     print("="*80)
     
     return 0
