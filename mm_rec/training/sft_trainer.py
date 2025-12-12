@@ -310,6 +310,7 @@ class ChatCompletionAPI:
         max_tokens: int = 100,
         temperature: float = 0.7,
         top_p: float = 1.0,
+        stop: Optional[Union[str, List[str]]] = None,  # OpenAI-compatible stop sequences
         device: torch.device = torch.device('cpu'),
         **kwargs
     ) -> Dict:
@@ -339,13 +340,22 @@ class ChatCompletionAPI:
         input_ids = self.tokenizer.encode(input_text, max_length=None, truncation=False)
         input_ids = torch.tensor([input_ids], dtype=torch.long, device=device)
         
+        # Normalize stop sequences
+        stop_sequences = []
+        if stop is not None:
+            if isinstance(stop, str):
+                stop_sequences = [stop]
+            else:
+                stop_sequences = list(stop)[:4]  # Max 4 like OpenAI
+        
         # Streaming Mode
         if kwargs.get('stream', False):
             return self._create_stream(
                 input_ids, 
                 max_tokens=max_tokens, 
                 temperature=temperature, 
-                top_p=top_p
+                top_p=top_p,
+                stop_sequences=stop_sequences
             )
         
         # Standard Mode with Explainability
@@ -356,7 +366,8 @@ class ChatCompletionAPI:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
-                return_logprobs=True
+                return_logprobs=True,
+                stop_sequences=stop_sequences
             )
         
         # Decode
@@ -364,6 +375,17 @@ class ChatCompletionAPI:
         
         # Extract assistant response
         assistant_response = self._extract_assistant_response(generated_text)
+        
+        # Check if stopped by stop sequence
+        finish_reason = "stop"
+        if stop_sequences:
+            for seq in stop_sequences:
+                if seq in assistant_response:
+                    # Truncate at stop sequence (don't include it)
+                    idx = assistant_response.index(seq)
+                    assistant_response = assistant_response[:idx]
+                    finish_reason = "stop"
+                    break
         
         # Calculate Confidence (Explainability)
         avg_confidence = torch.exp(token_logprobs).mean().item() if token_logprobs is not None else 0.0
@@ -394,7 +416,8 @@ class ChatCompletionAPI:
         input_ids: torch.Tensor,
         max_tokens: int,
         temperature: float,
-        top_p: float
+        top_p: float,
+        stop_sequences: Optional[List[str]] = None
     ):
         """Generator for streaming responses."""
         import time
@@ -433,16 +456,32 @@ class ChatCompletionAPI:
                     break
                     
                 # Append and Yield
-                generated = torch.cat([generated, next_token.unsqueeze(0)], dim=1)
-                token_text = self.tokenizer.decode([next_token.item()])
+                generated = torch.cat([generated, next_token.unsqueeze(0)], dim=1)\n                token_text = self.tokenizer.decode([next_token.item()])
                 
-                yield {
-                    "id": "chatcmpl-mmrec",
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "choices": [{"index": 0, "delta": {"content": token_text}, "finish_reason": None}],
-                    "confidence": probs[next_token].item()
-                }
+                # Check stop sequences
+                should_stop = False
+                if stop_sequences:
+                    # Decode current generation to check for stop
+                    current_text = self.tokenizer.decode(generated[0, input_ids.shape[1]:].tolist())
+                    for seq in stop_sequences:
+                        if seq in current_text:
+                            # Truncate at stop sequence
+                            idx = current_text.index(seq)
+                            token_text = current_text[idx-len(token_text):idx] if idx >= len(token_text) else ""
+                            should_stop = True
+                            break
+                
+                if token_text:  # Only yield if there's content
+                    yield {
+                        "id": "chatcmpl-mmrec",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "choices": [{"index": 0, "delta": {"content": token_text}, "finish_reason": None}],
+                        "confidence": probs[next_token].item()
+                    }
+                
+                if should_stop:
+                    break
         
         # Final finish
         yield {
@@ -458,7 +497,8 @@ class ChatCompletionAPI:
         max_tokens: int,
         temperature: float,
         top_p: float,
-        return_logprobs: bool = False
+        return_logprobs: bool = False,
+        stop_sequences: Optional[List[str]] = None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Generate tokens with optional logprobs."""
         generated = input_ids.clone()
@@ -488,6 +528,14 @@ class ChatCompletionAPI:
             if return_logprobs:
                 token_logprob = torch.log(probs[next_token]).item()
                 logprobs_list.append(token_logprob)
+            
+            # Check stop sequences
+            if stop_sequences:
+                current_text = self.tokenizer.decode(generated[0, input_ids.shape[1]:].tolist())
+                for seq in stop_sequences:
+                    if seq in current_text:
+                        # Stop generation (will truncate in create())
+                        break
             
             # Stop at EOS
             if next_token.item() == self.tokenizer.eos_token_id:
