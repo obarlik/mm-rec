@@ -245,8 +245,22 @@ def test_sparse_expert_utilization():
     def hook_fn(module, input, output):
         if len(output) == 3:
             _, expert_indices, _ = output
-            for idx in expert_indices[0].tolist():
-                expert_usage[idx] = expert_usage.get(idx, 0) + 1
+            # expert_indices is a tensor, convert to list
+            if expert_indices.dim() > 1:
+                indices = expert_indices[0].tolist()
+            else:
+                indices = expert_indices.tolist()
+            
+            # Handle both single values and lists
+            if isinstance(indices, list):
+                for idx in indices:
+                    if isinstance(idx, list):
+                        for i in idx:
+                            expert_usage[i] = expert_usage.get(i, 0) + 1
+                    else:
+                        expert_usage[idx] = expert_usage.get(idx, 0) + 1
+            else:
+                expert_usage[indices] = expert_usage.get(indices, 0) + 1
     
     model.blocks[0].ffn.router.register_forward_hook(hook_fn)
     
