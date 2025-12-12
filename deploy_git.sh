@@ -39,7 +39,7 @@ fi
 cd ../..
 
 # Verify GPU
-python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}'); print(f'GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else None}')"
+python -c 'import torch; print(f"CUDA: {torch.cuda.is_available()}"); print(f"GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else None}")'
 
 # Start server
 nohup python server/train_server.py > server.log 2>&1 &
