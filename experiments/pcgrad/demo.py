@@ -48,11 +48,20 @@ def pcgrad_step(model: nn.Module, optimizer, x, y1, y2):
     loss2 = torch.nn.functional.mse_loss(out2, y2)
 
     params = [p for p in model.parameters() if p.requires_grad]
-    g1 = torch.autograd.grad(loss1, params, retain_graph=True, allow_unused=False)
-    g2 = torch.autograd.grad(loss2, params, allow_unused=False)
+    g1 = torch.autograd.grad(loss1, params, retain_graph=True, allow_unused=True)
+    g2 = torch.autograd.grad(loss2, params, allow_unused=True)
 
     proj_grads: List[torch.Tensor] = []
     for g1_p, g2_p in zip(g1, g2):
+        if g1_p is None and g2_p is None:
+            proj_grads.append(None)
+            continue
+        if g1_p is None:
+            proj_grads.append(g2_p)
+            continue
+        if g2_p is None:
+            proj_grads.append(g1_p)
+            continue
         # Flatten to compute dot
         g1_flat = g1_p.view(-1)
         g2_flat = g2_p.view(-1)
@@ -65,7 +74,8 @@ def pcgrad_step(model: nn.Module, optimizer, x, y1, y2):
 
     with torch.no_grad():
         for p, g in zip(params, proj_grads):
-            p.grad = g
+            if g is not None:
+                p.grad = g
     optimizer.step()
     return loss1.item(), loss2.item()
 
