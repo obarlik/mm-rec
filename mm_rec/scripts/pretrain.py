@@ -44,12 +44,12 @@ class PreTrainingDataLoader:
         self,
         data_files: List[str],
         tokenizer,
-        seq_len: int = 2048,
+        seq_len: Optional[int] = 2048,  # None = infinite context
         batch_size: int = 4
     ):
         self.data_files = data_files
         self.tokenizer = tokenizer
-        self.seq_len = seq_len
+        self.seq_len = seq_len  # Can be None for infinite context
         self.batch_size = batch_size
         self.texts = []
         self._load_data()
@@ -96,10 +96,18 @@ class PreTrainingDataLoader:
             text = self.texts[torch.randint(0, len(self.texts), (1,)).item()]
             
             # Tokenize
+            # If seq_len is None, no truncation (infinite context!)
+            if self.seq_len is not None:
+                max_length = self.seq_len + 1  # +1 for target
+                truncation = True
+            else:
+                max_length = None  # Infinite!
+                truncation = False
+            
             tokens = self.tokenizer.encode(
                 text,
-                max_length=self.seq_len + 1,  # +1 for target
-                truncation=True,
+                max_length=max_length,
+                truncation=truncation,
                 padding=False
             )
             
@@ -114,8 +122,15 @@ class PreTrainingDataLoader:
         if not batch_inputs:
             return None
         
-        # Pad to same length (use seq_len + 1 as max)
-        max_len = min(max(len(ids) for ids in batch_inputs), self.seq_len + 1)
+        # Determine max length for this batch
+        if self.seq_len is not None:
+            # Fixed length mode: pad/truncate to seq_len + 1
+            max_len = self.seq_len + 1
+        else:
+            # Variable length mode: use longest sequence in batch
+            max_len = max(len(ids) for ids in batch_inputs)
+        
+        # Pad to same length
         padded_batch = []
         for ids in batch_inputs:
             if len(ids) > max_len:
@@ -134,23 +149,8 @@ class PreTrainingDataLoader:
                     # If empty, return None
                     return None
         
-        # Stack and ensure correct shape
+        # Stack
         batch_tensor = torch.stack(padded_batch[:self.batch_size]).to(device)
-        
-        # Ensure all sequences have same length
-        if batch_tensor.size(1) != self.seq_len + 1:
-            # Truncate or pad to exact length
-            current_len = batch_tensor.size(1)
-            if current_len > self.seq_len + 1:
-                batch_tensor = batch_tensor[:, :self.seq_len + 1]
-            elif current_len < self.seq_len + 1:
-                padding = torch.zeros(
-                    self.batch_size, 
-                    self.seq_len + 1 - current_len, 
-                    dtype=batch_tensor.dtype, 
-                    device=device
-                )
-                batch_tensor = torch.cat([batch_tensor, padding], dim=1)
         
         return batch_tensor
 

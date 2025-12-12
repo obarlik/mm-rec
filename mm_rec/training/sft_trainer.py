@@ -17,7 +17,7 @@ from ..tokenizers.openai_tokenizer import get_tokenizer
 class SFTConfig:
     """Configuration for SFT training."""
     model_name: str = "gpt-4"
-    max_length: int = 2048
+    max_length: Optional[int] = 2048  # None = infinite context
     only_predict_assistant: bool = True
     label_smoothing: float = 0.0
     ignore_index: int = -100
@@ -335,8 +335,8 @@ class ChatCompletionAPI:
         # Format input
         input_text = self.chat_formatter.format_messages(chat_messages)
         
-        # Tokenize
-        input_ids = self.tokenizer.encode(input_text, max_length=2048, truncation=True)
+        # Tokenize (no hardcoded limit - use model's capability)
+        input_ids = self.tokenizer.encode(input_text, max_length=None, truncation=False)
         input_ids = torch.tensor([input_ids], dtype=torch.long, device=device)
         
         # Streaming Mode
