@@ -310,7 +310,8 @@ class ChatCompletionAPI:
         max_tokens: int = 100,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        device: torch.device = torch.device('cpu')
+        device: torch.device = torch.device('cpu'),
+        **kwargs
     ) -> Dict:
         """
         Create chat completion (OpenAI API format).
@@ -338,14 +339,24 @@ class ChatCompletionAPI:
         input_ids = self.tokenizer.encode(input_text, max_length=2048, truncation=True)
         input_ids = torch.tensor([input_ids], dtype=torch.long, device=device)
         
-        # Generate
+        # Streaming Mode
+        if kwargs.get('stream', False):
+            return self._create_stream(
+                input_ids, 
+                max_tokens=max_tokens, 
+                temperature=temperature, 
+                top_p=top_p
+            )
+        
+        # Standard Mode with Explainability
         self.model.eval()
         with torch.no_grad():
-            generated_ids = self._generate(
+            generated_ids, token_logprobs = self._generate(
                 input_ids,
                 max_tokens=max_tokens,
                 temperature=temperature,
-                top_p=top_p
+                top_p=top_p,
+                return_logprobs=True
             )
         
         # Decode
@@ -354,14 +365,91 @@ class ChatCompletionAPI:
         # Extract assistant response
         assistant_response = self._extract_assistant_response(generated_text)
         
+        # Calculate Confidence (Explainability)
+        avg_confidence = torch.exp(token_logprobs).mean().item() if token_logprobs is not None else 0.0
+        
         return {
+            "id": "chatcmpl-mmrec",
+            "object": "chat.completion",
             "choices": [{
                 "message": {
                     "role": "assistant",
                     "content": assistant_response
                 },
-                "finish_reason": "stop"
-            }]
+                "finish_reason": "stop",
+                "logprobs": {
+                    "average_token_confidence": f"{avg_confidence:.2%}",
+                    "token_logprobs": token_logprobs.tolist() if token_logprobs is not None else []
+                }
+            }],
+            "usage": {
+                "prompt_tokens": len(input_ids[0]),
+                "completion_tokens": len(generated_ids[0]),
+                "total_tokens": len(input_ids[0]) + len(generated_ids[0])
+            }
+        }
+    
+    def _create_stream(
+        self,
+        input_ids: torch.Tensor,
+        max_tokens: int,
+        temperature: float,
+        top_p: float
+    ):
+        """Generator for streaming responses."""
+        import time
+        self.model.eval()
+        
+        generated = input_ids.clone()
+        
+        # 1. Yield Role
+        yield {
+            "id": "chatcmpl-mmrec",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]
+        }
+        
+        with torch.no_grad():
+            for _ in range(max_tokens):
+                logits = self.model(generated)
+                next_token_logits = logits[0, -1, :] / temperature
+                
+                # Sampling
+                if top_p < 1.0:
+                    sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
+                    cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                    sorted_indices_to_remove = cumulative_probs > top_p
+                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                    sorted_indices_to_remove[..., 0] = 0
+                    indices_to_remove = sorted_indices[sorted_indices_to_remove]
+                    next_token_logits[indices_to_remove] = float('-inf')
+                
+                probs = F.softmax(next_token_logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+                
+                # Check EOS
+                if next_token.item() == self.tokenizer.eos_token_id:
+                    break
+                    
+                # Append and Yield
+                generated = torch.cat([generated, next_token.unsqueeze(0)], dim=1)
+                token_text = self.tokenizer.decode([next_token.item()])
+                
+                yield {
+                    "id": "chatcmpl-mmrec",
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "choices": [{"index": 0, "delta": {"content": token_text}, "finish_reason": None}],
+                    "confidence": probs[next_token].item()
+                }
+        
+        # Final finish
+        yield {
+            "id": "chatcmpl-mmrec",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
         }
     
     def _generate(
@@ -369,17 +457,21 @@ class ChatCompletionAPI:
         input_ids: torch.Tensor,
         max_tokens: int,
         temperature: float,
-        top_p: float
-    ) -> torch.Tensor:
-        """Generate tokens (simplified - implement proper sampling)."""
-        # Simplified generation - in practice, use proper sampling
+        top_p: float,
+        return_logprobs: bool = False
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Generate tokens with optional logprobs."""
         generated = input_ids.clone()
+        logprobs_list = [] if return_logprobs else None
         
         for _ in range(max_tokens):
             logits = self.model(generated)
             next_token_logits = logits[0, -1, :] / temperature
             
-            # Top-p sampling (simplified)
+            # Save probabilities before sampling if needed
+            probs = F.softmax(next_token_logits, dim=-1)
+            
+            # Top-p sampling
             if top_p < 1.0:
                 sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
                 cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
@@ -388,17 +480,25 @@ class ChatCompletionAPI:
                 sorted_indices_to_remove[..., 0] = 0
                 indices_to_remove = sorted_indices[sorted_indices_to_remove]
                 next_token_logits[indices_to_remove] = float('-inf')
+                probs = F.softmax(next_token_logits, dim=-1)
             
-            # Sample
-            probs = F.softmax(next_token_logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)
             generated = torch.cat([generated, next_token.unsqueeze(0)], dim=1)
+            
+            if return_logprobs:
+                token_logprob = torch.log(probs[next_token]).item()
+                logprobs_list.append(token_logprob)
             
             # Stop at EOS
             if next_token.item() == self.tokenizer.eos_token_id:
                 break
         
-        return generated
+        # Return generated sequence (excluding input)
+        generated_only = generated[:, input_ids.shape[1]:]
+        
+        if return_logprobs:
+            return generated_only, torch.tensor(logprobs_list)
+        return generated_only, None
     
     def _extract_assistant_response(self, text: str) -> str:
         """Extract assistant response from generated text."""
