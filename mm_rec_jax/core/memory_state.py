@@ -124,24 +124,33 @@ class MemoryState(struct.PyTreeNode):
                  # Case 2: Wrap Around
                  # Part 1: idx to end
                  part1_len = num_slots - idx
-                 part1_k = new_k[:part1_len]
-                 part1_v = new_v[:part1_len]
+                 
+                 # Dynamic Slice instead of new_k[:part1_len]
+                 part1_k = jax.lax.dynamic_slice(new_k, (0, 0), (part1_len, new_k.shape[1]))
+                 part1_v = jax.lax.dynamic_slice(new_v, (0, 0), (part1_len, new_v.shape[1]))
                  
                  k = jax.lax.dynamic_update_slice(k, part1_k, (idx, 0))
                  v = jax.lax.dynamic_update_slice(v, part1_v, (idx, 0))
                  
-                 part1_age = jnp.arange(seq_len)[::-1][:part1_len]
+                 # Age Part 1
+                 # jnp.arange(seq_len)[::-1] is static size
+                 # need slice
+                 full_new_age = jnp.arange(seq_len)[::-1]
+                 part1_age = jax.lax.dynamic_slice(full_new_age, (0,), (part1_len,))
                  age = jax.lax.dynamic_update_slice(age, part1_age, (idx,))
                  
                  # Part 2: 0 to remaining
+                 # part2_len = seq_len - part1_len (dynamic)
+                 # We want to start at part1_len
                  part2_len = seq_len - part1_len
-                 part2_k = new_k[part1_len:]
-                 part2_v = new_v[part1_len:]
+                 
+                 part2_k = jax.lax.dynamic_slice(new_k, (part1_len, 0), (part2_len, new_k.shape[1]))
+                 part2_v = jax.lax.dynamic_slice(new_v, (part1_len, 0), (part2_len, new_v.shape[1]))
                  
                  k = jax.lax.dynamic_update_slice(k, part2_k, (0, 0))
                  v = jax.lax.dynamic_update_slice(v, part2_v, (0, 0))
                  
-                 part2_age = jnp.arange(seq_len)[::-1][part1_len:]
+                 part2_age = jax.lax.dynamic_slice(full_new_age, (part1_len,), (part2_len,))
                  age = jax.lax.dynamic_update_slice(age, part2_age, (0,))
                  
                  return k, v, age
