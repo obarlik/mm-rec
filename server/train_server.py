@@ -73,7 +73,10 @@ class TrainingJob:
             
             # Setup
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            tokenizer = get_tokenizer(vocab_size=100256)
+            # Initialize tokenizer without hardcoded size (tiktoken will set it correct, e.g. 100277)
+            tokenizer = get_tokenizer()
+            vocab_size = tokenizer.vocab_size
+            print(f"ℹ️  Tokenizer initialized with vocab_size={vocab_size}")
             
             # Load data
             data_path = WORKSPACE_DIR / "data" / "phase1" / "train.json"
@@ -88,7 +91,7 @@ class TrainingJob:
             
             # Create model
             model = MMRecModel(
-                vocab_size=100256,
+                vocab_size=vocab_size,
                 model_dim=self.config.model_dim,
                 num_layers=self.config.num_layers,
                 num_heads=self.config.num_heads,
