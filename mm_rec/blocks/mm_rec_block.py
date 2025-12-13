@@ -522,89 +522,52 @@ class MMRecBlock(nn.Module):
         # Update h_prev for next chunk boundaries (if chunking is used)
         h_prev = h_final
         
-        # 3. Post-Recurrence Processing (Attention + FFN)
-        # Now that we have the full 'h_t' sequence (output), we can process Attention and FFN
-        # in parallel for the whole sequence!
+        # 3. Post-Recurrence Processing (Vectorized)
         
         # Output from recurrence is [batch, seq_len, model_dim] aka h_t sequence
         h_sequence = output
         
         # Step 7: Multi-Memory Attention (Parallel over sequence)
-        # Note: MultiMemoryAttention likely expects [batch, seq_len, dim]
-        # We need to check if it supports full sequence processing.
-        # Assuming it does or we loop. Given optimization, we should process efficiently.
-        # But wait, the original code called it per step with `state`.
-        # `state` updates sequentially inside the loop...
+        # We process the entire sequence at once.
+        # Note: q_all, v_all are already [batch, seq_len, dim]
         
-        # CRITICAL: The original code updated `state` (KV cache) sequentially inside the loop.
-        # "state.update_state_sequential(...)".
-        # If MultiMemoryAttention depends on the *current* updated state at step t, 
-        # then we cannot fully parallelize unless we unroll or assume causal masking handles it.
-        # However, for TRAIN mode, we usually use full Attention with causal mask.
-        # Let's assume standard causal attention.
+        mem_context = self.multi_mem_attention(h_sequence, hds, state, q_input=q_all)
         
-        # For strict fidelity to the "sequential update of state" mechanism:
-        # We must verify if 'multi_mem_attention' uses the 'state' that was just updated.
-        # In the original loop:
-        #   h_t calculated -> Attention(h_t, state) -> state.update(h_t)
-        # So Attention used the *previous* state (before update of step t).
-        # This confirms we can process attention using the state accumulated so far.
+        # Residual Connection
+        # h_attended = h_t + attention + v*0.1
+        # v_all * 0.1 is broadcasting 0.1
+        v_contribution = v_all * 0.1
+        h_attended = h_sequence + mem_context + v_contribution
         
-        # Since we removed the loop, we need to defer state updates? 
-        # Or bulk update?
-        # For Short-Term memory, it's just a circular buffer/linear buffer.
-        # We can bulk update it.
+        # Step 8: Dropout & Residual
+        # x_residual = x + dropout(h_attended)
+        # Note: 'x' is the input to the block. 
+        # In HEM/Kernel fusion, 'x' [batch, seq_len, dim] is available.
+        x_residual = x + self.dropout_layer(h_attended)
         
-        # Re-implementing Post-processing efficiently:
-        # We'll use a loop for now to be safe with state updates and Attention, 
-        # BUT this loop is much lighter than the recurrence loop because:
-        # 1. No dependency on h_{t-1} for computation (just for state).
-        # 2. Attention is the heavy part, but maybe we can batch it?
+        # Step 9: Feed-Forward Network (Parallel)
+        x_norm2 = self.norm2(x_residual)
         
-        # Actually, let's look at standard Transformer: Attention is O(N^2) or O(N log N).
-        # Here `multi_mem_attention` typically handles the sequence if passed input [B, S, D].
-        # Let's try to pass the whole sequence.
+        if hasattr(self.ffn, 'router'):
+             # Sparse FFN likely supports sequence input too
+            ffn_out = self.ffn(x_norm2, router_threshold=router_threshold)
+        else:
+            ffn_out = self.ffn(x_norm2)
+            
+        final_output = x_residual + ffn_out
         
-        # Note: To maintain 100% fidelity with the "sequential state update" creating side-effects,
-        # we might need to restore the loop ONLY for Attention + State Update if they are stateful.
-        # But `h_t` generation (the bottleneck) is now fast.
+        # Step 10: Store Output & Update State
+        # 'final_output' is [batch, seq_len, dim]
+        output = final_output
         
-        # Let's iterate for Attention/FFN application to ensure state correctness.
-        # This loop will be faster because `h_t` is already known.
-        
+        # Step 11: State Update (Sequential but fast)
+        # We still need to update the state step-by-step for the next block/chunk.
+        # Since this is just memory copy, it's fast.
+        # We can optimize this if State supports bulk update, but for now loop is fine
+        # as it doesn't involve heavy compute.
         for t in range(seq_len):
-            h_t = h_sequence[:, t:t+1, :] # [batch, 1, model_dim]
-            q_t = q_all[:, t:t+1, :]
-            v_t = v_all[:, t:t+1, :]
-            
-            # Attention
-            mem_context_t = self.multi_mem_attention(h_t, hds, state, q_input=q_t)
-            
-            # V contribution (Residual)
-            v_contribution = v_t * 0.1
-            h_attended_t = h_t + mem_context_t + v_contribution
-            
-            # Residual
-            x_t = x[:, t:t+1, :]
-            x_residual_t = x_t + self.dropout_layer(h_attended_t)
-            
-            # FFN
-            x_norm2_t = self.norm2(x_residual_t)
-            if hasattr(self.ffn, 'router'):
-                ffn_out_t = self.ffn(x_norm2_t, router_threshold=router_threshold)
-            else:
-                ffn_out_t = self.ffn(x_norm2_t)
-            
-            output_t = x_residual_t + ffn_out_t
-            
-            # Store final output
-            # Overwrite the 'h_sequence' buffer with final output? No, reuse 'output' logic?
-            # 'output' currently holds h_t. We can overwrite it with Final Output.
-            output[:, t:t+1, :] = output_t
-            
-            # State Update (Essential for next steps/layers)
-            h_t_for_state = h_t.squeeze(1)
-            state.update_state_sequential(bank_type='short', new_k=h_t_for_state, new_v=h_t_for_state, step=t)
+            h_t_val = h_sequence[:, t, :] # [batch, dim]
+            state.update_state_sequential(bank_type='short', new_k=h_t_val, new_v=h_t_val, step=t)
 
         
         # Update long-term memory (less frequent, typically at block level)
