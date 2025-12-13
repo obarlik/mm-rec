@@ -47,7 +47,10 @@ def create_train_state(rng, config):
     
     params = model.init(rng, dummy_input, dummy_state)['params']
     
-    tx = optax.adamw(learning_rate=config['learning_rate'])
+    tx = optax.chain(
+        optax.clip_by_global_norm(1.0),
+        optax.adamw(learning_rate=config['learning_rate'])
+    )
     
     return train_state.TrainState.create(
         apply_fn=model.apply,
@@ -93,8 +96,8 @@ def main():
     # dataset = SFTDataset(...)
     # For benchmark speed, generate random data
     print("ℹ️  Generating Random Data for Benchmark...")
-    batch_size = 32
-    seq_len = 512
+    batch_size = 16
+    seq_len = 256
     num_batches = 500
     
     data = [np.random.randint(0, 32000, (batch_size, seq_len)).astype(np.int32) for _ in range(num_batches)]
@@ -102,10 +105,10 @@ def main():
     # Setup Model (Config for Benchmark)
     config = {
         'vocab_size': 32000,
-        'model_dim': 128,
+        'model_dim': 64,
         'num_layers': 2,
-        'num_heads': 4,
-        'learning_rate': 3e-4 # Lower LR for stability
+        'num_heads': 2,
+        'learning_rate': 1e-3
     }
     
     # Setup Model
