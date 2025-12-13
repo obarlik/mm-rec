@@ -87,7 +87,19 @@ def train_step(state, batch, memory_state, rng):
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
     (loss, new_mem_state), grads = grad_fn(state.params)
     state = state.apply_gradients(grads=grads)
-    return state, loss, new_mem_state
+    
+    # Check Health Metrics for NaN prediction
+    grad_norm = optax.global_norm(grads)
+    # Check max value in Memory (proxy for hidden state saturation)
+    # We check Short Term Memory Key magnitude
+    state_max = jnp.max(jnp.abs(new_mem_state.short_term.k))
+    
+    metrics = {
+        'grad_norm': grad_norm,
+        'state_max': state_max
+    }
+    
+    return state, loss, new_mem_state, metrics
 
 # Manually JIT compilation to avoid decorator issues with arguments
 train_step = jax.jit(train_step, donate_argnums=(0, 2))
@@ -173,7 +185,7 @@ def main():
     print("   Compiling...")
     start = time.time()
     rng, step_rng = jax.random.split(rng)
-    state, loss, batched_mem_state = train_step(state, jnp.array(data[0]), batched_mem_state, step_rng)
+    state, loss, batched_mem_state, _ = train_step(state, jnp.array(data[0]), batched_mem_state, step_rng)
     print(f"   Compilation done in {time.time() - start:.2f}s")
     
     # Loop
@@ -183,12 +195,32 @@ def main():
         batch_np = data[i]
         batch_jax = jnp.array(batch_np) # Zero copy if possible
         
-        state, loss, batched_mem_state = train_step(state, batch_jax, batched_mem_state, step_rng)
+        state, loss, batched_mem_state, metrics = train_step(state, batch_jax, batched_mem_state, step_rng)
         
-        if i % 50 == 0:
-            elapsed = time.time() - t0
-            avg_speed = i / elapsed
-            print(f"Step {i}: Loss {loss:.4f} | Speed: {avg_speed:.2f} it/s")
+        # Periodic Monitoring
+        if i % 10 == 0:
+            # Check for NaN / Instability Risk
+            grad_norm = metrics['grad_norm']
+            state_max = metrics['state_max']
+            
+            # Simple "Predictive" Warning
+            warning_msg = ""
+            if state_max > 90.0:
+                warning_msg += " ⚠️ SATURATION RISK (State > 90)"
+            if grad_norm > 10.0:
+                 warning_msg += " ⚠️ EXPLOSION RISK (Grad > 10)"
+            
+            if i % 50 == 0:
+                elapsed = time.time() - t0
+                avg_speed = i / elapsed
+                
+                # Get VRAM Usage via nvidia-smi (Linux)
+                try:
+                    vram_mb = os.popen("nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits").read().strip()
+                except:
+                    vram_mb = "N/A"
+                    
+                print(f"Step {i}: Loss {loss:.4f} | Speed: {avg_speed:.2f} it/s | VRAM: {vram_mb} MiB | GNorm: {grad_norm:.2f} | MaxState: {state_max:.2f}{warning_msg}")
 
 if __name__ == '__main__':
     main()
