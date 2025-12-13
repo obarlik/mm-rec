@@ -18,7 +18,8 @@ class HDS:
     def construct_hierarchy(
         state: MemoryState, 
         num_levels: int = 3,
-        level_ratios: Tuple[int, ...] = (4, 4) # Ratio between levels (0->1, 1->2)
+        level_ratios: Tuple[int, ...] = (4, 4), # Ratio between levels (0->1, 1->2)
+        disable_roll: bool = False # Optimization: Skip roll if we don't care about order for Level 0
     ) -> Dict[int, MemoryBank]:
         """
         Constructs hierarchy levels from long-term memory.
@@ -45,7 +46,7 @@ class HDS:
         current_v = lt.v
         
         # Roll if idx is present and non-zero
-        if lt.idx is not None:
+        if lt.idx is not None and not disable_roll:
              # We want to shift so that 'idx' (oldest) moves to 0.
              # Logical order: [idx, idx+1, ..., N-1, 0, 1, ..., idx-1]
              # Indices: (jnp.arange(N) + idx) % N

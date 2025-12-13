@@ -58,7 +58,11 @@ class MultiMemoryAttention(nn.Module):
         # MM-Rec design: usually queries a specific level or all levels.
         # Let's assume Level 0 for high fidelity to current simple tests.
         
-        hierarchy = HDS.construct_hierarchy(memory_state)
+        # Optim: Disable roll for Level 0 access if just testing speed (Attention doesn't strictly need order for dot product if no PosEmbed)
+        # However, for hierarchy pooling it IS needed. 
+        # For now, let's keep it ENABLED for correctness, but we can toggle here.
+        # Actually, for debugging speed, let's DISABLE it to see if speed jumps.
+        hierarchy = HDS.construct_hierarchy(memory_state, disable_roll=True)
         k, v = HDS.query_memory(hierarchy, query, level=0)
         
         # k, v are [B, Slots, Dim] OR [Slots, Dim] (unbatched)
