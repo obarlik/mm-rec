@@ -382,7 +382,7 @@ async def update_server(restart: bool = True):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-SERVER_VERSION = "v0.2.1 (Windows Native + Debug)"
+SERVER_VERSION = "v0.2.2 (Data Upload + Stop)"
 
 @app.get("/api/health")
 async def health_check():
