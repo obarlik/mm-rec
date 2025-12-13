@@ -37,7 +37,7 @@ Write-Host "🚀 Starting new server..." -ForegroundColor Green
 conda activate mm-rec
 
 # Start server in background
-$Env:CUDA_LAUNCH_BLOCKING = "1"
+# CUDA_LAUNCH_BLOCKING removed for production speed
 Start-Process -FilePath "python" -ArgumentList "server\train_server.py" -WindowStyle Hidden -RedirectStandardOutput "server.log" -RedirectStandardError "server_error.log"
 
 Write-Host "✅ Server restarted!" -ForegroundColor Green

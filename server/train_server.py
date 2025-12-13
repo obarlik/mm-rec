@@ -386,8 +386,8 @@ async def update_server(restart: bool = True, force: bool = False):
                 ps_script = server_dir / "server" / "restart_server.ps1"
                 sh_script = server_dir / "server" / "restart_server.sh"
                 
-                if ps_script.exists():
-                    # Windows PowerShell/WSL
+                if ps_script.exists() and sys.platform == 'win32':
+                    # Windows PowerShell (Only on actual Windows)
                     subprocess.Popen(
                         ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps_script)],
                         cwd=server_dir,
@@ -422,7 +422,7 @@ async def update_server(restart: bool = True, force: bool = False):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-SERVER_VERSION = "v0.2.12 (Hotfix: Variable)"
+SERVER_VERSION = "v0.2.13 (Speed Fix: No Debug)"
 
 @app.get("/api/health")
 async def health_check():
