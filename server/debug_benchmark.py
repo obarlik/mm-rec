@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
+import sys
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 from mm_rec.tokenizers.openai_tokenizer import get_tokenizer
 from mm_rec.data.chat_format import ChatMessage
 from mm_rec.data.dataset import SFTDataset, SFTDataCollator
