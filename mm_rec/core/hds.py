@@ -103,14 +103,40 @@ class HierarchicalDataStructure(nn.Module):
         
         for level_idx in range(1, self.num_levels):
             # Pool from previous level
-            # Transpose for pooling: [batch, dim, num_slots]
-            k_pooled = self.pooling_layers[level_idx - 1](
-                k_current.transpose(1, 2)  # [batch, k_dim, num_slots]
-            ).transpose(1, 2)  # [batch, num_slots_new, k_dim]
+            # AdaptiveAvgPool1d expects [N, C, L] where L is the dimension to pool over.
+            # Here, L should be num_slots.
             
-            v_pooled = self.pooling_layers[level_idx - 1](
-                v_current.transpose(1, 2)  # [batch, v_dim, num_slots]
-            ).transpose(1, 2)  # [batch, num_slots_new, v_dim]
+            # Handle k_current (and v_current) which can be 3D or 4D
+            # 3D: [batch, num_slots, k_dim]
+            # 4D: [batch, num_memories, num_slots, k_dim] (e.g., if multiple memory banks are concatenated)
+            
+            # --- Pooling for Keys ---
+            if k_current.dim() == 4:
+                # Reshape from [B, M, S, D] to [B*M, D, S] for pooling
+                b, m, s, d = k_current.shape
+                k_input_for_pool = k_current.view(b * m, s, d).transpose(1, 2) # [B*M, D, S]
+                k_pooled_flat = self.pooling_layers[level_idx - 1](k_input_for_pool) # [B*M, D, new_S]
+                k_pooled = k_pooled_flat.transpose(1, 2).view(b, m, -1, d) # Reshape back to [B, M, new_S, D]
+            elif k_current.dim() == 3:
+                # Reshape from [B, S, D] to [B, D, S] for pooling
+                k_input_for_pool = k_current.transpose(1, 2) # [B, D, S]
+                k_pooled = self.pooling_layers[level_idx - 1](k_input_for_pool).transpose(1, 2) # [B, new_S, D]
+            else:
+                raise ValueError(f"Unsupported dimension for k_current: {k_current.dim()}")
+
+            # --- Pooling for Values ---
+            if v_current.dim() == 4:
+                # Reshape from [B, M, S, D] to [B*M, D, S] for pooling
+                b, m, s, d = v_current.shape
+                v_input_for_pool = v_current.view(b * m, s, d).transpose(1, 2) # [B*M, D, S]
+                v_pooled_flat = self.pooling_layers[level_idx - 1](v_input_for_pool) # [B*M, D, new_S]
+                v_pooled = v_pooled_flat.transpose(1, 2).view(b, m, -1, d) # Reshape back to [B, M, new_S, D]
+            elif v_current.dim() == 3:
+                # Reshape from [B, S, D] to [B, D, S] for pooling
+                v_input_for_pool = v_current.transpose(1, 2) # [B, D, S]
+                v_pooled = self.pooling_layers[level_idx - 1](v_input_for_pool).transpose(1, 2) # [B, new_S, D]
+            else:
+                raise ValueError(f"Unsupported dimension for v_current: {v_current.dim()}")
             
             self.levels_cache[level_idx] = {
                 'k': k_pooled,
