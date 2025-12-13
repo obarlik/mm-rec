@@ -5,9 +5,10 @@ import argparse
 import os
 
 # Prevent JAX from hogging all GPU memory (allows sharing)
-os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
-# Optional: Limit to 50% if needed, but false should suffice for demand-paging
-# os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.50'
+# CRITICAL: 'false' kills performance (syscall overhead).
+# Use MEM_FRACTION instead to reserve space without thrashing.
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'true'
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.85'
 
 import jax
 import jax.numpy as jnp
@@ -116,18 +117,18 @@ def main():
     # 1. Load Dataset (PyTorch)
     # dataset = SFTDataset(...)
     # For benchmark speed, generate random data
-    print("ℹ️  Generating Random Data for Benchmark (Medium)...")
-    batch_size = 32
+    print("ℹ️  Generating Random Data for Benchmark (Scaled Up)...")
+    batch_size = 64
     seq_len = 512
     num_batches = 500
     
     data = [np.random.randint(0, 32000, (batch_size, seq_len)).astype(np.int32) for _ in range(num_batches)]
     
-    # Setup Model (Config for Benchmark - MEDIUM)
-    # Testing throughput: Batch 32, Dim 128
+    # Setup Model (Config for Benchmark - SCALED UP)
+    # Testing throughput: Batch 64, Dim 256
     config = {
         'vocab_size': 32000,
-        'model_dim': 128,
+        'model_dim': 256,
         'num_layers': 2,
         'num_heads': 4,
         'learning_rate': 1e-4
