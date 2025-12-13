@@ -53,6 +53,21 @@ ssh onurbarlik@hotmail.com@phoenix 'echo $SHELL'
 # Should output: /bin/bash
 ```
 
+# 3. Training & Data Management
+```bash
+# Upload Data (HTTP - No Git required)
+python client/train_client.py --server http://192.168.1.86:8001 --action upload --file data/phase1/train.json
+
+# Submit Job
+python client/train_client.py --server http://192.168.1.86:8001 --action submit --config configs/stage2_full_features.json
+
+# Monitor Job
+python client/train_client.py --server http://192.168.1.86:8001 --action monitor --job-id <JOB_ID>
+
+# Stop Job
+python client/train_client.py --server http://192.168.1.86:8001 --action stop --job-id <JOB_ID>
+```
+
 ---
 
 ## Current Workaround
