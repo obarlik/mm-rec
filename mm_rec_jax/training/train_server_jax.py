@@ -20,8 +20,10 @@ def get_smart_memory_fraction(reserve_gb=4.0):
         )
         # Parse first GPU
         free_mib, total_mib = map(int, result.strip().split('\n')[0].split(', '))
+        used_before = total_mib - free_mib
         
-        # Calculate Target Allocation
+        print(f"🧠 Smart Memory: Total={total_mib}MiB, Free={free_mib}MiB")
+        print(f"   (Pre-existing Usage: {used_before}MiB by System/Other processes)")
         # Strategy: "Safe Minimum"
         # 4GB was too tight for Compilation/Autotuning.
         # We target 8 GB, which handles the 2GB chunks safely.
