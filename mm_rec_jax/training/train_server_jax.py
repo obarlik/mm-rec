@@ -58,7 +58,7 @@ def create_train_state(rng, config):
         tx=tx
     ), model
 
-@jax.jit
+@jax.jit(donate_argnums=(0, 2))
 def train_step(state, batch, memory_state, rng):
     def loss_fn(params):
         # Forward

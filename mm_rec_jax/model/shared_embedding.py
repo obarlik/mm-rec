@@ -10,7 +10,7 @@ class SharedEmbedding(nn.Module):
     def __call__(self, x, mode='embed'):
         # Define the embedding parameter explicitly to share it
         embedding = self.param('embedding', 
-                               nn.initializers.normal(stddev=1.0), 
+                               nn.initializers.normal(stddev=0.02), 
                                (self.vocab_size, self.model_dim))
         
         if mode == 'embed':
