@@ -268,11 +268,12 @@ async def list_jobs():
     }
 
 @app.post("/api/update")
-async def update_server():
-    """Pull latest code from git and restart server."""
+async def update_server(restart: bool = True):
+    """Pull latest code from git and optionally restart server."""
     try:
         import subprocess
         import os
+        import sys
         
         # Get current directory
         server_dir = Path(__file__).parent.parent
@@ -289,18 +290,33 @@ async def update_server():
         if result.returncode != 0:
             raise HTTPException(status_code=500, detail=f"Git pull failed: {result.stderr}")
         
-        # Restart server (will be handled by process manager or manual restart)
-        return {
+        response_data = {
             "status": "updated",
-            "message": "Code updated successfully. Server restart required.",
-            "git_output": result.stdout,
-            "note": "Please restart the server manually or use a process manager"
+            "message": "Code updated successfully.",
+            "git_output": result.stdout
         }
+        
+        # Auto-restart if requested
+        if restart:
+            response_data["message"] += " Server restarting..."
+            response_data["restart"] = True
+            
+            # Schedule restart after response is sent
+            async def restart_server():
+                await asyncio.sleep(1)  # Give time for response to be sent
+                os.execv(sys.executable, ['python'] + sys.argv)
+            
+            asyncio.create_task(restart_server())
+        else:
+            response_data["note"] = "Server restart required manually"
+        
+        return response_data
         
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=500, detail="Git pull timeout")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/health")
 async def health_check():
