@@ -15,4 +15,14 @@ Bu dizin, dağınık durumdaki Markdown dosyalarını konu başlıklarına göre
 - `mlops/`: MLOps özel spesifikasyonlar.
 - `misc/`: Diğer yardımcı notlar.
 
-Kurulum betiği `scripts/install/install_mkl.sh` altına taşındı. `mm_rec/core` altındaki kernel/algoritma açıklamaları kodla birlikte kalmaya devam ediyor.
+---
+
+### 🔥 JAX Migration (Current Active Architecture)
+Projects has pivoted to JAX for performance (>100 it/s).
+- **Setup**: [Environment Setup](setup/environment.md)
+- **Deployment**: [Git Workflow](workflow/deployment.md)
+- **Architecture**: [JAX Migration Specs](architecture/jax_migration.md)
+
+---
+
+**Legacy Note**: Files referring to `mm_rec` (PyTorch) directly are now reference material. Active development is in `mm_rec_jax/`.
