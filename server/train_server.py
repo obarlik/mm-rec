@@ -62,6 +62,7 @@ class TrainingJob:
             self.start_time = time.time()
             
             # Import training modules
+            import sys
             # Code is extracted to workspace root
             # sys.path.insert(0, str(WORKSPACE_DIR)) # DISABLED: Prefer local git code
             
