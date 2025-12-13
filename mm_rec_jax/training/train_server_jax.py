@@ -22,19 +22,20 @@ def get_smart_memory_fraction(reserve_gb=4.0):
         free_mib, total_mib = map(int, result.strip().split('\n')[0].split(', '))
         
         # Calculate Target Allocation
-        # Target = Free - Reserve
-        # Convert GB to MiB: 1GB = 1024MiB
-        reserve_mib = reserve_gb * 1024
-        target_mib = max(1024, free_mib - reserve_mib) # At least 1GB
+        # Strategy: "Minimum Necessary"
+        # We target a fixed 4 GB, which is plenty for this model size
+        target_mib = 4096 # 4 GB fixed
+        
+        # Ensure we don't exceed free memory
+        if target_mib > (free_mib - 500):
+            print(f"⚠️  Warning: 4GB requested but only {free_mib}MiB free. Using available.")
+            target_mib = max(1024, free_mib - 500)
         
         fraction = target_mib / total_mib
         
-        # Safety Clip (never take > 90%)
-        fraction = min(0.90, fraction)
-        
         print(f"🧠 Smart Memory: Free={free_mib}MiB, Total={total_mib}MiB")
-        print(f"   Allocating {target_mib}MiB ({fraction:.2%}) to JAX. Reserved {reserve_mib}MiB for system.")
-        return f"{fraction:.2f}"
+        print(f"   Targeting Minimal {target_mib}MiB ({fraction:.2%}) for JAX efficiency.")
+        return f"{fraction:.4f}"
         
     except Exception as e:
         print(f"⚠️  Could not detect GPU memory: {e}")
