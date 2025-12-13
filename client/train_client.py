@@ -169,6 +169,7 @@ class RemoteTrainer:
             else:
                 print(f"❌ Update failed: {response.text}")
                 return False
+        except Exception as e:
             print(f"❌ Update failed: {e}")
             return False
 

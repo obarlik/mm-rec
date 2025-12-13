@@ -215,10 +215,12 @@ class TrainingJob:
             self.status = "completed"
             
         except Exception as e:
+            import traceback
+            error_msg = f"{str(e)}\n{traceback.format_exc()}"
             self.status = "failed"
-            self.progress['error'] = str(e)
+            self.progress['error'] = str(e) # Keep short for status
             with open(self.log_file, 'a') as f:
-                f.write(f"\nERROR: {str(e)}\n")
+                f.write(f"\nERROR: {error_msg}\n")
 
 @app.post("/api/code/sync")
 async def sync_code(file: UploadFile = File(...)):

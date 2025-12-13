@@ -91,7 +91,8 @@ async def get_system_logs(log_type: str):
     if log_type == "gateway":
         log_file = SERVER_DIR.parent / "gateway.log"
     elif log_type == "server":
-        log_file = SERVER_DIR.parent / "server_internal.log"
+        # Log is created in CWD=SERVER_DIR
+        log_file = SERVER_DIR / "server_internal.log"
     else:
         raise HTTPException(status_code=400, detail="Invalid log type. Use 'gateway' or 'server'.")
         
