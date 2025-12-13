@@ -58,7 +58,6 @@ def create_train_state(rng, config):
         tx=tx
     ), model
 
-@jax.jit(donate_argnums=(0, 2))
 def train_step(state, batch, memory_state, rng):
     def loss_fn(params):
         # Forward
@@ -82,6 +81,9 @@ def train_step(state, batch, memory_state, rng):
     (loss, new_mem_state), grads = grad_fn(state.params)
     state = state.apply_gradients(grads=grads)
     return state, loss, new_mem_state
+
+# Manually JIT compilation to avoid decorator issues with arguments
+train_step = jax.jit(train_step, donate_argnums=(0, 2))
 
 def main():
     parser = argparse.ArgumentParser()
