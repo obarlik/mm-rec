@@ -5,10 +5,45 @@ import argparse
 import os
 
 # Prevent JAX from hogging all GPU memory (allows sharing)
-# CRITICAL: 'false' kills performance (syscall overhead).
-# Use MEM_FRACTION instead to reserve space without thrashing.
+import subprocess
+
+def get_smart_memory_fraction(reserve_gb=4.0):
+    """
+    Calculates the optimal JAX memory fraction based on currently free GPU memory.
+    Reserves 'reserve_gb' for system/other processes.
+    """
+    try:
+        # Get Memory Info: [Free, Total] in MiB from nvidia-smi
+        result = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=memory.free,memory.total", "--format=csv,noheader,nounits"],
+            encoding="utf-8"
+        )
+        # Parse first GPU
+        free_mib, total_mib = map(int, result.strip().split('\n')[0].split(', '))
+        
+        # Calculate Target Allocation
+        # Target = Free - Reserve
+        # Convert GB to MiB: 1GB = 1024MiB
+        reserve_mib = reserve_gb * 1024
+        target_mib = max(1024, free_mib - reserve_mib) # At least 1GB
+        
+        fraction = target_mib / total_mib
+        
+        # Safety Clip (never take > 90%)
+        fraction = min(0.90, fraction)
+        
+        print(f"🧠 Smart Memory: Free={free_mib}MiB, Total={total_mib}MiB")
+        print(f"   Allocating {target_mib}MiB ({fraction:.2%}) to JAX. Reserved {reserve_mib}MiB for system.")
+        return f"{fraction:.2f}"
+        
+    except Exception as e:
+        print(f"⚠️  Could not detect GPU memory: {e}")
+        print("   Fallback to default 30%")
+        return ".30"
+
+# Configure JAX Memory
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'true'
-os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.30' # ~7GB on 24GB card (Plenty for this model)
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = get_smart_memory_fraction(reserve_gb=2.0)
 
 import jax
 import jax.numpy as jnp
