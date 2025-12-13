@@ -610,11 +610,12 @@ class MMRecBlock(nn.Module):
                         ) from e
             else:
                 # GPU mode: Try Triton, fallback to Torch Native (Robust on Windows)
+                # The associative_scan_exponential wrapper now handles the fallback internally
+                # so we can just call it directly.
                 try:
                     cumprod_t = associative_scan_exponential(gamma_t_reshaped)
                 except (RuntimeError, ImportError):
-                    # GPU Triton failed/missing (common on Windows), use Torch Native GPU implementation
-                    # This uses torch.cumsum which IS GPU accelerated and fast
+                    # Double safety net
                     from ..core.associative_scan_torch import associative_scan_exponential_torch
                     cumprod_t = associative_scan_exponential_torch(gamma_t_reshaped)
             

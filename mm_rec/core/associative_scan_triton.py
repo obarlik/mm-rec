@@ -666,7 +666,7 @@ class AssociativeScanExponential(Function):
                 carry_in = carry_out.clone()
                 carry_out.zero_()
         
-        # If Triton failed, handle based on device
+            # If Triton failed, handle based on device
         if triton_failed:
             # On CPU, C++ extension is REQUIRED (no slow Python fallback)
             if not torch.cuda.is_available():
@@ -676,17 +676,10 @@ class AssociativeScanExponential(Function):
                     "   Fallback to slow Python implementation is DISABLED."
                 )
             
-            # On GPU, log warning but continue with slow fallback (last resort)
-            import warnings
-            warnings.warn(
-                "⚠️ CRITICAL: Triton kernel failed! Using slow CPU fallback (O(N) sequential).\n"
-                "   This will cause O(N²) memory growth for long sequences (100K+).\n"
-                "   Please check CUDA/Triton installation and kernel correctness.",
-                RuntimeWarning,
-                stacklevel=2
-            )
-            # Use slow Python fallback (only on GPU, as last resort)
-            log_cumsum = torch.cumsum(log_gamma_clamped, dim=2)
+            # On GPU, use Torch Native GPU implementation (Robust & Fast)
+            # This is much faster than CPU fallback and works on Windows
+            from .associative_scan_torch import associative_scan_exponential_torch
+            return associative_scan_exponential_torch(gamma) # Return directly
         
         # Step 5: Convert back to linear space with stability
         # Use max-subtraction pattern: exp(log_sum - max) * exp(max)
