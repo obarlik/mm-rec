@@ -243,13 +243,13 @@ async def run_benchmark():
     import sys
     import io
     from contextlib import redirect_stdout
-    import debug_speed
+    import debug_benchmark
     
     # Capture output
     f = io.StringIO()
     with redirect_stdout(f):
         try:
-            debug_speed.benchmark()
+            debug_benchmark.benchmark()
         except Exception as e:
             import traceback
             print(f"Error: {e}\n{traceback.format_exc()}")
