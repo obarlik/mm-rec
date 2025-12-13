@@ -61,7 +61,13 @@ class MultiMemoryAttention(nn.Module):
         hierarchy = HDS.construct_hierarchy(memory_state)
         k, v = HDS.query_memory(hierarchy, query, level=0)
         
-        # k, v are [B, Slots, Dim]
+        # k, v are [B, Slots, Dim] OR [Slots, Dim] (unbatched)
+        
+        # Handle unbatched case (e.g. during init)
+        if k.ndim == 2:
+            k = k[None, ...] # [1, S, D]
+            v = v[None, ...]
+            
         # query is [B, 1, Dim] (if h_t was [B, D])
         
         if query.ndim == 2:
