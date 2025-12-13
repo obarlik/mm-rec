@@ -8,7 +8,7 @@ import os
 # CRITICAL: 'false' kills performance (syscall overhead).
 # Use MEM_FRACTION instead to reserve space without thrashing.
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'true'
-os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.85'
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.30' # ~7GB on 24GB card (Plenty for this model)
 
 import jax
 import jax.numpy as jnp
