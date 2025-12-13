@@ -354,7 +354,10 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 Starting MM-Rec Training Server...")
+    print("\n🚀 Starting MM-Rec Training Server...")
+    print("ℹ️  Version: v0.2.0 (Windows Native Edition)")
+    print("✅ Features: [Triton-Free GPU] [Threaded Execution] [Auto-Restart]")
     print(f"📁 Workspace: {WORKSPACE_DIR.absolute()}")
     print(f"💾 Checkpoints: {CHECKPOINTS_DIR.absolute()}")
+    print(f"🔧 Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
     uvicorn.run(app, host="0.0.0.0", port=8001)
