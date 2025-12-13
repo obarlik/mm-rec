@@ -104,18 +104,18 @@ def main():
     # 1. Load Dataset (PyTorch)
     # dataset = SFTDataset(...)
     # For benchmark speed, generate random data
-    print("ℹ️  Generating Random Data for Benchmark (Scaled Up)...")
-    batch_size = 64
+    print("ℹ️  Generating Random Data for Benchmark (Medium)...")
+    batch_size = 32
     seq_len = 512
     num_batches = 500
     
     data = [np.random.randint(0, 32000, (batch_size, seq_len)).astype(np.int32) for _ in range(num_batches)]
     
-    # Setup Model (Config for Benchmark - SCALED UP)
-    # Testing throughput: Batch 64, Dim 256
+    # Setup Model (Config for Benchmark - MEDIUM)
+    # Testing throughput: Batch 32, Dim 128
     config = {
         'vocab_size': 32000,
-        'model_dim': 256,
+        'model_dim': 128,
         'num_layers': 2,
         'num_heads': 4,
         'learning_rate': 1e-3

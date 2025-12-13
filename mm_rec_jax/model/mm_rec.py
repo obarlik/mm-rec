@@ -19,8 +19,8 @@ class MMRecModel(nn.Module):
     dropout_rate: float = 0.1
     
     # Memory Config
-    short_mem_len: int = 2048
-    long_mem_len: int = 1024
+    short_mem_len: int = 512 # Reduced from 2048 for benchmark stability
+    long_mem_len: int = 512
     
     def setup(self):
         # Tied Weights: Embedding and LM Head share the same matrix
