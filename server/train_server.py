@@ -422,7 +422,7 @@ async def update_server(restart: bool = True, force: bool = False):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-SERVER_VERSION = "v0.2.13 (Speed Fix: No Debug)"
+SERVER_VERSION = "v0.2.14 (Benchmark Endpoint)"
 
 @app.get("/api/health")
 async def health_check():
