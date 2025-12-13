@@ -64,6 +64,8 @@ class MMRecBlock(nn.Module):
         # Norms
         self.norm1 = nn.RMSNorm()
         self.norm2 = nn.RMSNorm()
+        # Recurrence Norm (Critical for MDI stability)
+        self.norm_recurrence = nn.RMSNorm()
         
         # FFN (Explicit definition to handle 'deterministic' arg correctly)
         self.ffn_dense1 = nn.Dense(self.ffn_dim, kernel_init=nn.initializers.xavier_uniform())
@@ -143,6 +145,10 @@ class MMRecBlock(nn.Module):
             
             # Final: h_new = h_tilde + gamma * h_prev
             h_t = h_tilde + gamma_t * h_prev
+            
+            # Stabilization: LayerNorm inside recurrence
+            # This keeps h_t distribution stable, preventing drift to infinity
+            h_t = self.norm_recurrence(h_t)
             
             # CRITICAL SAFETY: Clip hidden state to prevent exponential explosion
             # Since terms can sum > 1.0, this prevents infinity over long sequences
