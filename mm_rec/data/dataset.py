@@ -37,31 +37,22 @@ class SFTDataset(Dataset):
         )
         
         # Tokenize (returns list of ints)
-        input_ids = self.tokenizer.encode(
-            input_text,
-            max_length=self.config.max_length,
-            truncation=True,
-            padding="do_not_pad" # We pad in collator
-        )
+        # tiktoken encode() only accepts 'text' and 'allowed_special'/'disallowed_special'
+        # It does not support max_length, truncation, padding natively.
+        input_ids = self.tokenizer.encode(input_text)
+        
+        # Manual Truncation
+        if len(input_ids) > self.config.max_length:
+            input_ids = input_ids[:self.config.max_length]
         
         # Create labels
         if self.config.only_predict_assistant:
             # Tokenize full input to find assistant token position
-            full_input_ids = self.tokenizer.encode(
-                input_text,
-                max_length=self.config.max_length * 2,
-                truncation=False,
-                padding="do_not_pad"
-            )
+            full_input_ids = self.tokenizer.encode(input_text)
             
             # Assistant token
             assistant_token = self.chat_formatter.assistant_token
-            assistant_token_ids = self.tokenizer.encode(
-                assistant_token,
-                max_length=10,
-                truncation=False,
-                padding="do_not_pad"
-            )
+            assistant_token_ids = self.tokenizer.encode(assistant_token)
             
             # Find assistant token position
             assistant_pos = -1
@@ -80,12 +71,10 @@ class SFTDataset(Dataset):
             
             if assistant_pos >= 0:
                 # Tokenize target
-                target_ids = self.tokenizer.encode(
-                    target_text,
-                    max_length=self.config.max_length,
-                    truncation=True,
-                    padding="do_not_pad"
-                )
+                target_ids = self.tokenizer.encode(target_text)
+                
+                # Manual Truncation for Target (if needed within context)
+                # Usually we just fit it into the buffer
                 
                 # Match truncated input
                 truncated_ids = list(input_ids)
@@ -104,6 +93,9 @@ class SFTDataset(Dataset):
                         break
                 
                 if not assistant_in_truncated and len(target_ids) > 0:
+                     # This fallback is tricky with tiktoken mismatch, simpler to just skip or naive logic
+                     # For now, if assistant token was truncated out, we probably shouldn't learn from this sample
+                     # But falling back to "learn last part" is existing logic
                      label_len = min(len(input_ids), len(target_ids))
                      labels[-label_len:] = target_ids[:label_len]
             else:
