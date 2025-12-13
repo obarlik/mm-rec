@@ -35,13 +35,24 @@ class MMRecBlock(nn.Module):
         
         # Gamma (MDI)
         # PyTorch MDI W_gamma is: Linear -> GELU -> Linear -> Sigmoid
-        self.W_gamma_1 = nn.Dense(self.model_dim // 4) # Inner dim default is dim // 4
-        self.W_gamma_2 = nn.Dense(self.model_dim)
+        self.W_gamma_1 = nn.Dense(self.model_dim // 4, kernel_init=nn.initializers.xavier_uniform())
+        # Init Gamma 2 with Zeros and Negative Bias to start with small Gamma (~0.05)
+        # This prevents exponential explosion in the recurrence (1 + gamma)^T
+        self.W_gamma_2 = nn.Dense(
+            self.model_dim, 
+            kernel_init=nn.initializers.zeros,
+            bias_init=lambda k, s, d: jnp.full(s, -3.0, d)
+        )
         
         # Context Modulation (MDI)
         # Modulates gamma based on context (Keys)
-        self.W_gamma_context_1 = nn.Dense(self.model_dim // 4)
-        self.W_gamma_context_2 = nn.Dense(self.model_dim)
+        self.W_gamma_context_1 = nn.Dense(self.model_dim // 4, kernel_init=nn.initializers.xavier_uniform())
+        # Init context modulation to identity/zero initially
+        self.W_gamma_context_2 = nn.Dense(
+             self.model_dim,
+             kernel_init=nn.initializers.zeros,
+             bias_init=nn.initializers.zeros
+        )
         
         # Attention
         self.attn = MultiMemoryAttention(
@@ -55,10 +66,10 @@ class MMRecBlock(nn.Module):
         self.norm2 = nn.RMSNorm()
         
         # FFN (Explicit definition to handle 'deterministic' arg correctly)
-        self.ffn_dense1 = nn.Dense(self.ffn_dim)
+        self.ffn_dense1 = nn.Dense(self.ffn_dim, kernel_init=nn.initializers.xavier_uniform())
         self.ffn_act = nn.gelu
         self.ffn_drop1 = nn.Dropout(self.dropout_rate)
-        self.ffn_dense2 = nn.Dense(self.model_dim)
+        self.ffn_dense2 = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform())
         self.ffn_drop2 = nn.Dropout(self.dropout_rate)
         
         self.dropout = nn.Dropout(self.dropout_rate)
@@ -133,8 +144,6 @@ class MMRecBlock(nn.Module):
             # Final: h_new = h_tilde + gamma * h_prev
             h_t = h_tilde + gamma_t * h_prev
             
-            return h_t, h_t
-
             return h_t, h_t
         # scan arguments: (f, init, xs)
         # xs structure must match inputs of scan_fn
