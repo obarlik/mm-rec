@@ -21,8 +21,9 @@ def benchmark():
     
     # Load data
     possible_paths = [
-        WORKSPACE_DIR / "data" / "train.json",
-        WORKSPACE_DIR / "data" / "phase1" / "train.json"
+        WORKSPACE_DIR / "workspace" / "data" / "train.json", 
+        WORKSPACE_DIR / "workspace" / "data" / "phase1" / "train.json",
+        WORKSPACE_DIR / "data" / "train.json"
     ]
     data_path = None
     for p in possible_paths:
