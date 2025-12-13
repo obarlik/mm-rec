@@ -75,8 +75,8 @@ class TrainingJob:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
             # Initialize tokenizer without hardcoded size (tiktoken will set it correct, e.g. 100277)
             tokenizer = get_tokenizer()
-            vocab_size = tokenizer.vocab_size
-            print(f"ℹ️  Tokenizer initialized with vocab_size={vocab_size}")
+            vocab_size = tokenizer.vocab_size + 1000  # Safety margin for special tokens/mismatches
+            print(f"ℹ️  Tokenizer initialized with vocab_size={vocab_size} (inc. +1000 margin)")
             
             # Load data
             data_path = WORKSPACE_DIR / "data" / "phase1" / "train.json"
