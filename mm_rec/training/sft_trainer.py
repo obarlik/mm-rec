@@ -1,6 +1,7 @@
 """
 Supervised Fine-Tuning (SFT) Trainer for OpenAI-Compatible Training
 Handles chat format, loss masking, and OpenAI API compatibility
+# Handles batched training (v2)
 """
 
 import torch
