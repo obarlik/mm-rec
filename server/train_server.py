@@ -122,7 +122,11 @@ class TrainingJob:
             optimizer = torch.optim.AdamW(model.parameters(), lr=self.config.learning_rate)
             
             # Training loop
-            total_steps = len(conversations) * self.config.num_epochs
+            self.progress['total_steps'] = total_steps
+            
+            for epoch in range(self.config.num_epochs):
+                epoch_losses = []
+                
                 for i, conv in enumerate(conversations):
                     step_start_time = time.time()
                     
@@ -417,7 +421,7 @@ async def update_server(restart: bool = True, force: bool = False):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-SERVER_VERSION = "v0.2.10 (Enhanced Monitor + Speed)"
+SERVER_VERSION = "v0.2.11 (Hotfix: Loop)"
 
 @app.get("/api/health")
 async def health_check():
