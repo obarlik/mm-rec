@@ -99,73 +99,29 @@ class MemoryState(struct.PyTreeNode):
             # k: [Slots, Dim], idx: scalar
             # new_k: [Seq, Dim]
             
+            # Scatter Update via .at[].set()
+            # This handles wrapping automatically via modulo arithmetic on indices
+            
             # 1. Update Age (Global increment)
-            # age = age + seq_len 
-            # (Simple approximation: age is just time counter)
             age = age + seq_len
             
-            # Write new data
-            # Check if wrap around
-            remaining = num_slots - idx
+            # 2. Calculate indices for new data
+            # [0, 1, ..., seq_len-1] + idx % num_slots
+            # We wrap indices so they fit in [0, num_slots-1]
+            indices = (idx + jnp.arange(seq_len)) % num_slots
             
-            def write_wrapped(k, v, age, idx, new_k, new_v):
-                 # Case 1: No Wrap
-                 # Just one update
-                 k = jax.lax.dynamic_update_slice(k, new_k, (idx, 0))
-                 v = jax.lax.dynamic_update_slice(v, new_v, (idx, 0))
-                 
-                 # Update age for new items to 0
-                 new_age_vals = jnp.arange(seq_len)[::-1] # 0 is newest
-                 age = jax.lax.dynamic_update_slice(age, new_age_vals, (idx,))
-                 
-                 return k, v, age
-                 
-            def write_split(k, v, age, idx, new_k, new_v):
-                 # Case 2: Wrap Around
-                 # Part 1: idx to end
-                 part1_len = num_slots - idx
-                 
-                 # Dynamic Slice instead of new_k[:part1_len]
-                 part1_k = jax.lax.dynamic_slice(new_k, (0, 0), (part1_len, new_k.shape[1]))
-                 part1_v = jax.lax.dynamic_slice(new_v, (0, 0), (part1_len, new_v.shape[1]))
-                 
-                 k = jax.lax.dynamic_update_slice(k, part1_k, (idx, 0))
-                 v = jax.lax.dynamic_update_slice(v, part1_v, (idx, 0))
-                 
-                 # Age Part 1
-                 # jnp.arange(seq_len)[::-1] is static size
-                 # need slice
-                 full_new_age = jnp.arange(seq_len)[::-1]
-                 part1_age = jax.lax.dynamic_slice(full_new_age, (0,), (part1_len,))
-                 age = jax.lax.dynamic_update_slice(age, part1_age, (idx,))
-                 
-                 # Part 2: 0 to remaining
-                 # part2_len = seq_len - part1_len (dynamic)
-                 # We want to start at part1_len
-                 part2_len = seq_len - part1_len
-                 
-                 part2_k = jax.lax.dynamic_slice(new_k, (part1_len, 0), (part2_len, new_k.shape[1]))
-                 part2_v = jax.lax.dynamic_slice(new_v, (part1_len, 0), (part2_len, new_v.shape[1]))
-                 
-                 k = jax.lax.dynamic_update_slice(k, part2_k, (0, 0))
-                 v = jax.lax.dynamic_update_slice(v, part2_v, (0, 0))
-                 
-                 part2_age = jax.lax.dynamic_slice(full_new_age, (part1_len,), (part2_len,))
-                 age = jax.lax.dynamic_update_slice(age, part2_age, (0,))
-                 
-                 return k, v, age
-
-            # JAX Condition
-            # If seq_len <= remaining, use write_wrapped
-            # Else write_split
-            k, v, age = jax.lax.cond(
-                seq_len <= remaining,
-                write_wrapped,
-                write_split,
-                k, v, age, idx, new_k, new_v
-            )
+            # 3. Perform Update
+            # JAX handles parallel/conflicting indices (last write wins usually, but here unique)
+            k = k.at[indices].set(new_k)
+            v = v.at[indices].set(new_v)
             
+            # 4. Update Age for new items
+            new_age_vals = jnp.arange(seq_len)[::-1] # 0 is newest
+            age = age.at[indices].set(new_age_vals)
+            
+            # 5. Advance Index
             new_idx = (idx + seq_len) % num_slots
+            
             return k, v, age, new_idx
 
         # VMAP over batch

@@ -46,26 +46,22 @@ class HDS:
         
         # Roll if idx is present and non-zero
         if lt.idx is not None:
-             # Calculate shift amount: -idx
-             # Handle unbatched or batched idx
-             # roll is not cheaply vectorized with variable shift in JAX? 
-             # Actually jnp.roll supports only constant shift in some contexts, but dynamic here?
-             # "shifts argument to roll must be static". jax.numpy.roll generally requires static or concretizable.
-             # Wait, typical jnp.roll takes dynamic shift since recent versions? No.
-             # We might need to use fancy indexing: combined = concatenate([k[idx:], k[:idx]])
+             # We want to shift so that 'idx' (oldest) moves to 0.
+             # Logical order: [idx, idx+1, ..., N-1, 0, 1, ..., idx-1]
+             # Indices: (jnp.arange(N) + idx) % N
              
-             # Let's perform manual roll via slicing for speed/validity
-             def manual_roll(arr, idx):
-                 # arr: [S, D], idx: scalar
-                 return jnp.concatenate([arr[idx:], arr[:idx]], axis=0)
+             def gather_roll(arr, idx):
+                 # arr: [S, D]
+                 num_slots = arr.shape[0]
+                 indices = (jnp.arange(num_slots) + idx) % num_slots
+                 return arr[indices]
                  
              if current_k.ndim == 3: # Batched [B, S, D]
-                 # idx is likely [B]
-                 current_k = jax.vmap(manual_roll)(current_k, lt.idx)
-                 current_v = jax.vmap(manual_roll)(current_v, lt.idx)
+                 current_k = jax.vmap(gather_roll)(current_k, lt.idx)
+                 current_v = jax.vmap(gather_roll)(current_v, lt.idx)
              else: # Unbatched
-                 current_k = manual_roll(current_k, lt.idx)
-                 current_v = manual_roll(current_v, lt.idx)
+                 current_k = gather_roll(current_k, lt.idx)
+                 current_v = gather_roll(current_v, lt.idx)
         
         hierarchy = {0: MemoryBank(k=current_k, v=current_v)}
         
