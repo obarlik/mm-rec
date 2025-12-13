@@ -55,7 +55,7 @@ class TrainingJob:
         self.log_file = WORKSPACE_DIR / f"{job_id}.log"
         self.start_time = None
         
-        def run(self):
+    def run(self):
         """Run training via External JAX Process."""
         try:
             self.status = "training"
