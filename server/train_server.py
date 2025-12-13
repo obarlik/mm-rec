@@ -123,8 +123,15 @@ class TrainingJob:
             optimizer = torch.optim.AdamW(model.parameters(), lr=self.config.learning_rate)
             
             # Training loop
-            total_steps = (len(conversations) // self.config.batch_size) * self.config.num_epochs
+            epoch_steps = len(conversations) // self.config.batch_size
+            if epoch_steps == 0:
+                print(f"⚠️  Warning: Dataset size ({len(conversations)}) is smaller than batch size ({self.config.batch_size}). Adjusting to 1 step per epoch.")
+                epoch_steps = 1
+                
+            total_steps = epoch_steps * self.config.num_epochs
             self.progress['total_steps'] = total_steps
+            
+            print(f"ℹ️  Training: {len(conversations)} examples, {self.config.num_epochs} epochs, {total_steps} total steps")
             
             # OneCycleLR: Warmup + Cosine Decay
             scheduler = torch.optim.lr_scheduler.OneCycleLR(
