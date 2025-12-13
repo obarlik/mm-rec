@@ -357,5 +357,72 @@ class MemoryState(nn.Module):
         Returns:
             Tuple of (k, v) tensors
         """
-        return self.get_state(bank_type)
+    def update_state_chunk(
+        self,
+        bank_type: str,
+        new_k_chunk: torch.Tensor,
+        new_v_chunk: torch.Tensor,
+        start_step: int
+    ):
+        """
+        Update memory state efficiently for a chunk of steps (bulk update).
+        
+        Args:
+            bank_type: 'short' or 'long'
+            new_k_chunk: [batch, chunk_len, k_dim]
+            new_v_chunk: [batch, chunk_len, v_dim]
+            start_step: Starting sequence step index
+        """
+        if bank_type == 'short':
+             # Ensure correct shape
+            chunk_len = new_k_chunk.shape[1]
+            end_step = start_step + chunk_len
+            batch_size = new_k_chunk.shape[0]
+            
+            # Check shape of bank
+            k_shape = self.short_term.k.data.shape
+            
+            if len(k_shape) == 2:
+                # 2D case: [num_slots, k_dim] (No batching support implies single batch or shared)
+                if end_step <= self.short_term.num_slots:
+                    # Take mean if batched input for non-batched bank
+                     if batch_size > 1:
+                        new_k_mean = new_k_chunk.mean(dim=0)
+                        new_v_mean = new_v_chunk.mean(dim=0)
+                     else:
+                        new_k_mean = new_k_chunk.squeeze(0)
+                        new_v_mean = new_v_chunk.squeeze(0)
+                        
+                     self.short_term.k.data[start_step:end_step, :] = new_k_mean.to(self.short_term.k.device)
+                     self.short_term.v.data[start_step:end_step, :] = new_v_mean.to(self.short_term.v.device)
+            elif len(k_shape) == 3:
+                # 3D case: [batch, num_slots, k_dim]
+                if k_shape[0] != batch_size:
+                    # Resize
+                    old_k = self.short_term.k.data
+                    old_v = self.short_term.v.data
+                    self.short_term.k.data = torch.zeros(
+                        batch_size, self.short_term.num_slots, self.short_term.k_dim,
+                        dtype=old_k.dtype, device=old_k.device
+                    )
+                    self.short_term.v.data = torch.zeros(
+                        batch_size, self.short_term.num_slots, self.short_term.v_dim,
+                        dtype=old_v.dtype, device=old_v.device
+                    )
+                
+                if end_step <= self.short_term.num_slots:
+                    self.short_term.k.data[:, start_step:end_step, :] = new_k_chunk.to(self.short_term.k.device)
+                    self.short_term.v.data[:, start_step:end_step, :] = new_v_chunk.to(self.short_term.v.device)
+                else:
+                    # Handle overflow (wrap-around not implemented for simple linear scan, assume truncated or standard seq)
+                    # Just clip to max slots
+                     valid_len = self.short_term.num_slots - start_step
+                     if valid_len > 0:
+                        self.short_term.k.data[:, start_step:start_step+valid_len, :] = new_k_chunk[:, :valid_len, :].to(self.short_term.k.device)
+                        self.short_term.v.data[:, start_step:start_step+valid_len, :] = new_v_chunk[:, :valid_len, :].to(self.short_term.v.device)
+            else:
+                 raise ValueError(f"Unexpected tensor shape: {k_shape}")
+        else:
+            raise NotImplementedError("Bulk update for long-term memory not implemented yet.")
+
 

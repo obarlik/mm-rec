@@ -560,14 +560,29 @@ class MMRecBlock(nn.Module):
         # 'final_output' is [batch, seq_len, dim]
         output = final_output
         
-        # Step 11: State Update (Sequential but fast)
-        # We still need to update the state step-by-step for the next block/chunk.
-        # Since this is just memory copy, it's fast.
-        # We can optimize this if State supports bulk update, but for now loop is fine
-        # as it doesn't involve heavy compute.
-        for t in range(seq_len):
-            h_t_val = h_sequence[:, t, :] # [batch, dim]
-            state.update_state_sequential(bank_type='short', new_k=h_t_val, new_v=h_t_val, step=t)
+        # Step 11: State Update (Bulk)
+        # We process the entire sequence at once.
+        # This replaces the Python loop over T steps.
+        # h_sequence: [batch, seq_len, dim]
+        # We assume start_step is 0 for the block unless we are in inference/chunking.
+        # In this context, we update slots corresponding to the current sequence window.
+        
+        # NOTE: For chunking, we need 'start_step'. 
+        # But this forward function processes 'x' which is 'seq_len'.
+        # Assuming training on [0:seq_len] or a chunk.
+        # For simplicity in this optimization phase (SFT), we assume step starts at 0 or controlled externally.
+        # But wait, MMRecBlock doesn't take 'start_step' arg.
+        # However, `update_state_sequential(..., step=t)` implies t is 0..seq_len relative to batch?
+        # Or absolute position?
+        # Looking at original code: `for t in range(seq_len): ... step=t`.
+        # So it starts at 0 relative to the input x.
+        
+        state.update_state_chunk(
+            bank_type='short',
+            new_k_chunk=h_sequence,
+            new_v_chunk=h_sequence,
+            start_step=0  # Original code loop was range(seq_len), so starts at 0
+        )
 
         
         # Update long-term memory (less frequent, typically at block level)
