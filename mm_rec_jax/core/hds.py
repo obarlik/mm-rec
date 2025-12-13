@@ -32,10 +32,42 @@ class HDS:
             Dict mapping level_idx -> MemoryBank (containing pooled k, v)
         """
         # Level 0 is the raw long-term memory
-        hierarchy = {0: state.long_term}
+        # CRITICAL: Since MemoryState uses a Ring Buffer, we must roll it to canonical order
+        # for pooling to make sense (temporal adjacency).
+        # We roll by -idx to bring the "oldest" element (at idx) to position 0.
         
-        current_k = state.long_term.k
-        current_v = state.long_term.v
+        # HDS currently only uses long_term for hierarchy. 
+        # TODO: Should it use short_term too? Original PyTorch model used MemoryState which had implicit structure.
+        # Assuming we pool long_term.
+        
+        lt = state.long_term
+        current_k = lt.k
+        current_v = lt.v
+        
+        # Roll if idx is present and non-zero
+        if lt.idx is not None:
+             # Calculate shift amount: -idx
+             # Handle unbatched or batched idx
+             # roll is not cheaply vectorized with variable shift in JAX? 
+             # Actually jnp.roll supports only constant shift in some contexts, but dynamic here?
+             # "shifts argument to roll must be static". jax.numpy.roll generally requires static or concretizable.
+             # Wait, typical jnp.roll takes dynamic shift since recent versions? No.
+             # We might need to use fancy indexing: combined = concatenate([k[idx:], k[:idx]])
+             
+             # Let's perform manual roll via slicing for speed/validity
+             def manual_roll(arr, idx):
+                 # arr: [S, D], idx: scalar
+                 return jnp.concatenate([arr[idx:], arr[:idx]], axis=0)
+                 
+             if current_k.ndim == 3: # Batched [B, S, D]
+                 # idx is likely [B]
+                 current_k = jax.vmap(manual_roll)(current_k, lt.idx)
+                 current_v = jax.vmap(manual_roll)(current_v, lt.idx)
+             else: # Unbatched
+                 current_k = manual_roll(current_k, lt.idx)
+                 current_v = manual_roll(current_v, lt.idx)
+        
+        hierarchy = {0: MemoryBank(k=current_k, v=current_v)}
         
         # We assume [Batch, Slots, Dim] or [Slots, Dim]
         # MemoryBank initialization usually gives [Slots, Dim]
