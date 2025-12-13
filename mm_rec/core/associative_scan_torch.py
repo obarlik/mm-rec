@@ -34,6 +34,8 @@ class AssociativeScanExponential(torch.autograd.Function):
         # 1. Convert to log-space: log(gamma)
         # Add epsilon to prevent log(0)
         epsilon = 1e-8
+        # Clamp gamma to strict (0, 1] range to ensure log <= 0
+        gamma_fp32 = torch.clamp(gamma_fp32, min=0.0, max=1.0)
         log_gamma = torch.log(gamma_fp32 + epsilon)
         
         # 2. Cumulative sum in log-space (equivalent to cumulative product in linear space)
@@ -43,6 +45,8 @@ class AssociativeScanExponential(torch.autograd.Function):
         # 3. Convert back to linear space
         # Use simple exp() since we are just doing products
         # For very long sequences, we might need more stability, but for <32k this is usually fine
+        # Clamp to avoid potential overflow (though unlikely with gamma <= 1)
+        log_cumsum = torch.clamp(log_cumsum, max=0.0)
         cumulative_product = torch.exp(log_cumsum)
         
         # 4. Convert back to original dtype
