@@ -79,9 +79,24 @@ class TrainingJob:
             print(f"ℹ️  Tokenizer initialized with vocab_size={vocab_size} (inc. +1000 margin)")
             
             # Load data
-            data_path = WORKSPACE_DIR / "data" / "phase1" / "train.json"
+            # Load data - check multiple locations
+            possible_paths = [
+                WORKSPACE_DIR / "data" / "train.json",  # Uploaded
+                WORKSPACE_DIR / "data" / "phase1" / "train.json"  # Git synced
+            ]
+            
+            data_path = None
+            for p in possible_paths:
+                if p.exists():
+                    data_path = p
+                    break
+            
+            if not data_path:
+                raise FileNotFoundError(f"train.json not found in: {[str(p) for p in possible_paths]}")
+                
+            print(f"ℹ️  Loading data from: {data_path}")
             with open(data_path) as f:
-                data = json.load(f)[:5000]  # Limit for testing
+                data = json.load(f)  # Full dataset (no limit)
             
             conversations = []
             for item in data:
@@ -379,7 +394,7 @@ async def update_server(restart: bool = True):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-SERVER_VERSION = "v0.2.4 (Hotfix: Syntax)"
+SERVER_VERSION = "v0.2.5 (Path Fix + Full Data)"
 
 @app.get("/api/health")
 async def health_check():
