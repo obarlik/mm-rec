@@ -113,7 +113,12 @@ class TrainingJob:
             for epoch in range(self.config.num_epochs):
                 epoch_losses = []
                 
-                for i, conv in enumerate(conversations):
+                    for i, conv in enumerate(conversations):
+                    # Check for stop signal
+                    if self.status == "stopped":
+                        print(f"🛑 Job {self.job_id} stopped by user.")
+                        return
+
                     # Training step
                     result = trainer.train_step(conv, optimizer, device, verbose=False)
                     epoch_losses.append(result['loss'])
@@ -197,8 +202,40 @@ async def submit_training(config: TrainingConfig, background_tasks: BackgroundTa
     return {
         "job_id": job_id,
         "status": "queued",
+    return {
+        "job_id": job_id,
+        "status": "queued",
         "message": f"Job {config.job_name} submitted"
     }
+
+@app.post("/api/train/stop/{job_id}")
+async def stop_job(job_id: str):
+    """Stop a training job."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job.status in ["training", "queued"]:
+        job.status = "stopped"
+        return {"status": "stopped", "message": f"Job {job_id} stopping..."}
+    else:
+        return {"status": job.status, "message": f"Job {job_id} is already {job.status}"}
+
+@app.post("/api/data/upload")
+async def upload_data(file: UploadFile = File(...)):
+    """Upload data file to workspace/data."""
+    try:
+        data_dir = WORKSPACE_DIR / "data"
+        data_dir.mkdir(exist_ok=True)
+        
+        file_path = data_dir / file.filename
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+            
+        return {"status": "success", "filename": file.filename, "path": str(file_path)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/train/status/{job_id}")
 async def get_status(job_id: str):

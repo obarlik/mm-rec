@@ -176,12 +176,14 @@ def main():
     
     parser = argparse.ArgumentParser(description="Remote GPU Training Client")
     parser.add_argument("--server", default="http://localhost:8000", help="Server URL")
-    parser.add_argument("--action", choices=['sync', 'submit', 'monitor', 'download', 'list', 'health', 'update'], 
-                       required=True, help="Action to perform")
+    parser.add_argument('--action', required=True, 
+                        choices=['sync', 'submit', 'monitor', 'download', 'list', 'health', 'update', 'stop', 'upload'],
+                        help='Action to perform')
     parser.add_argument("--job-id", help="Job ID (for monitor/download)")
     parser.add_argument("--config", help="Config file (for submit)")
     parser.add_argument("--output", help="Output path (for download)")
     parser.add_argument("--project-dir", default=".", help="Project directory (for sync)")
+    parser.add_argument('--file', type=str, help='File path for upload')
     
     args = parser.parse_args()
     
@@ -205,6 +207,43 @@ def main():
         if job_id:
             print(f"\n💡 Monitor with: python client/train_client.py --action monitor --job-id {job_id}")
     
+    elif args.action == 'stop':
+        if not args.job_id:
+            print("❌ Error: --job-id required for stop")
+            return
+        
+        try:
+            response = requests.post(f"{args.server}/api/train/stop/{args.job_id}")
+            if response.status_code == 200:
+                print(f"🛑 Job stopped: {response.json()}")
+            else:
+                print(f"❌ Stop failed: {response.text}")
+        except Exception as e:
+            print(f"❌ Connection error: {e}")
+
+    elif args.action == 'upload':
+        if not args.file:
+            print("❌ Error: --file required for upload")
+            return
+            
+        file_path = Path(args.file)
+        if not file_path.exists():
+            print(f"❌ File not found: {file_path}")
+            return
+            
+        print(f"📤 Uploading {file_path.name}...")
+        try:
+            with open(file_path, 'rb') as f:
+                files = {'file': f}
+                response = requests.post(f"{args.server}/api/data/upload", files=files)
+            
+            if response.status_code == 200:
+                print(f"✅ Upload successful: {response.json()}")
+            else:
+                print(f"❌ Upload failed: {response.text}")
+        except Exception as e:
+            print(f"❌ Connection error: {e}")
+
     elif args.action == 'monitor':
         if not args.job_id:
             print("❌ --job-id required for monitor")
