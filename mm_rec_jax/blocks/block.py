@@ -46,7 +46,8 @@ class MMRecBlock(nn.Module):
         # Attention
         self.attn = MultiMemoryAttention(
             model_dim=self.model_dim,
-            num_heads=self.num_heads
+            num_heads=self.num_heads,
+            head_dim=self.model_dim // self.num_heads
         )
         
         # Norms
