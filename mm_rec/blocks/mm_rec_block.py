@@ -492,200 +492,120 @@ class MMRecBlock(nn.Module):
                 x_with_pe = x_norm_all  # No positional encoding in non-HEM mode
         
         # Sequential processing: Loop over sequence steps
+        
+        # 1. Pre-compute Gamma for all steps (Parallel)
+        # Gamma depends only on z_all (and context k_all), so we can compute it massively parallel
+        # This replaces the inside-loop gamma computation
+        if self.use_dpg:
+            # Use DPG for dynamic gamma computation
+            gamma_all = self.compute_dpg_gamma(z_all, context=k_all)
+        else:
+            # Original MDI approach
+            gamma_all = self.mdi.compute_decay_only(z_all, context=k_all)
+            
+        # 2. Sequential Recurrence using JIT Kernel
+        # The core recurrence h_t = ... is sequential due to W_g(h_{t-1})
+        # We use a fused JIT kernel to execute this loop efficiently without Python overhead
+        # and without redundant kernel launches.
+        from .jit_kernels import mm_rec_recurrence_fused
+        
+        output, h_final = mm_rec_recurrence_fused(
+            z_all=z_all,
+            gamma_all=gamma_all,
+            gate_block_weight=self.W_g.weight,
+            gate_block_bias=self.W_g.bias,
+            gate_mdi_weight=self.mdi.W_g.weight,
+            gate_mdi_bias=self.mdi.W_g.bias,
+            h_init=h_prev,  # [batch, 1, model_dim]
+            use_mdi_gate=True
+        )
+        # Update h_prev for next chunk boundaries (if chunking is used)
+        h_prev = h_final
+        
+        # 3. Post-Recurrence Processing (Attention + FFN)
+        # Now that we have the full 'h_t' sequence (output), we can process Attention and FFN
+        # in parallel for the whole sequence!
+        
+        # Output from recurrence is [batch, seq_len, model_dim] aka h_t sequence
+        h_sequence = output
+        
+        # Step 7: Multi-Memory Attention (Parallel over sequence)
+        # Note: MultiMemoryAttention likely expects [batch, seq_len, dim]
+        # We need to check if it supports full sequence processing.
+        # Assuming it does or we loop. Given optimization, we should process efficiently.
+        # But wait, the original code called it per step with `state`.
+        # `state` updates sequentially inside the loop...
+        
+        # CRITICAL: The original code updated `state` (KV cache) sequentially inside the loop.
+        # "state.update_state_sequential(...)".
+        # If MultiMemoryAttention depends on the *current* updated state at step t, 
+        # then we cannot fully parallelize unless we unroll or assume causal masking handles it.
+        # However, for TRAIN mode, we usually use full Attention with causal mask.
+        # Let's assume standard causal attention.
+        
+        # For strict fidelity to the "sequential update of state" mechanism:
+        # We must verify if 'multi_mem_attention' uses the 'state' that was just updated.
+        # In the original loop:
+        #   h_t calculated -> Attention(h_t, state) -> state.update(h_t)
+        # So Attention used the *previous* state (before update of step t).
+        # This confirms we can process attention using the state accumulated so far.
+        
+        # Since we removed the loop, we need to defer state updates? 
+        # Or bulk update?
+        # For Short-Term memory, it's just a circular buffer/linear buffer.
+        # We can bulk update it.
+        
+        # Re-implementing Post-processing efficiently:
+        # We'll use a loop for now to be safe with state updates and Attention, 
+        # BUT this loop is much lighter than the recurrence loop because:
+        # 1. No dependency on h_{t-1} for computation (just for state).
+        # 2. Attention is the heavy part, but maybe we can batch it?
+        
+        # Actually, let's look at standard Transformer: Attention is O(N^2) or O(N log N).
+        # Here `multi_mem_attention` typically handles the sequence if passed input [B, S, D].
+        # Let's try to pass the whole sequence.
+        
+        # Note: To maintain 100% fidelity with the "sequential state update" creating side-effects,
+        # we might need to restore the loop ONLY for Attention + State Update if they are stateful.
+        # But `h_t` generation (the bottleneck) is now fast.
+        
+        # Let's iterate for Attention/FFN application to ensure state correctness.
+        # This loop will be faster because `h_t` is already known.
+        
         for t in range(seq_len):
-            # Get current timestep input
-            if self.use_hem:
-                # Use pre-computed fused projections (HEM mode)
-                x_t = x[:, t:t+1, :]  # [batch, 1, model_dim]
-                x_t_norm = x_norm_all[:, t:t+1, :]  # [batch, 1, model_dim]
-                q_t = q_all[:, t:t+1, :]  # [batch, 1, model_dim]
-                k_t = k_all[:, t:t+1, :]  # [batch, 1, model_dim]
-                v_t = v_all[:, t:t+1, :]  # [batch, 1, model_dim]
-                z_t = z_all[:, t:t+1, :]  # [batch, 1, model_dim]
-            elif self.use_kernel_fusion:
-                # Use pre-computed projections (non-HEM mode, but with kernel fusion)
-                x_t = x[:, t:t+1, :]  # [batch, 1, model_dim]
-                x_t_norm = x_norm_all[:, t:t+1, :]  # [batch, 1, model_dim]
-                q_t = q_all[:, t:t+1, :]  # [batch, 1, model_dim]
-                k_t = k_all[:, t:t+1, :]  # [batch, 1, model_dim]
-                v_t = v_all[:, t:t+1, :]  # [batch, 1, model_dim]
-                z_t = z_all[:, t:t+1, :]  # [batch, 1, model_dim]
-            else:
-                # Original per-step computation (slower, more CPU-GPU sync)
-                x_t = x[:, t:t+1, :]  # [batch, 1, model_dim]
-                x_t_norm = self.norm1(x_t)
-                q_t = self.W_q(x_t_norm)
-                k_t = self.W_k(x_t_norm)
-                v_t = self.W_v(x_t_norm)
-                z_t = self.W_z(x_t_norm)
+            h_t = h_sequence[:, t:t+1, :] # [batch, 1, model_dim]
+            q_t = q_all[:, t:t+1, :]
+            v_t = v_all[:, t:t+1, :]
             
-            # Step 3-5: MDI computation (optimized with kernel fusion and checkpointing)
-            # Get h_{t-1} from previous iteration
-            h_prev_expanded = h_prev  # [batch, 1, model_dim]
+            # Attention
+            mem_context_t = self.multi_mem_attention(h_t, hds, state, q_input=q_t)
             
-            # ====================================================================
-            # DPG: Dynamic γ_t Computation
-            # ====================================================================
-            # DPG mekanizması ile dinamik decay coefficient hesaplama
-            # γ_t = σ(W_γ,up · ReLU(W_γ,down · z_t))
-            # ====================================================================
-            
-            if self.use_dpg:
-                # Use DPG for dynamic gamma computation
-                gamma_new_t = self.compute_dpg_gamma(z_t, context=k_t)
-                # gamma_new_t: [batch, 1, model_dim]
-                
-                # For MDI, we still need h_new_t (use simplified version or full MDI)
-                # We'll use a simplified version that still computes h_new_t
-                # but uses DPG gamma instead of MDI gamma
-                if self.use_gradient_checkpointing:
-                    mdi_fn = lambda z, h, ctx: self.mdi(z, h, context=ctx, return_auxiliary_loss=return_auxiliary_loss)
-                    mdi_result = checkpoint(mdi_fn, z_t, h_prev_expanded, k_t, use_reentrant=False)
-                    if isinstance(mdi_result, tuple) and len(mdi_result) == 3:
-                        h_new_t, _, L_Aux_t = mdi_result
-                    else:
-                        h_new_t, _ = mdi_result
-                        L_Aux_t = None
-                else:
-                    mdi_result = self.mdi(z_t, h_prev_expanded, context=k_t, return_auxiliary_loss=return_auxiliary_loss)
-                    if isinstance(mdi_result, tuple) and len(mdi_result) == 3:
-                        h_new_t, _, L_Aux_t = mdi_result
-                    else:
-                        h_new_t, _ = mdi_result
-                        L_Aux_t = None
-                
-                # Replace MDI gamma with DPG gamma
-                # gamma_new_t is already computed via DPG above
-            else:
-                # Original MDI approach (use MDI's gamma computation)
-                if self.use_gradient_checkpointing:
-                    # Gradient checkpointing: recompute activations during backward
-                    # This trades compute for memory (recomputes forward during backward)
-                    mdi_fn = lambda z, h, ctx: self.mdi(z, h, context=ctx, return_auxiliary_loss=return_auxiliary_loss)
-                    mdi_result = checkpoint(mdi_fn, z_t, h_prev_expanded, k_t, use_reentrant=False)
-                    if isinstance(mdi_result, tuple) and len(mdi_result) == 3:
-                        h_new_t, gamma_new_t, L_Aux_t = mdi_result
-                    else:
-                        h_new_t, gamma_new_t = mdi_result
-                        L_Aux_t = None
-                else:
-                    # Standard forward pass
-                    mdi_result = self.mdi(z_t, h_prev_expanded, context=k_t, return_auxiliary_loss=return_auxiliary_loss)
-                    if isinstance(mdi_result, tuple) and len(mdi_result) == 3:
-                        h_new_t, gamma_new_t, L_Aux_t = mdi_result
-                    else:
-                        h_new_t, gamma_new_t = mdi_result
-                        L_Aux_t = None
-            
-            # Collect auxiliary loss for this timestep
-            if return_auxiliary_loss and L_Aux_t is not None:
-                if not hasattr(self, '_auxiliary_losses'):
-                    self._auxiliary_losses = []
-                self._auxiliary_losses.append(L_Aux_t)
-            
-            # Step 4: Associative Scan - Compute cumulative exponential product
-            # For sequential processing, we need cumulative product up to step t
-            # Reshape for associative scan: [batch, heads, 1, head_dim]
-            gamma_t_reshaped = gamma_new_t.view(batch_size, self.num_heads, 1, -1)
-            
-            # On CPU, C++ extension is REQUIRED (no fallback)
-            # On GPU, try Triton first, then C++ extension
-            # On GPU, try Triton first, then Torch Native (which is also GPU accelerated)
-            if not torch.cuda.is_available():
-                # CPU mode: Try JAX first (fastest), then C++ extension
-                if _JAX_AVAILABLE:
-                    # JAX is ~2x faster than PyTorch/C++ on CPU
-                    cumprod_t = JaxScanner.apply(gamma_t_reshaped)
-                else:
-                    # Fallback to C++ extension
-                    from ..core.associative_scan_triton import associative_scan_exponential_cpu_fallback
-                    try:
-                        cumprod_t = associative_scan_exponential_cpu_fallback(gamma_t_reshaped)
-                    except RuntimeError as e:
-                        # C++ extension failed - this is fatal
-                        raise RuntimeError(
-                            f"❌ CRITICAL: C++ extension required for CPU mode in MMRecBlock!\n"
-                            f"   {str(e)}\n"
-                            f"   Block cannot proceed without optimized C++ extension."
-                        ) from e
-            else:
-                # GPU mode: Try Triton, fallback to Torch Native (Robust on Windows)
-                # The associative_scan_exponential wrapper now handles the fallback internally
-                # so we can just call it directly.
-                try:
-                    cumprod_t = associative_scan_exponential(gamma_t_reshaped)
-                except (RuntimeError, ImportError):
-                    # Double safety net
-                    from ..core.associative_scan_torch import associative_scan_exponential_torch
-                    cumprod_t = associative_scan_exponential_torch(gamma_t_reshaped)
-            
-            cumprod_t = cumprod_t.view(batch_size, 1, self.model_dim)
-            
-            # Step 6: Core Formula: h_t = z_t ⊙ σ(W_g h_{t-1}) + γ ⊙ h_{t-1}
-            # OPTIMIZATION: Fused gate computation (W_g + sigmoid in one step)
-            # Pre-compute W_g(h_prev) and apply sigmoid
-            gate_signal = torch.sigmoid(self.W_g(h_prev_expanded))  # σ(W_g h_{t-1})
-            
-            # Fused element-wise operations (reduces intermediate allocations)
-            gated_input = z_t * gate_signal  # z_t ⊙ σ(W_g h_{t-1})
-            decayed_prev = gamma_new_t * h_prev_expanded  # γ ⊙ h_{t-1}
-            h_t = gated_input + decayed_prev  # h_t = z_t ⊙ σ(W_g h_{t-1}) + γ ⊙ h_{t-1}
-            
-            # Ensure h_new_t from MDI also contributes (for gradient flow)
-            h_t = h_t + 0.1 * h_new_t
-            
-            # Step 7: Multi-Memory Attention
-            # OPTIMIZATION: Use checkpointing for attention if enabled
-            if self.use_gradient_checkpointing:
-                attn_fn = lambda h, q: self.multi_mem_attention(h, hds, state, q_input=q)
-                mem_context_t = checkpoint(attn_fn, h_t, q_t, use_reentrant=False)
-            else:
-                mem_context_t = self.multi_mem_attention(h_t, hds, state, q_input=q_t)
-            
-            # CRITICAL FIX: Ensure v_t contributes to output for gradient flow
+            # V contribution (Residual)
             v_contribution = v_t * 0.1
             h_attended_t = h_t + mem_context_t + v_contribution
             
-            # Step 8: Residual connection
+            # Residual
+            x_t = x[:, t:t+1, :]
             x_residual_t = x_t + self.dropout_layer(h_attended_t)
             
-            # Step 9: Feed-forward network
-            # OPTIMIZATION: Use checkpointing for FFN if enabled
-            if self.use_gradient_checkpointing:
-                def ffn_step(x_res):
-                    x_norm2 = self.norm2(x_res)
-                    return self.ffn(x_norm2)
-                ffn_out_t = checkpoint(ffn_step, x_residual_t, use_reentrant=False)
+            # FFN
+            x_norm2_t = self.norm2(x_residual_t)
+            if hasattr(self.ffn, 'router'):
+                ffn_out_t = self.ffn(x_norm2_t, router_threshold=router_threshold)
             else:
-                x_norm2_t = self.norm2(x_residual_t)
-                
-                # Handling Sparse FFN with threshold
-                # Check if it's SparseFFN by checking attribute (or type, but attr is safer for duck typing)
-                if hasattr(self.ffn, 'router'):
-                    ffn_out_t = self.ffn(x_norm2_t, router_threshold=router_threshold)
-                else:
-                    ffn_out_t = self.ffn(x_norm2_t)
+                ffn_out_t = self.ffn(x_norm2_t)
             
             output_t = x_residual_t + ffn_out_t
             
-            # Store output for this timestep
+            # Store final output
+            # Overwrite the 'h_sequence' buffer with final output? No, reuse 'output' logic?
+            # 'output' currently holds h_t. We can overwrite it with Final Output.
             output[:, t:t+1, :] = output_t
             
-            # Update memory state at step t
-            # Extract h_t without batch dimension for state update
-            h_t_for_state = h_t.squeeze(1)  # [batch, model_dim]
-            
-            # Update short-term memory state at step t
-            # Use h_t as both k and v for short-term memory
-            state.update_state_sequential(
-                bank_type='short',
-                new_k=h_t_for_state,
-                new_v=h_t_for_state,
-                step=t
-            )
-            
-            # Update h_prev for next iteration
-            h_prev = h_t  # [batch, 1, model_dim]
+            # State Update (Essential for next steps/layers)
+            h_t_for_state = h_t.squeeze(1)
+            state.update_state_sequential(bank_type='short', new_k=h_t_for_state, new_v=h_t_for_state, step=t)
+
         
         # Update long-term memory (less frequent, typically at block level)
         # For now, use a summary of the sequence
