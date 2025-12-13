@@ -54,14 +54,12 @@ class MMRecBlock(nn.Module):
         self.norm1 = nn.RMSNorm()
         self.norm2 = nn.RMSNorm()
         
-        # FFN
-        self.ffn = nn.Sequential([
-            nn.Dense(self.ffn_dim),
-            nn.gelu,
-            nn.Dropout(self.dropout_rate),
-            nn.Dense(self.model_dim),
-            nn.Dropout(self.dropout_rate)
-        ])
+        # FFN (Explicit definition to handle 'deterministic' arg correctly)
+        self.ffn_dense1 = nn.Dense(self.ffn_dim)
+        self.ffn_act = nn.gelu
+        self.ffn_drop1 = nn.Dropout(self.dropout_rate)
+        self.ffn_dense2 = nn.Dense(self.model_dim)
+        self.ffn_drop2 = nn.Dropout(self.dropout_rate)
         
         self.dropout = nn.Dropout(self.dropout_rate)
 
@@ -178,7 +176,14 @@ class MMRecBlock(nn.Module):
         
         # FFN
         x_norm2 = self.norm2(x_residual)
-        ffn_out = self.ffn(x_norm2, deterministic=not training)
+        
+        # Manual FFN execution
+        h_ffn = self.ffn_dense1(x_norm2)
+        h_ffn = self.ffn_act(h_ffn)
+        h_ffn = self.ffn_drop1(h_ffn, deterministic=not training)
+        h_ffn = self.ffn_dense2(h_ffn)
+        ffn_out = self.ffn_drop2(h_ffn, deterministic=not training)
+        
         output = x_residual + ffn_out
         
         # 4. State Update (Functional)
