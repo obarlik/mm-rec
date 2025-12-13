@@ -62,7 +62,7 @@ class MultiMemoryAttention(nn.Module):
         # However, for hierarchy pooling it IS needed. 
         # For now, let's keep it ENABLED for correctness, but we can toggle here.
         # Actually, for debugging speed, let's DISABLE it to see if speed jumps.
-        hierarchy = HDS.construct_hierarchy(memory_state, disable_roll=True)
+        hierarchy = HDS.construct_hierarchy(memory_state)
         k, v = HDS.query_memory(hierarchy, query, level=0)
         
         # k, v are [B, Slots, Dim] OR [Slots, Dim] (unbatched)
