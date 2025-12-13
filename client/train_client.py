@@ -220,8 +220,6 @@ def main():
         trainer.download_model(args.job_id, args.output)
     
     elif args.action == 'update':
-        trainer.update_server()
-    
     elif args.action == 'list':
         trainer.list_jobs()
 
