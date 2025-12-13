@@ -55,196 +55,100 @@ class TrainingJob:
         self.log_file = WORKSPACE_DIR / f"{job_id}.log"
         self.start_time = None
         
-    def run(self):
-        """Run training on GPU."""
+        def run(self):
+        """Run training via External JAX Process."""
         try:
             self.status = "training"
             self.start_time = time.time()
             
-            # Import training modules
-            import sys
-            # Code is extracted to workspace root
-            # sys.path.insert(0, str(WORKSPACE_DIR)) # DISABLED: Prefer local git code
+            # 1. Prepare Config File
+            config_path = WORKSPACE_DIR / f"{self.job_id}_config.json"
             
-            # Add repo root to path to allow importing mm_rec
-            sys.path.append(str(Path(__file__).parent.parent))
+            # Add data path to config so JAX script knows where to look
+            # Check for available data file
+            data_file = WORKSPACE_DIR / "data" / "chat_data_real.jsonl"
+            if not data_file.exists():
+                 data_file = WORKSPACE_DIR / "data" / "chat_data.jsonl" # Fallback
             
-            from mm_rec.model import MMRecModel
-            from mm_rec.tokenizers.openai_tokenizer import get_tokenizer
-            from mm_rec.training.sft_trainer import SFTTrainer, SFTConfig
-            from mm_rec.data.chat_format import ChatMessage
-            from mm_rec.data.dataset import SFTDataset, SFTDataCollator
-            from torch.utils.data import DataLoader
+            config_dict = self.config.dict()
+            config_dict['data_path'] = str(data_file.absolute())
+            # JAX needs explicit types often, pydantic handles this
             
-            # Setup
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            # Initialize tokenizer without hardcoded size (tiktoken will set it correct, e.g. 100277)
-            tokenizer = get_tokenizer()
-            vocab_size = tokenizer.vocab_size + 1000  # Safety margin for special tokens/mismatches
-            print(f"ℹ️  Tokenizer initialized with vocab_size={vocab_size} (inc. +1000 margin)")
-            
-            # Load data
-            # Load data - check multiple locations
-            possible_paths = [
-                WORKSPACE_DIR / "data" / "train.json",  # Uploaded
-                WORKSPACE_DIR / "data" / "phase1" / "train.json"  # Git synced
+            with open(config_path, 'w') as f:
+                json.dump(config_dict, f, indent=2)
+                
+            print(f"ℹ️  Job {self.job_id}: Config saved to {config_path}")
+
+            # 2. Build JAX Command
+            # Assumes running from project root
+            cmd = [
+                "python", 
+                "mm_rec_jax/training/train_server_jax.py",
+                "--config", str(config_path.absolute())
             ]
             
-            data_path = None
-            for p in possible_paths:
-                if p.exists():
-                    data_path = p
-                    break
+            print(f"🚀 Launching JAX Training: {' '.join(cmd)}")
             
-            if not data_path:
-                raise FileNotFoundError(f"train.json not found in: {[str(p) for p in possible_paths]}")
+            # 3. Launch Process
+            with open(self.log_file, 'w') as log_f:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1, # Line buffered
+                    cwd=str(Path.cwd())
+                )
                 
-            print(f"ℹ️  Loading data from: {data_path}")
-            with open(data_path) as f:
-                data = json.load(f)  # Full dataset (no limit)
-            
-            conversations = []
-            for item in data:
-                messages = [ChatMessage(role=msg['role'], content=msg['content']) 
-                           for msg in item['conversations']]
-                conversations.append(messages)
-            
-            # Create model
-            model = MMRecModel(
-                vocab_size=vocab_size,
-                model_dim=self.config.model_dim,
-                num_layers=self.config.num_layers,
-                num_heads=self.config.num_heads,
-                ffn_dim=self.config.ffn_dim
-            ).to(device)
-            
-            print(f"ℹ️  Model loaded. Parameters: {sum(p.numel() for p in model.parameters())/1e6:.1f}M")
-            
-            # Advanced Optimization: torch.compile
-            # SKIP: torch.compile causing backend errors with HDS structure.
-            # We stick to the optimized eager execution which gives 16 it/s.
-            
-            model.to(device)
-            
-            # Training setup
-            sft_config = SFTConfig(
-                max_length=self.config.max_length,
-                label_smoothing=0.1
-            )
-            # Create trainer
-            trainer = SFTTrainer(model, tokenizer, sft_config)
-            
-            # Create Dataset and DataLoader
-            print(f"ℹ️  Initializing Dataset and DataLoader (num_workers=4)...")
-            dataset = SFTDataset(conversations, tokenizer, sft_config)
-            collator = SFTDataCollator(tokenizer, ignore_index=sft_config.ignore_index)
-            
-            dataloader = DataLoader(
-                dataset,
-                batch_size=self.config.batch_size,
-                shuffle=True,
-                collate_fn=collator,
-                num_workers=4,        # 4 CPU workers for tokenization
-                prefetch_factor=2,    # Prefetch 2 batches per worker
-                persistent_workers=True, # Keep workers alive
-                pin_memory=True       # Faster transfer to GPU
-            )
-            
-            # Optimizer & Scheduler
-            optimizer = torch.optim.AdamW(model.parameters(), lr=self.config.learning_rate)
-            
-            # Training loop
-            epoch_steps = len(dataloader) # More accurate with DataLoader
-            if epoch_steps == 0:
-                 print(f"⚠️  Warning: Dataset size ({len(conversations)}) is smaller than batch size ({self.config.batch_size}). Adjusting to 1 step per epoch.")
-                 epoch_steps = 1
-                 
-            total_steps = epoch_steps * self.config.num_epochs
-            self.progress['total_steps'] = total_steps
-            
-            print(f"ℹ️  Training: {len(conversations)} examples, {self.config.num_epochs} epochs, {total_steps} total steps")
-            
-            # OneCycleLR: Warmup + Cosine Decay
-            scheduler = torch.optim.lr_scheduler.OneCycleLR(
-                optimizer,
-                max_lr=self.config.learning_rate,
-                total_steps=total_steps,
-                pct_start=0.1, # 10% warmup
-                anneal_strategy='cos'
-            )
-            
-            for epoch in range(self.config.num_epochs):
-                epoch_losses = []
+                # 4. Monitor & Stream Logs
+                self.process = process # Store ref for stopping
                 
-                # DataLoader Loop
-                for i, batch in enumerate(dataloader):
-                    step_start_time = time.time()
+                for line in iter(process.stdout.readline, ''):
+                    if not line: break
                     
-                    # Check for stop signal
+                    # Write to log file
+                    log_f.write(line)
+                    log_f.flush()
+                    
+                    # Optional: Parse line to update self.progress for API
+                    # Expected format: "Epoch X | Step Y ... Loss L ... Speed S"
+                    if "Loss" in line and "Step" in line:
+                        try:
+                            parts = line.split('|')
+                            # Crude parsing
+                            loss_str = [p for p in parts if "Loss" in p][0].split('Loss')[1].strip()
+                            speed_str = [p for p in parts if "Speed" in p][0].split('Speed:')[1].strip()
+                            self.progress['loss'] = float(loss_str)
+                            self.progress['speed'] = speed_str
+                        except:
+                            pass
+                    
+                    # Check for external stop signal (Gateway API set status='stopped')
                     if self.status == "stopped":
-                        print(f"🛑 Job {self.job_id} stopped by user.")
+                        print(f"🛑 Kill signal received for Job {self.job_id}")
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except:
+                            process.kill()
                         return
-                    
-                    # Get current LR (before step)
-                    current_lr = scheduler.get_last_lr()[0]
 
-                    # Training step (Batched on GPU)
-                    result = trainer.train_step_from_batch(batch, optimizer, device)
-                    epoch_losses.append(result['loss'])
-                    # Step Scheduler
-                    scheduler.step()
-                    
-                    # Update progress
-                    current_step = (epoch * len(dataloader)) + i + 1
-                    elapsed = time.time() - self.start_time
-                    step_duration = time.time() - step_start_time
-                    steps_per_sec = 1.0 / step_duration if step_duration > 0 else 0.0
-                    
-                    # Calculate ETA based on remaining batches
-                    remaining_steps = total_steps - current_step
-                    # Moving average speed could be better, but instantaneous is fine for now
-                    eta_seconds = remaining_steps / steps_per_sec if steps_per_sec > 0 else 0
-                    
-                    self.progress = {
-                        'epoch': epoch + 1,
-                        'step': current_step,
-                        'total_steps': total_steps,
-                        'loss': result['loss'],
-                        'eta_minutes': int(eta_seconds / 60),
-                        'speed': f"{steps_per_sec:.2f} it/s",
-                        'lr': f"{current_lr:.2e}"
-                    }
-                    
-                    # Save checkpoint every 500 steps
-                    if (current_step) % 500 == 0:
-                        checkpoint_path = CHECKPOINTS_DIR / f"{self.job_id}_epoch{epoch+1}_step{current_step}.pt"
-                        torch.save({
-                            'model_state_dict': model.state_dict(),
-                            'optimizer_state_dict': optimizer.state_dict(),
-                            'config': self.config.dict(),
-                            'progress': self.progress
-                        }, checkpoint_path)
-            
-            # Save final model
-            self.model_path = CHECKPOINTS_DIR / f"{self.job_id}_final.pt"
-            
-            avg_loss = sum(epoch_losses) / len(epoch_losses) if epoch_losses else 0.0
-            
-            torch.save({
-                'model_state_dict': model.state_dict(),
-                'config': self.config.dict(),
-                'final_loss': avg_loss
-            }, self.model_path)
-            
-            self.status = "completed"
-            
+            # 5. Completion
+            return_code = process.wait()
+            if return_code == 0:
+                self.status = "completed"
+                print(f"✅ Job {self.job_id} Completed Successfully.")
+            else:
+                self.status = "failed"
+                print(f"❌ Job {self.job_id} Failed with code {return_code}.")
+
         except Exception as e:
             import traceback
             error_msg = f"{str(e)}\n{traceback.format_exc()}"
             self.status = "failed"
-            self.progress['error'] = str(e) # Keep short for status
+            self.progress['error'] = str(e)
             with open(self.log_file, 'a') as f:
-                f.write(f"\nERROR: {error_msg}\n")
+                f.write(f"\nCRITICAL SERVER ERROR: {error_msg}\n")
 
 @app.get("/api/debug/benchmark")
 async def run_benchmark():

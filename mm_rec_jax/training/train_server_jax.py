@@ -190,27 +190,43 @@ def main():
     print(f"   JAX Devices: {jax.devices()}")
     
     print(f"   JAX Devices: {jax.devices()}")
-    
+
+    # Parse Arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=str, required=False, help='Path to JSON config file')
+    args, unknown = parser.parse_known_args()
+
+    # Load Config from File or Defaults
+    if args.config and os.path.exists(args.config):
+        print(f"📄 Loading config from {args.config}")
+        with open(args.config) as f:
+            config = json.load(f)
+    else:
+        print("⚠️  No config file provided. Using Default Medium Config.")
+        # Setup Model (Config for Benchmark - MEDIUM)
+        # Testing speed: Batch 32, Dim 128
+        config = {
+            'vocab_size': 100300, # cl100k_base has ~100k tokens
+            'model_dim': 128,
+            'num_layers': 2,
+            'num_heads': 4,
+            'learning_rate': 1e-4,
+            # Add defaults for data
+            'data_path': 'data/chat_data_real.jsonl',
+            'batch_size': 32,
+            'num_epochs': 5
+        }
+
     # Setup Data (Real)
-    data_path = 'data/chat_data_real.jsonl'
+    data_path = config.get('data_path', 'data/chat_data_real.jsonl')
     if not os.path.exists(data_path):
         # Fallback for testing if file missing
-        print(f"⚠️  Data file {data_path} not found. Using dummy path 'data/chat_data.jsonl' if exists.")
+        print(f"⚠️  Data file {data_path} not found. Using dummy fallback.")
         data_path = 'data/chat_data.jsonl'
         
-    batch_size = 32
+    batch_size = config.get('batch_size', 32)
     train_loader = load_real_dataset(data_path, batch_size=batch_size)
     num_batches = len(train_loader)
-    
-    # Setup Model (Config for Benchmark - MEDIUM)
-    # Testing speed: Batch 32, Dim 128
-    config = {
-        'vocab_size': 100300, # cl100k_base has ~100k tokens
-        'model_dim': 128,
-        'num_layers': 2,
-        'num_heads': 4,
-        'learning_rate': 1e-4
-    }
     
     # Setup Model
     rng = jax.random.PRNGKey(0)
@@ -273,31 +289,38 @@ def main():
     print(f"   Compilation done in {time.time() - start:.2f}s")
     
     # Loop
+    num_epochs = config.get('num_epochs', 5)
+    print(f"🔥 Starting Training Loop for {num_epochs} Epochs...")
+    
     t0 = time.time()
-    for i, batch in enumerate(train_loader):
-        rng, step_rng = jax.random.split(rng)
-        
-        # Convert PyTorch tensor to JAX array (Zero copy where possible)
-        batch_jax = jnp.array(batch['input_ids'].numpy())
-        
-        state, loss, batched_mem_state, metrics = train_step(state, batch_jax, batched_mem_state, step_rng)
-        
-        # Periodic Monitoring
-        if i % 10 == 0:
-            # Check for NaN / Instability Risk
-            grad_norm = metrics['grad_norm']
-            state_max = metrics['state_max']
+    global_step = 0
+    
+    for epoch in range(num_epochs):
+        print(f"   Epoch {epoch+1}/{num_epochs}")
+        for i, batch in enumerate(train_loader):
+            global_step += 1
+            rng, step_rng = jax.random.split(rng)
             
-            # Simple "Predictive" Warning
-            warning_msg = ""
-            if state_max > 90.0:
-                warning_msg += " ⚠️ SATURATION RISK (State > 90)"
-            if grad_norm > 10.0:
-                 warning_msg += " ⚠️ EXPLOSION RISK (Grad > 10)"
+            # Convert PyTorch tensor to JAX array (Zero copy where possible)
+            batch_jax = jnp.array(batch['input_ids'].numpy())
             
-            if i % 10 == 0: # Print every 10 steps for visibility with small data
+            state, loss, batched_mem_state, metrics = train_step(state, batch_jax, batched_mem_state, step_rng)
+            
+            # Periodic Monitoring
+            if i % 10 == 0:
+                # Check for NaN / Instability Risk
+                grad_norm = metrics['grad_norm']
+                state_max = metrics['state_max']
+                
+                # Simple "Predictive" Warning
+                warning_msg = ""
+                if state_max > 90.0:
+                    warning_msg += " ⚠️ SATURATION RISK (State > 90)"
+                if grad_norm > 10.0:
+                     warning_msg += " ⚠️ EXPLOSION RISK (Grad > 10)"
+                
                 elapsed = time.time() - t0
-                avg_speed = (i + 1) / (elapsed + 1e-6)
+                avg_speed = global_step / (elapsed + 1e-6)
                 
                 # Get VRAM Usage via nvidia-smi (Linux)
                 try:
@@ -305,7 +328,7 @@ def main():
                 except:
                     vram_mb = "N/A"
                     
-                print(f"Step {i}/{num_batches}: Loss {loss:.4f} | Speed: {avg_speed:.2f} it/s | VRAM: {vram_mb} MiB | GNorm: {grad_norm:.2f} | MaxState: {state_max:.2f}{warning_msg}")
+                print(f"Epoch {epoch+1} | Step {global_step} (E:{i}/{num_batches}): Loss {loss:.4f} | Speed: {avg_speed:.2f} it/s | VRAM: {vram_mb} MiB | GNorm: {grad_norm:.2f} | MaxState: {state_max:.2f}{warning_msg}")
 
 if __name__ == '__main__':
     main()
