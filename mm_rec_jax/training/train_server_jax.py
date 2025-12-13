@@ -22,9 +22,10 @@ def get_smart_memory_fraction(reserve_gb=4.0):
         free_mib, total_mib = map(int, result.strip().split('\n')[0].split(', '))
         
         # Calculate Target Allocation
-        # Strategy: "Minimum Necessary"
-        # We target a fixed 4 GB, which is plenty for this model size
-        target_mib = 4096 # 4 GB fixed
+        # Strategy: "Safe Minimum"
+        # 4GB was too tight for Compilation/Autotuning.
+        # We target 8 GB, which handles the 2GB chunks safely.
+        target_mib = 8192 # 8 GB fixed
         
         # Ensure we don't exceed free memory
         if target_mib > (free_mib - 500):
