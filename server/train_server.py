@@ -118,11 +118,29 @@ class TrainingJob:
                 ffn_dim=self.config.ffn_dim
             ).to(device)
             
+            print(f"ℹ️  Model loaded. Parameters: {sum(p.numel() for p in model.parameters())/1e6:.1f}M")
+            
+            # Advanced Optimization: torch.compile
+            # This fuses kernels and optimizes execution graph (PyTorch 2.0+)
+            if hasattr(torch, "compile"):
+                print("🚀 Compiling model with torch.compile...")
+                try:
+                    # mode="reduce-overhead" is best for small batches/loops
+                    model = torch.compile(model, mode="reduce-overhead")
+                    print("✅ Model compiled.")
+                except Exception as e:
+                    print(f"⚠️ torch.compile failed: {e}. continuing without compilation.")
+            else:
+                print("ℹ️  torch.compile not available (requires PyTorch 2.0+).")
+                
+            model.to(device) # Ensure model is on device after potential compilation
+            
             # Training setup
             sft_config = SFTConfig(
                 max_length=self.config.max_length,
                 label_smoothing=0.1
             )
+            # Create trainer
             trainer = SFTTrainer(model, tokenizer, sft_config)
             
             # Create Dataset and DataLoader

@@ -97,6 +97,17 @@ def benchmark():
     model.to(device)
     model.eval()
     
+    model.eval()
+    
+    # Optional: torch.compile
+    if hasattr(torch, "compile"):
+        print("🚀 Compiling model with torch.compile...")
+        try:
+             model = torch.compile(model, mode="reduce-overhead")
+             print("✅ Model compiled.")
+        except Exception as e:
+             print(f"⚠️ torch.compile failed: {e}")
+             
     # Create dummy batch
     batch_size = 16
     seq_len = 256
