@@ -649,16 +649,9 @@ class AssociativeScanExponential(Function):
                     triton_failed = True
                     break
             except Exception as e:
-                # Triton kernel failed - fall back to CPU
+                # Triton kernel failed - fall back to Torch Native GPU (Silent failover)
                 triton_failed = True
-                import warnings
-                warnings.warn(
-                    f"⚠️ Triton kernel failed at block {block_idx}/{num_blocks}: {e}\n"
-                    f"   Falling back to CPU implementation (O(N) sequential, NOT O(N log N)).\n"
-                    f"   This indicates a CRITICAL performance issue for long sequences!",
-                    RuntimeWarning,
-                    stacklevel=2
-                )
+                # We don't warn here anymore because we have a robust GPU fallback
                 break
             
             # Propagate carry-over to next block

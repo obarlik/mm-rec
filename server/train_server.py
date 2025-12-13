@@ -265,7 +265,7 @@ async def list_jobs():
             {
                 "job_id": job_id,
                 "status": job.status,
-                "config": job.config.dict()
+                "config": job.config.model_dump()
             }
             for job_id, job in jobs.items()
         ]
