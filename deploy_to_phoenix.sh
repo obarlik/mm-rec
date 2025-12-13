@@ -36,7 +36,7 @@ echo "✅ Code synced"
 # 3. Setup Python
 echo ""
 echo "[3/5] Setting up Python..."
-ssh ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_DIR} && python3 -m venv .venv && source .venv/bin/activate && pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && pip install -r requirements.txt && pip install -r server/requirements.txt"
+ssh ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_DIR} && python3 -m venv .venv && source .venv/bin/activate && pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && pip install -r requirements.txt && pip install -r server/requirements.txt && pip install -r requirements_jax.txt"
 
 # 4. Verify GPU
 echo ""
