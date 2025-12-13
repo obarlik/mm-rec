@@ -184,6 +184,7 @@ def main():
     parser.add_argument("--output", help="Output path (for download)")
     parser.add_argument("--project-dir", default=".", help="Project directory (for sync)")
     parser.add_argument('--file', type=str, help='File path for upload')
+    parser.add_argument('--force', action='store_true', help='Force operation (check active jobs)')
     
     args = parser.parse_args()
     

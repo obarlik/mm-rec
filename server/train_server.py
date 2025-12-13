@@ -321,9 +321,18 @@ async def list_jobs():
     }
 
 @app.post("/api/update")
-async def update_server(restart: bool = True):
+async def update_server(restart: bool = True, force: bool = False):
     """Pull latest code from git and optionally restart server."""
     try:
+        # Check for active jobs if restarting
+        if restart and not force:
+            active_jobs = [j.job_id for j in jobs.values() if j.status in ["training", "queued"]]
+            if active_jobs:
+                raise HTTPException(
+                    status_code=409, 
+                    detail=f"Active jobs running: {active_jobs}. Use force=True to restart anyway."
+                )
+
         import subprocess
         import os
         import sys
@@ -401,7 +410,7 @@ async def update_server(restart: bool = True):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-SERVER_VERSION = "v0.2.8 (Robust os.execv Restart)"
+SERVER_VERSION = "v0.2.9 (Safe Update + Force)"
 
 @app.get("/api/health")
 async def health_check():
