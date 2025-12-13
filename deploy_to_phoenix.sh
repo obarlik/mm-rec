@@ -45,15 +45,15 @@ ssh ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_DIR} && source .venv/bin/activate
 
 # 5. Start server
 echo ""
-echo "[5/5] Starting server..."
-ssh ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_DIR} && source .venv/bin/activate && pkill -f train_server.py || true && nohup python server/train_server.py > server.log 2>&1 &"
+echo "[5/5] Starting server (Gateway)..."
+ssh ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_DIR} && source .venv/bin/activate && pkill -f gateway.py || true && pkill -f train_server.py || true && nohup python server/gateway.py > gateway.log 2>&1 &"
 
 echo ""
 echo "================================================"
 echo "✅ Deployment Complete!"
 echo "================================================"
 echo ""
-echo "📡 Server: http://phoenix:8000"
+echo "📡 Gateway: http://phoenix:8000 (Proxies to Internal Server)"
 echo ""
 echo "🔧 Test:"
 echo "  python client/train_client.py --server http://phoenix:8000 --action health"

@@ -355,96 +355,19 @@ async def list_jobs():
     }
 
 @app.post("/api/update")
-async def update_server(restart: bool = True, force: bool = False):
-    """Pull latest code from git and optionally restart server."""
-    try:
-        # Check for active jobs if restarting
-        if restart and not force:
-            active_jobs = [j.job_id for j in jobs.values() if j.status in ["training", "queued"]]
-            if active_jobs:
-                raise HTTPException(
-                    status_code=409, 
-                    detail=f"Active jobs running: {active_jobs}. Use force=True to restart anyway."
-                )
-
-        import subprocess
-        import os
-        import sys
-        
-        # Get current directory
-        server_dir = Path(__file__).parent.parent
-        
-        # Pull latest code
-        result = subprocess.run(
-            ["git", "pull"],
-            cwd=server_dir,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        
-        if result.returncode != 0:
-            raise HTTPException(status_code=500, detail=f"Git pull failed: {result.stderr}")
-        
-        response_data = {
-            "status": "updated",
-            "message": "Code updated successfully.",
-            "git_output": result.stdout
-        }
-        
-        # Auto-restart if requested
-        if restart:
-            response_data["message"] += " Server restarting..."
-            response_data["restart"] = True
-            
-            # Schedule restart after response is sent
-            async def restart_server():
-                await asyncio.sleep(1)  # Give time for response to be sent
-                
-                # Determine which restart script to use
-                server_dir = Path(__file__).parent.parent
-                
-                # Try PowerShell script first (Windows)
-                ps_script = server_dir / "server" / "restart_server.ps1"
-                sh_script = server_dir / "server" / "restart_server.sh"
-                
-                if ps_script.exists() and sys.platform == 'win32':
-                    # Windows PowerShell (Only on actual Windows)
-                    subprocess.Popen(
-                        ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps_script)],
-                        cwd=server_dir,
-                        # DETACHED_PROCESS needed for Windows
-                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS if sys.platform == 'win32' else 0,
-                        start_new_session=True # For WSL/Linux
-                    )
-                elif sh_script.exists():
-                    # Linux/WSL/Mac - Use os.execv for robust process replacement
-                    # Re-build extensions first if needed
-                    cpp_dir = server_dir / "mm_rec" / "cpp"
-                    if (cpp_dir / "setup.py").exists():
-                        subprocess.run([sys.executable, "setup.py", "build_ext", "--inplace"], 
-                                     cwd=cpp_dir, check=False)
-                    
-                    # Restart process directly
-                    print("🔄 Executing os.execv restart...")
-                    os.execv(sys.executable, [sys.executable] + sys.argv)
-                else:
-                    # Fallback to os.execv
-                    os.execv(sys.executable, ['python'] + sys.argv)
-            
-            asyncio.create_task(restart_server())
-        else:
-            response_data["note"] = "Server restart required manually"
-        
-        return response_data
-        
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=500, detail="Git pull timeout")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def update_server():
+    """
+    Legacy update endpoint. 
+    In Gateway mode, this should be handled by the Gateway.
+    If reached here, it means we are running standalone or Gateway proxied it incorrectly.
+    """
+    return {
+        "status": "ignored",
+        "message": "Update should be handled by Gateway (Layer 1). This is Layer 2."
+    }
 
 
-SERVER_VERSION = "v0.2.16 (Batching + LR Scheduler)"
+SERVER_VERSION = "v0.3.0 (Gateway Supported)"
 
 @app.get("/api/health")
 async def health_check():
@@ -456,16 +379,23 @@ async def health_check():
         "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
         "active_jobs": len([j for j in jobs.values() if j.status == "training"]),
         "vocab_size": tokenizer.vocab_size if 'tokenizer' in globals() else "Not Initialized",
-        "features": ["Triton-Free", "Threaded-Training", "Auto-Restart", "Vocab-Safe-Margin"]
+        "mode": "worker_process"
     }
     return gpu_info
 
 if __name__ == "__main__":
     import uvicorn
-    print("\n🚀 Starting MM-Rec Training Server...")
+    import argparse
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8001, help="Port to listen on")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to listen on")
+    args = parser.parse_args()
+    
+    print("\n🚀 Starting MM-Rec Training Server (Worker)...")
     print(f"ℹ️  Version: {SERVER_VERSION}")
-    print("✅ Features: [Triton-Free GPU] [Threaded Execution] [Auto-Restart]")
     print(f"📁 Workspace: {WORKSPACE_DIR.absolute()}")
-    print(f"💾 Checkpoints: {CHECKPOINTS_DIR.absolute()}")
     print(f"🔧 Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    print(f"📡 Listening on: {args.host}:{args.port}")
+    
+    uvicorn.run(app, host=args.host, port=args.port)
