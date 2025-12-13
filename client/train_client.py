@@ -150,6 +150,25 @@ class RemoteTrainer:
         except Exception as e:
             print(f"❌ Server unreachable: {e}")
             return False
+    
+    def update_server(self):
+        """Trigger server to pull latest code from git."""
+        print("🔄 Updating server code...")
+        try:
+            response = requests.post(f"{self.server_url}/api/update")
+            if response.status_code == 200:
+                result = response.json()
+                print(f"✅ {result['message']}")
+                print(f"📝 Git output: {result.get('git_output', 'No output')}")
+                if result.get('note'):
+                    print(f"⚠️  {result['note']}")
+                return True
+            else:
+                print(f"❌ Update failed: {response.text}")
+                return False
+        except Exception as e:
+            print(f"❌ Update failed: {e}")
+            return False
 
 def main():
     """CLI interface."""
@@ -157,7 +176,7 @@ def main():
     
     parser = argparse.ArgumentParser(description="Remote GPU Training Client")
     parser.add_argument("--server", default="http://localhost:8000", help="Server URL")
-    parser.add_argument("--action", choices=['sync', 'submit', 'monitor', 'download', 'list', 'health'], 
+    parser.add_argument("--action", choices=['sync', 'submit', 'monitor', 'download', 'list', 'health', 'update'], 
                        required=True, help="Action to perform")
     parser.add_argument("--job-id", help="Job ID (for monitor/download)")
     parser.add_argument("--config", help="Config file (for submit)")
@@ -200,8 +219,13 @@ def main():
         
         trainer.download_model(args.job_id, args.output)
     
+    elif args.action == 'update':
+        trainer.update_server()
+    
     elif args.action == 'list':
         trainer.list_jobs()
 
+
 if __name__ == "__main__":
     main()
+```

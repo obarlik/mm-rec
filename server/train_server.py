@@ -267,6 +267,41 @@ async def list_jobs():
         ]
     }
 
+@app.post("/api/update")
+async def update_server():
+    """Pull latest code from git and restart server."""
+    try:
+        import subprocess
+        import os
+        
+        # Get current directory
+        server_dir = Path(__file__).parent.parent
+        
+        # Pull latest code
+        result = subprocess.run(
+            ["git", "pull"],
+            cwd=server_dir,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"Git pull failed: {result.stderr}")
+        
+        # Restart server (will be handled by process manager or manual restart)
+        return {
+            "status": "updated",
+            "message": "Code updated successfully. Server restart required.",
+            "git_output": result.stdout,
+            "note": "Please restart the server manually or use a process manager"
+        }
+        
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Git pull timeout")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint."""
