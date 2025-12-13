@@ -2,6 +2,13 @@ import sys
 import os
 import time
 import argparse
+import os
+
+# Prevent JAX from hogging all GPU memory (allows sharing)
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
+# Optional: Limit to 50% if needed, but false should suffice for demand-paging
+# os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.50'
+
 import jax
 import jax.numpy as jnp
 import optax
