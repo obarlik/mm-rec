@@ -113,7 +113,7 @@ class TrainingJob:
             for epoch in range(self.config.num_epochs):
                 epoch_losses = []
                 
-                    for i, conv in enumerate(conversations):
+                for i, conv in enumerate(conversations):
                     # Check for stop signal
                     if self.status == "stopped":
                         print(f"🛑 Job {self.job_id} stopped by user.")
@@ -382,7 +382,7 @@ async def update_server(restart: bool = True):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-SERVER_VERSION = "v0.2.2 (Data Upload + Stop)"
+SERVER_VERSION = "v0.2.3 (Hotfix: Indentation)"
 
 @app.get("/api/health")
 async def health_check():
