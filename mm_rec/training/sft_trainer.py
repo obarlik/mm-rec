@@ -207,6 +207,41 @@ class SFTTrainer:
         
         return loss
     
+    def train_step_from_batch(
+        self,
+        batch: Dict[str, torch.Tensor],
+        optimizer: torch.optim.Optimizer,
+        device: torch.device
+    ) -> Dict[str, float]:
+        """
+        Train step using pre-collated batch.
+        Args:
+            batch: Dict with 'input_ids', 'labels', 'attention_mask'
+        """
+        self.model.train()
+        optimizer.zero_grad()
+        
+        # Move to device
+        input_ids = batch['input_ids'].to(device)
+        labels = batch['labels'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
+        
+        # Forward Pass
+        logits = self.model(input_ids)
+        
+        # Loss
+        loss = self.compute_loss(logits, labels, attention_mask)
+        
+        # Backward & Step
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        optimizer.step()
+        
+        return {
+            'loss': loss.item(),
+            'perplexity': torch.exp(loss).item() if loss.item() < 10 else float('inf')
+        }
+
     def train_batch(
         self,
         batch_messages: List[List[ChatMessage]],
@@ -215,7 +250,8 @@ class SFTTrainer:
         verbose: bool = False
     ) -> Dict[str, float]:
         """
-        Train on a batch of conversations (True Parallelism).
+        Legacy: Train on a batch of conversations (Slow CPU path).
+        Deprecated: Use train_step_from_batch with DataLoader.
         """
         self.model.train()
         optimizer.zero_grad()

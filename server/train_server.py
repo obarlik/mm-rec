@@ -73,6 +73,8 @@ class TrainingJob:
             from mm_rec.tokenizers.openai_tokenizer import get_tokenizer
             from mm_rec.training.sft_trainer import SFTTrainer, SFTConfig
             from mm_rec.data.chat_format import ChatMessage
+            from mm_rec.data.dataset import SFTDataset, SFTDataCollator
+            from torch.utils.data import DataLoader
             
             # Setup
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -122,15 +124,32 @@ class TrainingJob:
                 label_smoothing=0.1
             )
             trainer = SFTTrainer(model, tokenizer, sft_config)
+            
+            # Create Dataset and DataLoader
+            print(f"ℹ️  Initializing Dataset and DataLoader (num_workers=4)...")
+            dataset = SFTDataset(conversations, tokenizer, sft_config)
+            collator = SFTDataCollator(tokenizer, ignore_index=sft_config.ignore_index)
+            
+            dataloader = DataLoader(
+                dataset,
+                batch_size=self.config.batch_size,
+                shuffle=True,
+                collate_fn=collator,
+                num_workers=4,        # 4 CPU workers for tokenization
+                prefetch_factor=2,    # Prefetch 2 batches per worker
+                persistent_workers=True, # Keep workers alive
+                pin_memory=True       # Faster transfer to GPU
+            )
+            
             # Optimizer & Scheduler
             optimizer = torch.optim.AdamW(model.parameters(), lr=self.config.learning_rate)
             
             # Training loop
-            epoch_steps = len(conversations) // self.config.batch_size
+            epoch_steps = len(dataloader) # More accurate with DataLoader
             if epoch_steps == 0:
-                print(f"⚠️  Warning: Dataset size ({len(conversations)}) is smaller than batch size ({self.config.batch_size}). Adjusting to 1 step per epoch.")
-                epoch_steps = 1
-                
+                 print(f"⚠️  Warning: Dataset size ({len(conversations)}) is smaller than batch size ({self.config.batch_size}). Adjusting to 1 step per epoch.")
+                 epoch_steps = 1
+                 
             total_steps = epoch_steps * self.config.num_epochs
             self.progress['total_steps'] = total_steps
             
@@ -148,16 +167,10 @@ class TrainingJob:
             for epoch in range(self.config.num_epochs):
                 epoch_losses = []
                 
-                # Batch Loop
-                batch_size = self.config.batch_size
-                for i in range(0, len(conversations), batch_size):
+                # DataLoader Loop
+                for i, batch in enumerate(dataloader):
                     step_start_time = time.time()
                     
-                    # Create Batch
-                    batch_conversations = conversations[i : i + batch_size]
-                    if not batch_conversations:
-                        continue
-                        
                     # Check for stop signal
                     if self.status == "stopped":
                         print(f"🛑 Job {self.job_id} stopped by user.")
@@ -166,21 +179,20 @@ class TrainingJob:
                     # Get current LR (before step)
                     current_lr = scheduler.get_last_lr()[0]
 
-                    # Training step (Batched)
-                    # Removed broad try-except to see actual errors
-                    result = trainer.train_batch(batch_conversations, optimizer, device, verbose=False)
+                    # Training step (Batched on GPU)
+                    result = trainer.train_step_from_batch(batch, optimizer, device)
                     epoch_losses.append(result['loss'])
                     # Step Scheduler
                     scheduler.step()
                     
                     # Update progress
-                    current_step = (epoch * total_steps) + (i // batch_size) + 1
+                    current_step = (epoch * len(dataloader)) + i + 1
                     elapsed = time.time() - self.start_time
                     step_duration = time.time() - step_start_time
                     steps_per_sec = 1.0 / step_duration if step_duration > 0 else 0.0
                     
                     # Calculate ETA based on remaining batches
-                    remaining_steps = (total_steps * self.config.num_epochs) - current_step
+                    remaining_steps = total_steps - current_step
                     # Moving average speed could be better, but instantaneous is fine for now
                     eta_seconds = remaining_steps / steps_per_sec if steps_per_sec > 0 else 0
                     
@@ -195,8 +207,8 @@ class TrainingJob:
                     }
                     
                     # Save checkpoint every 500 steps
-                    if (i + 1) % 500 == 0:
-                        checkpoint_path = CHECKPOINTS_DIR / f"{self.job_id}_epoch{epoch+1}_step{i+1}.pt"
+                    if (current_step) % 500 == 0:
+                        checkpoint_path = CHECKPOINTS_DIR / f"{self.job_id}_epoch{epoch+1}_step{current_step}.pt"
                         torch.save({
                             'model_state_dict': model.state_dict(),
                             'optimizer_state_dict': optimizer.state_dict(),
