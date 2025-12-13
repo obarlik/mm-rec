@@ -304,7 +304,30 @@ async def update_server(restart: bool = True):
             # Schedule restart after response is sent
             async def restart_server():
                 await asyncio.sleep(1)  # Give time for response to be sent
-                os.execv(sys.executable, ['python'] + sys.argv)
+                
+                # Determine which restart script to use
+                server_dir = Path(__file__).parent.parent
+                
+                # Try PowerShell script first (Windows)
+                ps_script = server_dir / "server" / "restart_server.ps1"
+                sh_script = server_dir / "server" / "restart_server.sh"
+                
+                if ps_script.exists():
+                    # Windows PowerShell
+                    subprocess.Popen(
+                        ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps_script)],
+                        cwd=server_dir,
+                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
+                    )
+                elif sh_script.exists():
+                    # Linux/Mac bash
+                    subprocess.Popen(
+                        ["bash", str(sh_script)],
+                        cwd=server_dir
+                    )
+                else:
+                    # Fallback to os.execv
+                    os.execv(sys.executable, ['python'] + sys.argv)
             
             asyncio.create_task(restart_server())
         else:
