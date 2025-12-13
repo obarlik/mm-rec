@@ -62,9 +62,8 @@ class TrainingJob:
             self.start_time = time.time()
             
             # Import training modules
-            import sys
             # Code is extracted to workspace root
-            sys.path.insert(0, str(WORKSPACE_DIR))
+            # sys.path.insert(0, str(WORKSPACE_DIR)) # DISABLED: Prefer local git code
             
             from mm_rec.model import MMRecModel
             from mm_rec.tokenizers.openai_tokenizer import get_tokenizer
