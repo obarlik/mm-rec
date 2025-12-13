@@ -5,7 +5,6 @@ from typing import Dict, Optional
 
 # Define MemoryState as a PyTreeNode so it can be passed through JIT/Scan boundaries
 @struct.dataclass
-@struct.dataclass
 class MemoryBank(struct.PyTreeNode):
     k: jnp.ndarray
     v: jnp.ndarray
