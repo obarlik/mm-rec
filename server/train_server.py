@@ -164,14 +164,11 @@ class TrainingJob:
                     current_lr = scheduler.get_last_lr()[0]
 
                     # Training step (Batched)
-                    try:
-                        result = trainer.train_batch(batch_conversations, optimizer, device, verbose=False)
-                        epoch_losses.append(result['loss'])
-                        # Step Scheduler
-                        scheduler.step()
-                    except Exception as e:
-                        print(f"⚠️ Batch failed: {e}")
-                        continue
+                    # Removed broad try-except to see actual errors
+                    result = trainer.train_batch(batch_conversations, optimizer, device, verbose=False)
+                    epoch_losses.append(result['loss'])
+                    # Step Scheduler
+                    scheduler.step()
                     
                     # Update progress
                     current_step = (epoch * total_steps) + (i // batch_size) + 1
@@ -206,10 +203,13 @@ class TrainingJob:
             
             # Save final model
             self.model_path = CHECKPOINTS_DIR / f"{self.job_id}_final.pt"
+            
+            avg_loss = sum(epoch_losses) / len(epoch_losses) if epoch_losses else 0.0
+            
             torch.save({
                 'model_state_dict': model.state_dict(),
                 'config': self.config.dict(),
-                'final_loss': sum(epoch_losses) / len(epoch_losses)
+                'final_loss': avg_loss
             }, self.model_path)
             
             self.status = "completed"
