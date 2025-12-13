@@ -56,8 +56,18 @@ Log-Sum-Exp (LSE) stabilizasyonu ile uygulanan Paralel Kümülatif İşlem (Asso
 """
 
 import torch
-import triton
-import triton.language as tl
+import torch.nn.functional as F
+
+# Optional triton import for GPU acceleration
+try:
+    import triton
+    import triton.language as tl
+    TRITON_AVAILABLE = True
+except ImportError:
+    TRITON_AVAILABLE = False
+    triton = None
+    tl = None
+
 from torch.autograd import Function
 from typing import Optional
 

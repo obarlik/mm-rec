@@ -1,11 +1,19 @@
 """
-Hybrid Precision Associative Scan
-BF16 for weights/activations, FP64 for log-space accumulation
+Hybrid Associative Scan: JAX + Triton
+Combines JAX for CPU and Triton for GPU
 """
 
 import torch
-import triton
-import triton.language as tl
+# Optional triton import
+try:
+    import triton
+    import triton.language as tl
+    TRITON_AVAILABLE = True
+except ImportError:
+    TRITON_AVAILABLE = False
+    triton = None
+    tl = None
+
 from typing import Optional
 from .associative_scan_triton import AssociativeScanExponential
 
