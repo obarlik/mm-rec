@@ -33,12 +33,22 @@ echo "🛑 Stopping old processes..."
 pkill -f gateway.py || true
 pkill -f train_server.py || true
 
-# 5. Start Gateway
-echo "▶️  Starting Gateway on port $GATEWAY_PORT..."
-nohup python server/gateway.py > gateway.log 2>&1 &
-PID=$!
+# 5. Start Servers
+echo "▶️  Starting Training Server (Worker L2) on Port 8001..."
+nohup python server/train_server.py --port 8001 > train_server.log 2>&1 &
+PID_SERVER=$!
+echo "   ✅ Server PID: $PID_SERVER"
 
-echo "✅ Gateway started (PID: $PID)"
-echo "📜 Logs: tail -f gateway.log"
+echo "▶️  Starting Gateway (L1) on port $GATEWAY_PORT..."
+# Gateway proxies to localhost:8001 by default
+nohup python server/gateway.py --port $GATEWAY_PORT > gateway.log 2>&1 &
+PID_GATEWAY=$!
+echo "   ✅ Gateway PID: $PID_GATEWAY"
+
 echo ""
-echo "test with: curl http://localhost:$GATEWAY_PORT/gateway/health"
+echo "📝 Logs:"
+echo "   tail -f gateway.log"
+echo "   tail -f train_server.log"
+echo ""
+echo "✅ Stack is UP."
+echo "   Gateway Health: curl http://localhost:$GATEWAY_PORT/gateway/health"
