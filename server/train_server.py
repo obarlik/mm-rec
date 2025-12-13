@@ -375,12 +375,16 @@ async def update_server(restart: bool = True):
                         start_new_session=True # For WSL/Linux
                     )
                 elif sh_script.exists():
-                    # Linux/Mac bash
-                    subprocess.Popen(
-                        ["bash", str(sh_script)],
-                        cwd=server_dir,
-                        start_new_session=True # Critical for WSL: detaches child from parent
-                    )
+                    # Linux/WSL/Mac - Use os.execv for robust process replacement
+                    # Re-build extensions first if needed
+                    cpp_dir = server_dir / "mm_rec" / "cpp"
+                    if (cpp_dir / "setup.py").exists():
+                        subprocess.run([sys.executable, "setup.py", "build_ext", "--inplace"], 
+                                     cwd=cpp_dir, check=False)
+                    
+                    # Restart process directly
+                    print("🔄 Executing os.execv restart...")
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
                 else:
                     # Fallback to os.execv
                     os.execv(sys.executable, ['python'] + sys.argv)
@@ -397,7 +401,7 @@ async def update_server(restart: bool = True):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-SERVER_VERSION = "v0.2.7 (Auto-Update Verified)"
+SERVER_VERSION = "v0.2.8 (Robust os.execv Restart)"
 
 @app.get("/api/health")
 async def health_check():
