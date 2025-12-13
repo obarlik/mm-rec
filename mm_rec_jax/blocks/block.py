@@ -43,6 +43,12 @@ class MMRecBlock(nn.Module):
         self.W_gamma_context_1 = nn.Dense(self.model_dim // 4)
         self.W_gamma_context_2 = nn.Dense(self.model_dim)
         
+        # Attention
+        self.attn = MultiMemoryAttention(
+            model_dim=self.model_dim,
+            num_heads=self.num_heads
+        )
+        
         # Norms
         self.norm1 = nn.RMSNorm()
         self.norm2 = nn.RMSNorm()
