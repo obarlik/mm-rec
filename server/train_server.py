@@ -123,16 +123,16 @@ class TrainingJob:
             
             # Training loop
             total_steps = len(conversations) * self.config.num_epochs
-            self.progress['total_steps'] = total_steps
-            
-            for epoch in range(self.config.num_epochs):
-                epoch_losses = []
-                
                 for i, conv in enumerate(conversations):
+                    step_start_time = time.time()
+                    
                     # Check for stop signal
                     if self.status == "stopped":
                         print(f"🛑 Job {self.job_id} stopped by user.")
                         return
+                    
+                    # Get current LR
+                    current_lr = optimizer.param_groups[0]['lr']
 
                     # Training step
                     result = trainer.train_step(conv, optimizer, device, verbose=False)
@@ -141,16 +141,23 @@ class TrainingJob:
                     # Update progress
                     step = epoch * len(conversations) + i + 1
                     elapsed = time.time() - self.start_time
-                    steps_per_sec = step / elapsed if elapsed > 0 else 0
+                    step_duration = time.time() - step_start_time
+                    steps_per_sec = 1.0 / step_duration if step_duration > 0 else 0.0
+                    
                     remaining_steps = total_steps - step
-                    eta_seconds = remaining_steps / steps_per_sec if steps_per_sec > 0 else 0
+                    # Calculate ETA based on average speed (simple moving average for stability)
+                    # For simplicity, using overall average logic or instantaneous
+                    overall_speed = step / elapsed if elapsed > 0 else 0
+                    eta_seconds = remaining_steps / overall_speed if overall_speed > 0 else 0
                     
                     self.progress = {
                         'epoch': epoch + 1,
                         'step': i + 1,
                         'total_steps': len(conversations),
                         'loss': result['loss'],
-                        'eta_minutes': int(eta_seconds / 60)
+                        'eta_minutes': int(eta_seconds / 60),
+                        'speed': f"{steps_per_sec:.2f} it/s",
+                        'lr': f"{current_lr:.2e}"
                     }
                     
                     # Save checkpoint every 500 steps
@@ -410,7 +417,7 @@ async def update_server(restart: bool = True, force: bool = False):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-SERVER_VERSION = "v0.2.9 (Safe Update + Force)"
+SERVER_VERSION = "v0.2.10 (Enhanced Monitor + Speed)"
 
 @app.get("/api/health")
 async def health_check():

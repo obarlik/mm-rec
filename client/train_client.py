@@ -96,7 +96,10 @@ class RemoteTrainer:
             if status['status'] == 'training':
                 prog = status['progress']
                 print(f"\r[Epoch {prog['epoch']}, Step {prog['step']}/{prog['total_steps']}] "
-                      f"Loss: {prog['loss']:.4f}, ETA: {prog['eta_minutes']}m    ", 
+                      f"Loss: {prog['loss']:.4f}, "
+                      f"Speed: {prog.get('speed', 'N/A')}, "
+                      f"LR: {prog.get('lr', 'N/A')}, "
+                      f"ETA: {prog['eta_minutes']}m    ", 
                       end='', flush=True)
             
             time.sleep(update_interval)
