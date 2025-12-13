@@ -78,5 +78,49 @@ def benchmark():
     print(f"⏱️  160 items (DataLoader): {duration:.4f}s")
     print(f"⚡ Speed: {count/duration:.2f} items/s")
 
+    # Benchmark Model Forward Pass
+    print("\n🚀 Benchmarking MMRecModel Forward Pass...")
+    from mm_rec.model import MMRecModel
+    
+    # Tiny config matching stage1_gpu.json
+    model = MMRecModel(
+        vocab_size=1000, # Dummy
+        model_dim=64,
+        num_layers=2,
+        num_heads=2,
+        max_seq_len=256,
+        use_hem=True # Default as used in training
+    )
+    
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"ℹ️  Device: {device}")
+    model.to(device)
+    model.eval()
+    
+    # Create dummy batch
+    batch_size = 16
+    seq_len = 256
+    dummy_input = torch.randint(0, 1000, (batch_size, seq_len)).to(device)
+    
+    # Warmup
+    print("🔥 Warming up...")
+    with torch.no_grad():
+        for _ in range(5):
+            _ = model(dummy_input)
+            
+    # Benchmark
+    print("⏱️  Running 10 forward passes...")
+    start_time = time.time()
+    with torch.no_grad():
+        for i in range(10):
+            _ = model(dummy_input)
+            if device == "cuda":
+                torch.cuda.synchronize()
+                
+    duration = time.time() - start_time
+    avg_fs = 10 / duration
+    print(f"⏱️  10 passes: {duration:.4f}s")
+    print(f"⚡ Speed: {avg_fs:.2f} it/s")
+
 if __name__ == "__main__":
     benchmark()
