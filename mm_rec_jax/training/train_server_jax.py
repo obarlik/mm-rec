@@ -196,26 +196,28 @@ def main():
     parser.add_argument('--config', type=str, required=False, help='Path to JSON config file')
     args, unknown = parser.parse_known_args()
 
-    # Load Config from File or Defaults
+    # Default Config
+    default_config = {
+        'vocab_size': 100300, # cl100k_base has ~100k tokens
+        'model_dim': 128,
+        'num_layers': 2,
+        'num_heads': 4,
+        'learning_rate': 1e-4,
+        'data_path': 'data/chat_data_real.jsonl',
+        'batch_size': 32,
+        'num_epochs': 5
+    }
+
+    # Load Config from File (Merge with Defaults)
+    config = default_config.copy()
     if args.config and os.path.exists(args.config):
         print(f"📄 Loading config from {args.config}")
         with open(args.config) as f:
-            config = json.load(f)
+            file_config = json.load(f)
+            # Update defaults with file config (only for keys that exist or new keys)
+            config.update(file_config)
     else:
-        print("⚠️  No config file provided. Using Default Medium Config.")
-        # Setup Model (Config for Benchmark - MEDIUM)
-        # Testing speed: Batch 32, Dim 128
-        config = {
-            'vocab_size': 100300, # cl100k_base has ~100k tokens
-            'model_dim': 128,
-            'num_layers': 2,
-            'num_heads': 4,
-            'learning_rate': 1e-4,
-            # Add defaults for data
-            'data_path': 'data/chat_data_real.jsonl',
-            'batch_size': 32,
-            'num_epochs': 5
-        }
+        print("⚠️  No config file provided. Using Defaults.")
 
     # Setup Data (Real)
     data_path = config.get('data_path', 'data/chat_data_real.jsonl')

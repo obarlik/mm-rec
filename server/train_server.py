@@ -72,7 +72,8 @@ class TrainingJob:
             
             config_dict = self.config.dict()
             config_dict['data_path'] = str(data_file.absolute())
-            # JAX needs explicit types often, pydantic handles this
+            # Explicitly set vocab_size for JAX (tiktoken cl100k_base + margin)
+            config_dict['vocab_size'] = 100300 
             
             with open(config_path, 'w') as f:
                 json.dump(config_dict, f, indent=2)
