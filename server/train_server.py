@@ -237,6 +237,25 @@ class TrainingJob:
             with open(self.log_file, 'a') as f:
                 f.write(f"\nERROR: {error_msg}\n")
 
+@app.get("/api/debug/benchmark")
+async def run_benchmark():
+    """Run speed benchmark and return results."""
+    import sys
+    import io
+    from contextlib import redirect_stdout
+    import debug_speed
+    
+    # Capture output
+    f = io.StringIO()
+    with redirect_stdout(f):
+        try:
+            debug_speed.benchmark()
+        except Exception as e:
+            import traceback
+            print(f"Error: {e}\n{traceback.format_exc()}")
+            
+    return {"output": f.getvalue()}
+
 @app.post("/api/code/sync")
 async def sync_code(file: UploadFile = File(...)):
     """Receive and extract code archive."""
