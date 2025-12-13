@@ -119,9 +119,21 @@ class TrainingJob:
                 label_smoothing=0.1
             )
             trainer = SFTTrainer(model, tokenizer, sft_config)
+            # Optimizer & Scheduler
+            optimizer = torch.optim.AdamW(model.parameters(), lr=self.config.learning_rate)
+            
             # Training loop
-            total_steps = len(conversations) // self.config.batch_size
+            total_steps = (len(conversations) // self.config.batch_size) * self.config.num_epochs
             self.progress['total_steps'] = total_steps
+            
+            # OneCycleLR: Warmup + Cosine Decay
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=self.config.learning_rate,
+                total_steps=total_steps,
+                pct_start=0.1, # 10% warmup
+                anneal_strategy='cos'
+            )
             
             for epoch in range(self.config.num_epochs):
                 epoch_losses = []
@@ -141,13 +153,15 @@ class TrainingJob:
                         print(f"🛑 Job {self.job_id} stopped by user.")
                         return
                     
-                    # Get current LR
-                    current_lr = optimizer.param_groups[0]['lr']
+                    # Get current LR (before step)
+                    current_lr = scheduler.get_last_lr()[0]
 
                     # Training step (Batched)
                     try:
                         result = trainer.train_batch(batch_conversations, optimizer, device, verbose=False)
                         epoch_losses.append(result['loss'])
+                        # Step Scheduler
+                        scheduler.step()
                     except Exception as e:
                         print(f"⚠️ Batch failed: {e}")
                         continue
@@ -430,7 +444,7 @@ async def update_server(restart: bool = True, force: bool = False):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-SERVER_VERSION = "v0.2.15 (True Batching)"
+SERVER_VERSION = "v0.2.16 (Batching + LR Scheduler)"
 
 @app.get("/api/health")
 async def health_check():
