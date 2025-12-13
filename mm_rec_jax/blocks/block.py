@@ -124,6 +124,8 @@ class MMRecBlock(nn.Module):
         # Force Init of W_g_h (h dependent)
         # Scan cannot initialize variables, so we run it once here
         _ = self.W_g_h(h0)
+        # Force Init of Recurrence Norm
+        _ = self.norm_recurrence(h0)
         
         # 2. Recurrence Scan Function
         # Scan carries: (h_prev)
