@@ -65,6 +65,9 @@ class TrainingJob:
             # Code is extracted to workspace root
             # sys.path.insert(0, str(WORKSPACE_DIR)) # DISABLED: Prefer local git code
             
+            # Add repo root to path to allow importing mm_rec
+            sys.path.append(str(Path(__file__).parent.parent))
+            
             from mm_rec.model import MMRecModel
             from mm_rec.tokenizers.openai_tokenizer import get_tokenizer
             from mm_rec.training.sft_trainer import SFTTrainer, SFTConfig
