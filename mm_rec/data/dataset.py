@@ -39,7 +39,8 @@ class SFTDataset(Dataset):
         # Tokenize (returns list of ints)
         # tiktoken encode() only accepts 'text' and 'allowed_special'/'disallowed_special'
         # It does not support max_length, truncation, padding natively.
-        input_ids = self.tokenizer.encode(input_text)
+        # We allow all special tokens (like <|endoftext|>) to pass through.
+        input_ids = self.tokenizer.encode(input_text, allowed_special="all")
         
         # Manual Truncation
         if len(input_ids) > self.config.max_length:
@@ -48,11 +49,12 @@ class SFTDataset(Dataset):
         # Create labels
         if self.config.only_predict_assistant:
             # Tokenize full input to find assistant token position
-            full_input_ids = self.tokenizer.encode(input_text)
+            full_input_ids = self.tokenizer.encode(input_text, allowed_special="all")
             
             # Assistant token
             assistant_token = self.chat_formatter.assistant_token
-            assistant_token_ids = self.tokenizer.encode(assistant_token)
+            # Assistant token usually doesn't contain special tokens, but safe to allow
+            assistant_token_ids = self.tokenizer.encode(assistant_token, allowed_special="all")
             
             # Find assistant token position
             assistant_pos = -1
@@ -71,7 +73,7 @@ class SFTDataset(Dataset):
             
             if assistant_pos >= 0:
                 # Tokenize target
-                target_ids = self.tokenizer.encode(target_text)
+                target_ids = self.tokenizer.encode(target_text, allowed_special="all")
                 
                 # Manual Truncation for Target (if needed within context)
                 # Usually we just fit it into the buffer
