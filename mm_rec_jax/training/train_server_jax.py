@@ -145,8 +145,18 @@ def main():
     def expand(x): return jnp.repeat(x[None, ...], batch_size, axis=0)
     
     batched_mem_state = single_mem_state.replace(
-        short_term=short_term.replace(k=expand(short_term.k), v=expand(short_term.v), age=expand(short_term.age)),
-        long_term=long_term.replace(k=expand(long_term.k), v=expand(long_term.v), usage=expand(long_term.usage))
+        short_term=short_term.replace(
+            k=expand(short_term.k), 
+            v=expand(short_term.v), 
+            age=expand(short_term.age),
+            idx=jnp.repeat(short_term.idx[None, ...], batch_size, axis=0) # Broadcast scalar idx to [Batch]
+        ),
+        long_term=long_term.replace(
+            k=expand(long_term.k), 
+            v=expand(long_term.v), 
+            usage=expand(long_term.usage),
+            idx=jnp.repeat(long_term.idx[None, ...], batch_size, axis=0)
+        )
     )
     
     print("🔥 Starting Training Loop...")
