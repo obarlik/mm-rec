@@ -72,8 +72,6 @@ class MemoryState(struct.PyTreeNode):
             kept_k = current_k[:, seq_len:, :]
             kept_v = current_v[:, seq_len:, :]
             kept_age = current_age[:, seq_len:] # [Batch, Slots-Seq]
-            kept_v = self.short_term.v[:, seq_len:, :]
-            kept_age = self.short_term.age[:, seq_len:] # [Batch, Slots-Seq]
             
             # Append new
             new_k = jnp.concatenate([kept_k, k_new], axis=1)
