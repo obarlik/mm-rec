@@ -85,27 +85,28 @@ def main():
     parser.add_argument('--config', type=str, default='configs/stage1_gpu.json')
     args = parser.parse_args()
     
-    # Simple Config (Hardcoded to match stage1_gpu.json for now)
-    config = {
-        'vocab_size': 32000,
-        'model_dim': 64,
-        'num_layers': 2,
-        'num_heads': 2,
-        'learning_rate': 1e-3
-    }
-    
     print("🚀 Initializing JAX Training...")
+    print(f"   JAX Devices: {jax.devices()}")
     
     # Setup Data
     # 1. Load Dataset (PyTorch)
     # dataset = SFTDataset(...)
     # For benchmark speed, generate random data
     print("ℹ️  Generating Random Data for Benchmark...")
-    batch_size = 16
-    seq_len = 256
-    num_batches = 100
+    batch_size = 32
+    seq_len = 512
+    num_batches = 500
     
     data = [np.random.randint(0, 32000, (batch_size, seq_len)).astype(np.int32) for _ in range(num_batches)]
+    
+    # Setup Model (Config for Benchmark)
+    config = {
+        'vocab_size': 32000,
+        'model_dim': 128,
+        'num_layers': 2,
+        'num_heads': 4,
+        'learning_rate': 3e-4 # Lower LR for stability
+    }
     
     # Setup Model
     rng = jax.random.PRNGKey(0)
@@ -161,7 +162,7 @@ def main():
         
         state, loss, batched_mem_state = train_step(state, batch_jax, batched_mem_state, step_rng)
         
-        if i % 10 == 0:
+        if i % 50 == 0:
             elapsed = time.time() - t0
             avg_speed = i / elapsed
             print(f"Step {i}: Loss {loss:.4f} | Speed: {avg_speed:.2f} it/s")
