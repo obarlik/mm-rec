@@ -101,33 +101,26 @@ class MMRecBlock(nn.Module):
         # Stability Clamp (Matches PyTorch MDI)
         gamma = jnp.clip(gamma, 1e-6, 1.0 - 1e-6)
         
+        # Pre-compute Vectorized Gating Part 1 (z dependent)
+        # This moves W_g_z out of scan for speed and fixes init issue
+        gate_z_seq = self.W_g_z(z) # [Batch, Seq, Dim]
+        
+        # Force Init of W_g_h (h dependent)
+        # Scan cannot initialize variables, so we run it once here
+        _ = self.W_g_h(h0)
+        
         # 2. Recurrence Scan Function
         # Scan carries: (h_prev)
-        # Inputs: (q_t, k_t, v_t, z_t, gamma_t)
+        # Inputs: (gate_z_t, z_t, gamma_t)
         
         def scan_fn(carry, inputs):
             h_prev = carry
-            z_t, gamma_t = inputs
+            gate_z_t, z_t, gamma_t = inputs
             
-            # Gating Logic (MDI style)
-            # gate = Sigmoid(W_g([z_t, h_prev]))
-            # In PyTorch MDI, W_g takes concat(z_t, h_prev).
-            # My self.W_g here was initialized as Dense(model_dim). 
-            # PyTorch MDI has Linear(2*dim, dim).
-            # I need to concat and use correct weight (or separate weights if I want to avoid concat overhead).
-            
-            # But wait, self.W_g in my JAX setup was Dense(model_dim).
-            # I should update setup() too to be Dense(model_dim) but taking 2x input implicitly?
-            # Or just separate: gate = sigmoid(W_g1(z) + W_g2(h))
-            
-            # Let's check PyTorch again: `self.W_g = nn.Linear(model_dim * 2, model_dim)`
-            # So it does concat.
-            
-            # To match EXACTLY:
-            # I will use two Dense layers in setup: W_g_z and W_g_h and sum them.
-            # This is mathematically equivalent to W_g(concat(z, h)).
-            
-            gate_logits = self.W_g_z(z_t) + self.W_g_h(h_prev)
+            # Gating Logic
+            # gate_logits = W_g_z(z) + W_g_h(h)
+            # W_g_z(z) is precomputed
+            gate_logits = gate_z_t + self.W_g_h(h_prev)
             gate = nn.sigmoid(gate_logits)
             
             # MDI Formula:
@@ -144,19 +137,19 @@ class MMRecBlock(nn.Module):
         
         # Run Scan
         # We scan over axis 1 (Time)
+        # Run Scan
+        # We scan over axis 1 (Time)
         # scan arguments: (f, init, xs)
         # xs structure must match inputs of scan_fn
-        xs = (z, gamma)
-        # We need to transpose to [Seq, Batch, Dim] for scan iteration usually,
-        # but flax.linen.scan handles leading axis scan if configured.
-        # But jax.lax.scan expects leading axis scan.
+        xs = (gate_z_seq, z, gamma)
         
         # Transpose inputs to [Seq, Batch, Dim]
+        gate_z_T = jnp.swapaxes(gate_z_seq, 0, 1)
         z_T = jnp.swapaxes(z, 0, 1)
         gamma_T = jnp.swapaxes(gamma, 0, 1)
         
         # Run scan
-        _, h_sequence_T = jax.lax.scan(scan_fn, h0, (z_T, gamma_T))
+        _, h_sequence_T = jax.lax.scan(scan_fn, h0, (gate_z_T, z_T, gamma_T))
         
         # Transpose output back to [Batch, Seq, Dim]
         h_sequence = jnp.swapaxes(h_sequence_T, 0, 1)
