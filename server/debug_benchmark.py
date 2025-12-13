@@ -99,7 +99,15 @@ def benchmark():
     
     model.eval()
     
-    # SKIP: torch.compile disabled due to backend errors
+    # Optional: torch.compile
+    if hasattr(torch, "compile"):
+        print("🚀 Compiling model with torch.compile...")
+        try:
+             # Using max-autotune for highest speed if stable
+             model = torch.compile(model, mode="reduce-overhead")
+             print("✅ Model compiled.")
+        except Exception as e:
+             print(f"⚠️ torch.compile failed: {e}")
              
     # Create dummy batch
     batch_size = 16

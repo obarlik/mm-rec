@@ -57,8 +57,15 @@ class HierarchicalDataStructure(nn.Module):
         # Each level pools from the previous level
         self.pooling_layers = nn.ModuleList()
         for i in range(num_levels - 1):
-            # Average pooling to reduce dimensions
-            pool = nn.AdaptiveAvgPool1d(self.level_dims[i + 1])
+            # Use Fixed Average Pooling instead of Adaptive
+            # This is compiler-friendly (static shape)
+            # Ratio is usually 4 (e.g. 1024 -> 256)
+            prev_dim = self.level_dims[i]
+            curr_dim = self.level_dims[i + 1]
+            stride = prev_dim // curr_dim
+            kernel_size = stride # Non-overlapping windows
+            
+            pool = nn.AvgPool1d(kernel_size=kernel_size, stride=stride)
             self.pooling_layers.append(pool)
         
         # Cache for constructed hierarchy
@@ -103,61 +110,26 @@ class HierarchicalDataStructure(nn.Module):
         
         for level_idx in range(1, self.num_levels):
             # Pool from previous level
-            # AdaptiveAvgPool1d expects [N, C, L] where L is the dimension to pool over.
-            # Here, L should be num_slots.
+            # AvgPool1d expects [N, C, L] where L is the dimension to pool over (slots).
             
-            # Handle k_current (and v_current) which can be 3D or 4D
-            # 3D: [batch, num_slots, k_dim]
-            # 4D: [batch, num_memories, num_slots, k_dim] (e.g., if multiple memory banks are concatenated)
+            # Helper for pooling whether 3D or 4D
+            def pool_tensor(tensor):
+                 if tensor.dim() == 4:
+                     # [Batch, M, S, D] -> Reshape [B*M, D, S] -> Pool -> [B*M, D, S'] -> Reshape [B, M, S', D]
+                     b, m, s, d = tensor.shape
+                     # View as [B*M, S, D] -> Transpose [B*M, D, S]
+                     flat = tensor.view(b * m, s, d).transpose(1, 2)
+                     pooled_flat = self.pooling_layers[level_idx - 1](flat)
+                     # Transpose back [B*M, S', D] -> View [B, M, S', D]
+                     return pooled_flat.transpose(1, 2).view(b, m, -1, d)
+                 elif tensor.dim() == 3:
+                     # [Batch, S, D] -> Transpose [B, D, S] -> Pool -> Transpose [B, S', D]
+                     return self.pooling_layers[level_idx - 1](tensor.transpose(1, 2)).transpose(1, 2)
+                 else:
+                     raise ValueError(f"Unsupported dim: {tensor.dim()}")
             
-            # --- Pooling for Keys ---
-            if k_current.dim() == 4:
-                # [Batch, M, S, D]
-                # Avoid view(B*M) to prevent Inductor (3,4) assertion error.
-                # Loop over M dimension and pool each slice.
-                b, m, s, d = k_current.shape
-                pooled_slices = []
-                for i in range(m):
-                    # Slice: [B, S, D]
-                    k_slice = k_current[:, i, :, :]
-                    # Transpose to [B, D, S] for pooling
-                    k_slice_t = k_slice.transpose(1, 2)
-                    # Pool -> [B, D, new_S]
-                    pooled_t = self.pooling_layers[level_idx - 1](k_slice_t)
-                    # Transpose back -> [B, new_S, D]
-                    pooled = pooled_t.transpose(1, 2)
-                    pooled_slices.append(pooled)
-                
-                # Stack back to [B, M, new_S, D]
-                k_pooled = torch.stack(pooled_slices, dim=1)
-                
-            elif k_current.dim() == 3:
-                # Standard [B, S, D]
-                k_input_for_pool = k_current.transpose(1, 2) # [B, D, S]
-                k_pooled = self.pooling_layers[level_idx - 1](k_input_for_pool).transpose(1, 2) # [B, new_S, D]
-            else:
-                raise ValueError(f"Unsupported dimension for k_current: {k_current.dim()}")
-
-            # --- Pooling for Values ---
-            if v_current.dim() == 4:
-                # [Batch, M, S, D]
-                b, m, s, d = v_current.shape
-                pooled_slices = []
-                for i in range(m):
-                    v_slice = v_current[:, i, :, :]
-                    v_slice_t = v_slice.transpose(1, 2)
-                    pooled_t = self.pooling_layers[level_idx - 1](v_slice_t)
-                    pooled = pooled_t.transpose(1, 2)
-                    pooled_slices.append(pooled)
-                
-                v_pooled = torch.stack(pooled_slices, dim=1)
-                
-            elif v_current.dim() == 3:
-                 # Standard [B, S, D]
-                v_input_for_pool = v_current.transpose(1, 2) # [B, D, S]
-                v_pooled = self.pooling_layers[level_idx - 1](v_input_for_pool).transpose(1, 2) # [B, new_S, D]
-            else:
-                raise ValueError(f"Unsupported dimension for v_current: {v_current.dim()}")
+            k_pooled = pool_tensor(k_current)
+            v_pooled = pool_tensor(v_current)
             
             self.levels_cache[level_idx] = {
                 'k': k_pooled,

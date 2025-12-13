@@ -121,8 +121,18 @@ class TrainingJob:
             print(f"ℹ️  Model loaded. Parameters: {sum(p.numel() for p in model.parameters())/1e6:.1f}M")
             
             # Advanced Optimization: torch.compile
-            # SKIP: torch.compile causing backend errors with HDS structure.
-            # We stick to the optimized eager execution which gives 16 it/s.
+            # This fuses kernels and optimizes execution graph (PyTorch 2.0+)
+            if hasattr(torch, "compile"):
+                print("🚀 Compiling model with torch.compile...")
+                try:
+                    # mode="reduce-overhead" is best for small batches/loops
+                    # Try catch for Inductor errors
+                    model = torch.compile(model, mode="reduce-overhead")
+                    print("✅ Model compiled.")
+                except Exception as e:
+                    print(f"⚠️ torch.compile failed: {e}. continuing without compilation.")
+            else:
+                print("ℹ️  torch.compile not available (requires PyTorch 2.0+).")
             
             model.to(device)
             
