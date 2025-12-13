@@ -112,13 +112,27 @@ class HierarchicalDataStructure(nn.Module):
             
             # --- Pooling for Keys ---
             if k_current.dim() == 4:
-                # Reshape from [B, M, S, D] to [B*M, D, S] for pooling
+                # [Batch, M, S, D]
+                # Avoid view(B*M) to prevent Inductor (3,4) assertion error.
+                # Loop over M dimension and pool each slice.
                 b, m, s, d = k_current.shape
-                k_input_for_pool = k_current.view(b * m, s, d).transpose(1, 2) # [B*M, D, S]
-                k_pooled_flat = self.pooling_layers[level_idx - 1](k_input_for_pool) # [B*M, D, new_S]
-                k_pooled = k_pooled_flat.transpose(1, 2).view(b, m, -1, d) # Reshape back to [B, M, new_S, D]
+                pooled_slices = []
+                for i in range(m):
+                    # Slice: [B, S, D]
+                    k_slice = k_current[:, i, :, :]
+                    # Transpose to [B, D, S] for pooling
+                    k_slice_t = k_slice.transpose(1, 2)
+                    # Pool -> [B, D, new_S]
+                    pooled_t = self.pooling_layers[level_idx - 1](k_slice_t)
+                    # Transpose back -> [B, new_S, D]
+                    pooled = pooled_t.transpose(1, 2)
+                    pooled_slices.append(pooled)
+                
+                # Stack back to [B, M, new_S, D]
+                k_pooled = torch.stack(pooled_slices, dim=1)
+                
             elif k_current.dim() == 3:
-                # Reshape from [B, S, D] to [B, D, S] for pooling
+                # Standard [B, S, D]
                 k_input_for_pool = k_current.transpose(1, 2) # [B, D, S]
                 k_pooled = self.pooling_layers[level_idx - 1](k_input_for_pool).transpose(1, 2) # [B, new_S, D]
             else:
@@ -126,13 +140,20 @@ class HierarchicalDataStructure(nn.Module):
 
             # --- Pooling for Values ---
             if v_current.dim() == 4:
-                # Reshape from [B, M, S, D] to [B*M, D, S] for pooling
+                # [Batch, M, S, D]
                 b, m, s, d = v_current.shape
-                v_input_for_pool = v_current.view(b * m, s, d).transpose(1, 2) # [B*M, D, S]
-                v_pooled_flat = self.pooling_layers[level_idx - 1](v_input_for_pool) # [B*M, D, new_S]
-                v_pooled = v_pooled_flat.transpose(1, 2).view(b, m, -1, d) # Reshape back to [B, M, new_S, D]
+                pooled_slices = []
+                for i in range(m):
+                    v_slice = v_current[:, i, :, :]
+                    v_slice_t = v_slice.transpose(1, 2)
+                    pooled_t = self.pooling_layers[level_idx - 1](v_slice_t)
+                    pooled = pooled_t.transpose(1, 2)
+                    pooled_slices.append(pooled)
+                
+                v_pooled = torch.stack(pooled_slices, dim=1)
+                
             elif v_current.dim() == 3:
-                # Reshape from [B, S, D] to [B, D, S] for pooling
+                 # Standard [B, S, D]
                 v_input_for_pool = v_current.transpose(1, 2) # [B, D, S]
                 v_pooled = self.pooling_layers[level_idx - 1](v_input_for_pool).transpose(1, 2) # [B, new_S, D]
             else:
