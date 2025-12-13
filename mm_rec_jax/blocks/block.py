@@ -144,6 +144,10 @@ class MMRecBlock(nn.Module):
             # Final: h_new = h_tilde + gamma * h_prev
             h_t = h_tilde + gamma_t * h_prev
             
+            # CRITICAL SAFETY: Clip hidden state to prevent exponential explosion
+            # Since terms can sum > 1.0, this prevents infinity over long sequences
+            h_t = jnp.clip(h_t, -100.0, 100.0)
+            
             return h_t, h_t
         # scan arguments: (f, init, xs)
         # xs structure must match inputs of scan_fn

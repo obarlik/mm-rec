@@ -118,7 +118,7 @@ def main():
         'model_dim': 128,
         'num_layers': 2,
         'num_heads': 4,
-        'learning_rate': 1e-3
+        'learning_rate': 1e-4
     }
     
     # Setup Model
