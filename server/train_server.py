@@ -366,17 +366,20 @@ async def update_server(restart: bool = True):
                 sh_script = server_dir / "server" / "restart_server.sh"
                 
                 if ps_script.exists():
-                    # Windows PowerShell
+                    # Windows PowerShell/WSL
                     subprocess.Popen(
                         ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps_script)],
                         cwd=server_dir,
-                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
+                        # DETACHED_PROCESS needed for Windows
+                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS if sys.platform == 'win32' else 0,
+                        start_new_session=True # For WSL/Linux
                     )
                 elif sh_script.exists():
                     # Linux/Mac bash
                     subprocess.Popen(
                         ["bash", str(sh_script)],
-                        cwd=server_dir
+                        cwd=server_dir,
+                        start_new_session=True # Critical for WSL: detaches child from parent
                     )
                 else:
                     # Fallback to os.execv
@@ -394,7 +397,7 @@ async def update_server(restart: bool = True):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-SERVER_VERSION = "v0.2.5 (Path Fix + Full Data)"
+SERVER_VERSION = "v0.2.6 (Auto-Update Fixed)"
 
 @app.get("/api/health")
 async def health_check():
