@@ -590,6 +590,7 @@ class MMRecBlock(nn.Module):
             
             # On CPU, C++ extension is REQUIRED (no fallback)
             # On GPU, try Triton first, then C++ extension
+            # On GPU, try Triton first, then Torch Native (which is also GPU accelerated)
             if not torch.cuda.is_available():
                 # CPU mode: Try JAX first (fastest), then C++ extension
                 if _JAX_AVAILABLE:
@@ -608,13 +609,14 @@ class MMRecBlock(nn.Module):
                             f"   Block cannot proceed without optimized C++ extension."
                         ) from e
             else:
-                # GPU mode: Try Triton, fallback to C++ if needed
+                # GPU mode: Try Triton, fallback to Torch Native (Robust on Windows)
                 try:
                     cumprod_t = associative_scan_exponential(gamma_t_reshaped)
-                except RuntimeError:
-                    # GPU Triton failed, try C++ extension as last resort
-                    from ..core.associative_scan_triton import associative_scan_exponential_cpu_fallback
-                    cumprod_t = associative_scan_exponential_cpu_fallback(gamma_t_reshaped)
+                except (RuntimeError, ImportError):
+                    # GPU Triton failed/missing (common on Windows), use Torch Native GPU implementation
+                    # This uses torch.cumsum which IS GPU accelerated and fast
+                    from ..core.associative_scan_torch import associative_scan_exponential_torch
+                    cumprod_t = associative_scan_exponential_torch(gamma_t_reshaped)
             
             cumprod_t = cumprod_t.view(batch_size, 1, self.model_dim)
             

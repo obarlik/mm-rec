@@ -55,7 +55,7 @@ class TrainingJob:
         self.log_file = WORKSPACE_DIR / f"{job_id}.log"
         self.start_time = None
         
-    async def run(self):
+    def run(self):
         """Run training on GPU."""
         try:
             self.status = "training"
@@ -187,8 +187,9 @@ async def submit_training(config: TrainingConfig, background_tasks: BackgroundTa
     job = TrainingJob(job_id, config)
     jobs[job_id] = job
     
-    # Start training in background
-    background_tasks.add_task(job.run)
+    # Start training in background (in a thread to avoid blocking API)
+    from fastapi.concurrency import run_in_threadpool
+    background_tasks.add_task(run_in_threadpool, job.run)
     
     return {
         "job_id": job_id,

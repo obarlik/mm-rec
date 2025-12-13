@@ -1,0 +1,11 @@
+{
+    "job_name": "test_gpu_mini",
+    "model_dim": 32,
+    "num_layers": 1,
+    "num_heads": 1,
+    "ffn_dim": 64,
+    "num_epochs": 1,
+    "batch_size": 4,
+    "learning_rate": 0.001,
+    "max_length": 128
+}
