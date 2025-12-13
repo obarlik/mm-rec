@@ -1,6 +1,7 @@
 
 import os
 import torch
+import torch.nn as nn
 import sys
 from pathlib import Path
 import json
@@ -11,7 +12,10 @@ sys.path.insert(0, str(workspace_dir))
 
 # Enable debugging
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-torch.autograd.set_detect_anomaly(True)
+try:
+    torch.autograd.set_detect_anomaly(True)
+except:
+    pass
 
 def test_gpu():
     print("🔍 Starting GPU Diagnostic Test...")
@@ -54,8 +58,16 @@ def test_gpu():
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
         optimizer.zero_grad()
         
-        outputs = model(input_ids, labels=labels)
-        loss = outputs.loss
+        # MMRecModel returns logits only, handle loss manually
+        logits = model(input_ids)
+        
+        # Compute loss (Shift labels like CausalLM)
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        
+        loss_fct = nn.CrossEntropyLoss()
+        loss = loss_fct(shift_logits.view(-1, vocab_size), shift_labels.view(-1))
+        
         print(f"   Forward Pass Loss: {loss.item():.4f}")
         
         loss.backward()
