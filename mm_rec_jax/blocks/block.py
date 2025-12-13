@@ -101,6 +101,9 @@ class MMRecBlock(nn.Module):
         # Stability Clamp (Matches PyTorch MDI)
         gamma = jnp.clip(gamma, 1e-6, 1.0 - 1e-6)
         
+        # Initial hidden state (zeros) [Batch, Dim]
+        h0 = jnp.zeros((batch_size, self.model_dim))
+        
         # Pre-compute Vectorized Gating Part 1 (z dependent)
         # This moves W_g_z out of scan for speed and fixes init issue
         gate_z_seq = self.W_g_z(z) # [Batch, Seq, Dim]
@@ -132,13 +135,7 @@ class MMRecBlock(nn.Module):
             
             return h_t, h_t
 
-        # Initial hidden state (zeros) [Batch, Dim]
-        h0 = jnp.zeros((batch_size, self.model_dim))
-        
-        # Run Scan
-        # We scan over axis 1 (Time)
-        # Run Scan
-        # We scan over axis 1 (Time)
+            return h_t, h_t
         # scan arguments: (f, init, xs)
         # xs structure must match inputs of scan_fn
         xs = (gate_z_seq, z, gamma)
