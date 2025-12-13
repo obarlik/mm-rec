@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 import httpx
 from fastapi import FastAPI, Request, HTTPException, Response, BackgroundTasks
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 
 # Configuration
 GATEWAY_PORT = 8090
@@ -84,6 +84,21 @@ async def gateway_health():
         "server_pid": server_process.pid if server_process else None,
         "server_details": server_details
     }
+
+@app.get("/gateway/logs/{log_type}")
+async def get_system_logs(log_type: str):
+    """Get system logs (gateway or server)."""
+    if log_type == "gateway":
+        log_file = SERVER_DIR.parent / "gateway.log"
+    elif log_type == "server":
+        log_file = SERVER_DIR.parent / "server_internal.log"
+    else:
+        raise HTTPException(status_code=400, detail="Invalid log type. Use 'gateway' or 'server'.")
+        
+    if not log_file.exists():
+         raise HTTPException(status_code=404, detail=f"Log file not found: {log_file}")
+         
+    return FileResponse(log_file, media_type="text/plain")
 
 @app.post("/api/update")
 async def update_server():

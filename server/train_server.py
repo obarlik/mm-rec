@@ -347,6 +347,25 @@ async def download_model(job_id: str):
         media_type="application/octet-stream"
     )
 
+@app.get("/api/logs/file/{job_id}")
+async def get_job_log(job_id: str):
+    """Get log file for a specific job."""
+    job = jobs.get(job_id)
+    if not job:
+        # Check if file exists purely on disk (for past jobs)
+        log_path = WORKSPACE_DIR / f"{job_id}.log"
+    else:
+        log_path = job.log_file
+        
+    if not log_path.exists():
+        raise HTTPException(status_code=404, detail="Log file not found")
+        
+    return FileResponse(
+        log_path,
+        media_type="text/plain",
+        filename=f"{job_id}.log"
+    )
+
 @app.get("/api/jobs")
 async def list_jobs():
     """List all jobs."""

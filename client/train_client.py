@@ -169,9 +169,37 @@ class RemoteTrainer:
             else:
                 print(f"❌ Update failed: {response.text}")
                 return False
-        except Exception as e:
             print(f"❌ Update failed: {e}")
             return False
+
+    def get_logs(self, log_type: str, job_id: str = None):
+        """Get logs from server."""
+        print(f"📜 Fetching logs (Type: {log_type})...")
+        
+        try:
+            if log_type == 'job':
+                if not job_id:
+                    print("❌ Error: --job-id required for job logs")
+                    return
+                url = f"{self.server_url}/api/logs/file/{job_id}"
+            elif log_type in ['gateway', 'server']:
+                # Gateway logs might only work if connected to gateway port
+                url = f"{self.server_url}/gateway/logs/{log_type}"
+            else:
+                print(f"❌ Unknown log type: {log_type}")
+                return
+
+            response = requests.get(url)
+            
+            if response.status_code == 200:
+                print("\n" + "="*80)
+                print(response.text)
+                print("="*80 + "\n")
+            else:
+                print(f"❌ Failed to fetch logs: {response.status_code} - {response.text}")
+                
+        except Exception as e:
+            print(f"❌ Error fetching logs: {e}")
 
 def main():
     """CLI interface."""
@@ -180,13 +208,14 @@ def main():
     parser = argparse.ArgumentParser(description="Remote GPU Training Client")
     parser.add_argument("--server", default="http://localhost:8000", help="Server URL")
     parser.add_argument('--action', required=True, 
-                        choices=['sync', 'submit', 'monitor', 'download', 'list', 'health', 'update', 'stop', 'upload'],
+                        choices=['sync', 'submit', 'monitor', 'download', 'list', 'health', 'update', 'stop', 'upload', 'logs'],
                         help='Action to perform')
-    parser.add_argument("--job-id", help="Job ID (for monitor/download)")
+    parser.add_argument("--job-id", help="Job ID (for monitor/download/logs)")
     parser.add_argument("--config", help="Config file (for submit)")
     parser.add_argument("--output", help="Output path (for download)")
     parser.add_argument("--project-dir", default=".", help="Project directory (for sync)")
     parser.add_argument('--file', type=str, help='File path for upload')
+    parser.add_argument('--type', type=str, choices=['job', 'gateway', 'server'], help='Log type')
     parser.add_argument('--force', action='store_true', help='Force operation (check active jobs)')
     
     args = parser.parse_args()
@@ -196,6 +225,12 @@ def main():
     if args.action == 'health':
         trainer.health_check()
     
+    elif args.action == 'logs':
+        if not args.type:
+            print("❌ --type required for logs (job, gateway, server)")
+            return
+        trainer.get_logs(args.type, args.job_id)
+        
     elif args.action == 'sync':
         trainer.sync_code(args.project_dir)
     
