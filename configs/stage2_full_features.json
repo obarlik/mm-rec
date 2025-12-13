@@ -1,0 +1,16 @@
+{
+    "job_name": "stage2_full_features_gpu",
+    "model_dim": 128,
+    "num_layers": 4,
+    "num_heads": 4,
+    "ffn_dim": 256,
+    "num_epochs": 10,
+    "batch_size": 8,
+    "learning_rate": 0.0005,
+    "max_length": 512,
+    "use_hem": true,
+    "use_dpg": true,
+    "use_uboo": true,
+    "dpg_rank": 32,
+    "lambda_P": 0.1
+}
