@@ -345,20 +345,26 @@ async def update_server(restart: bool = True):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+SERVER_VERSION = "v0.2.1 (Windows Native + Debug)"
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint."""
-    return {
+    gpu_info = {
         "status": "healthy",
+        "version": SERVER_VERSION,
         "gpu_available": torch.cuda.is_available(),
         "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
-        "active_jobs": len([j for j in jobs.values() if j.status == "training"])
+        "active_jobs": len([j for j in jobs.values() if j.status == "training"]),
+        "vocab_size": tokenizer.vocab_size if 'tokenizer' in globals() else "Not Initialized",
+        "features": ["Triton-Free", "Threaded-Training", "Auto-Restart", "Vocab-Safe-Margin"]
     }
+    return gpu_info
 
 if __name__ == "__main__":
     import uvicorn
     print("\n🚀 Starting MM-Rec Training Server...")
-    print("ℹ️  Version: v0.2.0 (Windows Native Edition)")
+    print(f"ℹ️  Version: {SERVER_VERSION}")
     print("✅ Features: [Triton-Free GPU] [Threaded Execution] [Auto-Restart]")
     print(f"📁 Workspace: {WORKSPACE_DIR.absolute()}")
     print(f"💾 Checkpoints: {CHECKPOINTS_DIR.absolute()}")
