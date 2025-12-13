@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request, HTTPException, Response, BackgroundTasks
 from fastapi.responses import StreamingResponse
 
 # Configuration
-GATEWAY_PORT = 8000
+GATEWAY_PORT = 8090
 TRAIN_SERVER_PORT = 8001
 TRAIN_SERVER_HOST = "127.0.0.1"
 TRAIN_SERVER_URL = f"http://{TRAIN_SERVER_HOST}:{TRAIN_SERVER_PORT}"
