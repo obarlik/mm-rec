@@ -51,11 +51,27 @@ class MemoryState(struct.PyTreeNode):
         if is_chunk:
             # Chunk Update: [Batch, Seq, Dim]
             seq_len = k_new.shape[1]
-            num_slots = self.short_term.k.shape[1]
+            batch_size = k_new.shape[0]
+            
+            # Handle unbatched state (init case)
+            current_k = self.short_term.k
+            current_v = self.short_term.v
+            current_age = self.short_term.age
+            
+            if current_k.ndim == 2:
+                # Add Batch dim: [1, Slots, Dim]
+                # Then tile to match batch_size
+                current_k = jnp.broadcast_to(current_k[None, ...], (batch_size, current_k.shape[0], current_k.shape[1]))
+                current_v = jnp.broadcast_to(current_v[None, ...], (batch_size, current_v.shape[0], current_v.shape[1]))
+                current_age = jnp.broadcast_to(current_age[None, ...], (batch_size, current_age.shape[0]))
+
+            num_slots = current_k.shape[1]
             
             # Shift left by seq_len
             # [Batch, Slots-Seq, Dim]
-            kept_k = self.short_term.k[:, seq_len:, :]
+            kept_k = current_k[:, seq_len:, :]
+            kept_v = current_v[:, seq_len:, :]
+            kept_age = current_age[:, seq_len:] # [Batch, Slots-Seq]
             kept_v = self.short_term.v[:, seq_len:, :]
             kept_age = self.short_term.age[:, seq_len:] # [Batch, Slots-Seq]
             
