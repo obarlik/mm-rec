@@ -17,6 +17,18 @@ sleep 2
 echo "📥 Pulling latest code..."
 git pull
 
+# Build C++ extensions if needed
+echo "🔨 Building C++ extensions..."
+if [ -f "mm_rec/cpp/setup.py" ]; then
+    cd mm_rec/cpp
+    if python setup.py build_ext --inplace 2>/dev/null; then
+        echo "  ✅ C++ extensions built"
+    else
+        echo "  ⚠️  C++ build failed, using Python fallback"
+    fi
+    cd ../..
+fi
+
 # Activate environment and restart
 echo "🚀 Starting new server..."
 if [ -d ".venv" ]; then

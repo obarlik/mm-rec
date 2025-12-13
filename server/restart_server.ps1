@@ -9,7 +9,7 @@ Set-Location $ServerDir
 
 # Kill old server
 Write-Host "⏹️  Stopping old server..." -ForegroundColor Yellow
-Get-WmiObject Win32_Process | Where-Object {$_.CommandLine -like "*train_server.py*"} | ForEach-Object { 
+Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like "*train_server.py*" } | ForEach-Object { 
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
 }
 Start-Sleep -Seconds 2
@@ -17,6 +17,20 @@ Start-Sleep -Seconds 2
 # Pull latest code
 Write-Host "📥 Pulling latest code..." -ForegroundColor Yellow
 git pull
+
+# Build C++ extensions if needed
+Write-Host "🔨 Building C++ extensions..." -ForegroundColor Yellow
+if (Test-Path "mm_rec\cpp\setup.py") {
+    Push-Location "mm_rec\cpp"
+    python setup.py build_ext --inplace 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  ✅ C++ extensions built" -ForegroundColor Green
+    }
+    else {
+        Write-Host "  ⚠️  C++ build failed, using Python fallback" -ForegroundColor Yellow
+    }
+    Pop-Location
+}
 
 # Activate conda and restart
 Write-Host "🚀 Starting new server..." -ForegroundColor Green
