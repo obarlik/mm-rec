@@ -1,0 +1,19 @@
+{
+    "job_name": "mm_rec_100m_production",
+    "model_dim": 512,
+    "num_layers": 6,
+    "num_heads": 8,
+    "ffn_dim": 2048,
+    "num_epochs": 100,
+    "batch_size": 16,
+    "learning_rate": 3e-4,
+    "max_length": 1024,
+    "vocab_size": 100300,
+    "data_path": "data/production_100m.jsonl",
+    "checkpoint_interval": 1000,
+    "warmup_fraction": 0.05,
+    "early_stop_patience": 5,
+    "min_delta": 0.005,
+    "use_uboo": true,
+    "use_moe": false
+}

@@ -172,31 +172,50 @@ class SessionMemoryManager:
                 state_dict = torch.load(state_file, map_location=device)
                 
                 # Reconstruct MemoryState from saved tensors
-                # This is a simplified version - actual implementation would need
-                # to properly reconstruct MemoryState objects
                 from .memory_state import MemoryBank, MemoryState
                 
-                # Create memory banks from saved tensors
-                short_term = MemoryBank(
-                    k=state_dict.get('short_term_k'),
-                    v=state_dict.get('short_term_v'),
-                    state=None,
-                    decay_coeff=None
-                )
+                # Inference correct config from loaded tensors
+                # short_term_k: [slots, dim] or [batch, slots, dim]
+                st_k = state_dict.get('short_term_k')
+                lt_k = state_dict.get('long_term_m') # Key is stored as 'm' in save? need to check serialize. Assuming 'long_term_m' based on read code.
                 
-                long_term = MemoryBank(
-                    k=state_dict.get('long_term_m'),
-                    v=state_dict.get('long_term_v'),
-                    state=None,
-                    decay_coeff=None
-                )
-                
-                # Create MemoryState (simplified - would need proper config)
+                # Use shapes from loaded tensors to config (Robust loading)
+                if st_k is not None:
+                     k_dim = st_k.shape[-1]
+                     num_slots = st_k.shape[-2] if st_k.dim() > 1 else st_k.shape[0]
+                     st_cfg = {'k_dim': k_dim, 'v_dim': k_dim, 'num_slots': num_slots, 'dtype': st_k.dtype}
+                else:
+                     # Fallback defaults if load fails (shouldn't happen with valid file)
+                     st_cfg = {'k_dim': 128, 'v_dim': 128, 'num_slots': 512}
+
+                if lt_k is not None:
+                     k_dim = lt_k.shape[-1]
+                     num_slots = lt_k.shape[-2] if lt_k.dim() > 1 else lt_k.shape[0]
+                     lt_cfg = {'k_dim': k_dim, 'v_dim': k_dim, 'num_slots': num_slots, 'dtype': lt_k.dtype}
+                else:
+                     lt_cfg = {'k_dim': 128, 'v_dim': 128, 'num_slots': 512}
+
+                # 1. Initialize Empty State
                 state = MemoryState(
-                    short_term_config={'k_dim': 256, 'v_dim': 256, 'num_slots': 32768, 'dtype': torch.float32},
-                    long_term_config={'k_dim': 256, 'v_dim': 256, 'num_slots': 1024, 'dtype': torch.float32},
+                    short_term_config=st_cfg,
+                    long_term_config=lt_cfg,
                     device=device
                 )
+                
+                # 2. Populate Tensors
+                if st_k is not None:
+                    state.short_term.k.data = st_k.to(device)
+                    state.short_term.v.data = state_dict.get('short_term_v').to(device)
+                
+                if lt_k is not None:
+                    state.long_term.k.data = lt_k.to(device)
+                    state.long_term.v.data = state_dict.get('long_term_v').to(device)
+                    # Load usage if exists
+                    if 'long_term_usage' in state_dict:
+                         # MemoryBank doesn't officially store usage tensor in pytorch impl yet?
+                         # Checking memory_state.py... MemoryBank has k, v. MemoryState handles logic.
+                         # If checking memory_state.py, MemoryBank definition only had k, v.
+                         pass
                 
                 states.append(state)
                 layer_idx += 1

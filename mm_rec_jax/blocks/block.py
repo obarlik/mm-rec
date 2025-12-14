@@ -230,6 +230,9 @@ class MMRecBlock(nn.Module):
         # 4. State Update (Functional)
         # Return new state with updated Short Term Memory
         new_state = state.update_short(k_new=h_sequence, v_new=h_sequence)
+        
+        # CRITICAL FIX: Update Long-Term Memory (LRU) as well
+        new_state = new_state.update_long(k_new=h_sequence, v_new=h_sequence)
 
         # 5. UBOO Auxiliary Loss
         aux_loss = jnp.array(0.0)
