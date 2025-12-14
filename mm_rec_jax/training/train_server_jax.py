@@ -301,6 +301,7 @@ def main():
     
     t0 = time.time()
     global_step = 0
+    initial_step = 0
     start_epoch = 0
     
     # Check for Checkpoints to Resume
@@ -327,6 +328,7 @@ def main():
             # global_step approximation if needed, but not critical for AdamW resume (state has step)
             # Actually TrainState stores step!
             global_step = int(state.step)
+    initial_step = global_step
             print(f"   Resuming at Epoch {start_epoch}, Step {global_step}")
         except Exception as e:
             print(f"⚠️ Failed to resume from checkpoint: {e}")
@@ -366,7 +368,17 @@ def main():
                      warning_msg += " ⚠️ EXPLOSION RISK (Grad > 10)"
                 
                 elapsed = time.time() - t0
-                avg_speed = global_step / (elapsed + 1e-6)
+                # Fix: Speed should be based on steps processed IN THIS SESSION
+                steps_this_session = global_step - initial_step
+                avg_speed = steps_this_session / (elapsed + 1e-6)
+                
+                # Calculate ETA
+                total_expected_steps = num_epochs * num_batches
+                remaining_steps = total_expected_steps - global_step
+                eta_seconds = remaining_steps / (avg_speed + 1e-6)
+                eta_str = time.strftime("%M:%S", time.gmtime(eta_seconds))
+                if eta_seconds > 3600:
+                    eta_str = time.strftime("%H:%M:%S", time.gmtime(eta_seconds))
                 
                 # Get VRAM Usage via nvidia-smi (Linux)
                 try:
@@ -374,7 +386,7 @@ def main():
                 except:
                     vram_mb = "N/A"
                     
-                print(f"Epoch {epoch+1} | Step {global_step} (E:{i}/{num_batches}): Loss {loss:.4f} | Speed: {avg_speed:.2f} it/s | VRAM: {vram_mb} MiB | GNorm: {grad_norm:.2f} | MaxState: {state_max:.2f}{warning_msg}")
+                print(f"Epoch {epoch+1} | Step {global_step} (E:{i}/{num_batches}): Loss {loss:.4f} | Speed: {avg_speed:.2f} it/s | ETA: {eta_str} | VRAM: {vram_mb} MiB | GNorm: {grad_norm:.2f} | MaxState: {state_max:.2f}{warning_msg}")
 
         # Save Checkpoint at End of Epoch
         ckpt_path = f"{base_name}_ckpt_epoch_{epoch+1}.msgpack"

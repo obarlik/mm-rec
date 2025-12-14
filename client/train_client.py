@@ -98,6 +98,7 @@ class RemoteTrainer:
                 print(f"\r[Epoch {prog['epoch']}, Step {prog['step']}/{prog['total_steps']}] "
                       f"Loss: {prog['loss']:.4f} | "
                       f"Speed: {prog.get('speed', 'N/A')} | "
+                      f"ETA: {prog.get('eta', 'N/A')} | "
                       f"VRAM: {prog.get('vram', 'N/A')} | "
                       f"GNorm: {prog.get('gnorm', 'N/A')} | "
                       f"State: {prog.get('max_state', 'N/A')}    ", 

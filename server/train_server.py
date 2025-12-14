@@ -113,28 +113,24 @@ class TrainingJob:
                     
                     # Optional: Parse line to update self.progress for API
                     # Optional: Parse line to update self.progress for API
-                    # New JAX Format: "Epoch 3 | Step 175 (E:0/87): Loss 1.6201 | Speed: 4.18 it/s | VRAM: 19635 MiB | GNorm: 0.14 | MaxState: 6.55"
+                    # New JAX Format: "... | Speed: 4.18 it/s | ETA: 02:45 | VRAM: ..."
                     import re
-                    # Regex to capture: Epoch, Step, TotalSteps(in paren), Loss, Speed, VRAM, GNorm, MaxState
-                    # Epoch (\d+) \| Step (\d+) \(E:\d+/(\d+)\): Loss ([\d\.]+) \| Speed: ([\d\.]+) it/s \| VRAM: ([\d]+) MiB \| GNorm: ([\d\.]+) \| MaxState: ([\d\.]+)
-                    match = re.search(r'Epoch (\d+) \| Step (\d+) \(E:\d+/(\d+)\): Loss ([\d\.]+) \| Speed: ([\d\.]+) it/s \| VRAM: ([\w/]+) MiB \| GNorm: ([\d\.]+) \| MaxState: ([\d\.]+)', line)
+                    # Updated Regex to include ETA
+                    match = re.search(r'Epoch (\d+) \| Step (\d+) \(E:\d+/(\d+)\): Loss ([\d\.]+) \| Speed: ([\d\.]+) it/s \| ETA: ([\d\:]+) \| VRAM: ([\w/]+) MiB \| GNorm: ([\d\.]+) \| MaxState: ([\d\.]+)', line)
                     if match:
                         try:
                             self.progress['epoch'] = int(match.group(1))
-                            self.progress['step'] = int(match.group(2)) # Global Step
-                            # For total steps, we can approximate Step * (TotalEpochs/CurrentEpoch) or retrieve batch count
-                            # Actually group(3) is batches_per_epoch. Total steps = batches_per_epoch * num_epochs. 
-                            # We don't have num_epochs here easily without parsing config again or assuming. 
-                            # Let's just store what we have.
+                            self.progress['step'] = int(match.group(2))
                             batches_per_epoch = int(match.group(3))
                             total_epochs = self.config.num_epochs
                             self.progress['total_steps'] = batches_per_epoch * total_epochs
                             
                             self.progress['loss'] = float(match.group(4))
                             self.progress['speed'] = match.group(5) + " it/s"
-                            self.progress['vram'] = match.group(6) + " MiB"
-                            self.progress['gnorm'] = match.group(7)
-                            self.progress['max_state'] = match.group(8)
+                            self.progress['eta'] = match.group(6) # Captured ETA
+                            self.progress['vram'] = match.group(7) + " MiB"
+                            self.progress['gnorm'] = match.group(8)
+                            self.progress['max_state'] = match.group(9)
                         except:
                             pass
                     
