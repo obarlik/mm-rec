@@ -341,28 +341,9 @@ def main():
     state, model = create_train_state(init_rng, config)
     
     # Memory State (Batched)
-    single_mem_state = model.initialize_state(1)
+    batched_mem_state = model.initialize_state(config['batch_size'])
     
-    # Init state with batch dim
-    short_term = single_mem_state.short_term
-    long_term = single_mem_state.long_term
-    
-    def expand(x): return jnp.repeat(x[None, ...], batch_size, axis=0)
-    
-    batched_mem_state = single_mem_state.replace(
-        short_term=short_term.replace(
-            k=expand(short_term.k), 
-            v=expand(short_term.v), 
-            age=expand(short_term.age),
-            idx=jnp.repeat(short_term.idx[None, ...], batch_size, axis=0)
-        ),
-        long_term=long_term.replace(
-            k=expand(long_term.k), 
-            v=expand(long_term.v), 
-            usage=expand(long_term.usage),
-            idx=jnp.repeat(long_term.idx[None, ...], batch_size, axis=0)
-        )
-    )
+    # RESUME LOGIC
 
     # RESUME LOGIC
     # Look for existing checkpoints for this job or generic ones
