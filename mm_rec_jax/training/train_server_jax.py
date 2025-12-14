@@ -169,10 +169,55 @@ def create_train_state(rng, config):
         tx=tx
     ), model
 
+def cleanup_old_checkpoints(filename, max_keep=3):
+    """
+    Delete older checkpoints, keeping only the 'max_keep' most recent ones.
+    Assumes filename format: {base_name}_ckpt_epoch_{epoch}.msgpack
+    """
+    try:
+        # 1. Parse Directory and Base Name
+        path = Path(filename)
+        directory = path.parent
+        # filename is like: workspace/5f4412d6_ckpt_epoch_7.msgpack
+        # We need to find all files starting with "5f4412d6_ckpt_epoch_"
+        
+        # Extract job_id prefix (everything before _ckpt_epoch_)
+        import re
+        match = re.match(r"(.*)_ckpt_epoch_(\d+)\.msgpack", path.name)
+        if not match: return
+        
+        base_prefix = match.group(1) # e.g. 5f4412d6
+        
+        # 2. List all matching checkpoints
+        checkpoints = []
+        for f in directory.glob(f"{base_prefix}_ckpt_epoch_*.msgpack"):
+            m = re.match(r".*_ckpt_epoch_(\d+)\.msgpack", f.name)
+            if m:
+                epoch_num = int(m.group(1))
+                checkpoints.append((epoch_num, f))
+        
+        # 3. Sort by Epoch (Descending)
+        checkpoints.sort(key=lambda x: x[0], reverse=True)
+        
+        # 4. Delete excess
+        if len(checkpoints) > max_keep:
+            for _, file_to_remove in checkpoints[max_keep:]:
+                try:
+                    print(f"🧹 Culling old checkpoint: {file_to_remove.name}")
+                    os.remove(file_to_remove)
+                except OSError as e:
+                    print(f"⚠️ Failed to remove {file_to_remove.name}: {e}")
+                    
+    except Exception as e:
+        print(f"⚠️ Checkpoint cleanup failed: {e}")
+
 def save_checkpoint(state, epoch, filename):
     with open(filename, "wb") as f:
         f.write(serialization.to_bytes(state))
     print(f"💾 Checkpoint saved: {filename}")
+    
+    # Auto-cleanup
+    cleanup_old_checkpoints(filename, max_keep=3)
 
 def restore_checkpoint(state, filename):
     with open(filename, "rb") as f:
