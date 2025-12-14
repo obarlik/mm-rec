@@ -17,21 +17,31 @@ git commit -m "Your update message"
 git push origin main
 ```
 
-### 2. Phoenix Host (Remote)
-Login to Phoenix (WSL Terminal) manually and pull the changes.
+### 2. Phoenix Host (Automated via Gateway)
 
+**Option A: Hot Reload (Recommended)**
 ```bash
+# From your local machine
+python client/train_client.py --server http://phoenix:8090 --action update
+```
+Gateway automatically pulls code and restarts all servers.
+
+**Option B: Manual Restart (if Gateway is down)**
+```bash
+# SSH/RDP to Phoenix, then:
 cd ~/mm-rec-training
 git pull origin main
 
-# Update dependencies if needed
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -r requirements_jax.txt
+# Kill old processes
+pkill -9 -f python
 
-# Run Training
-python mm_rec_jax/training/train_server_jax.py --config configs/moe_activation.json
+# Restart Gateway (manages everything)
+./phoenix_manual_start.sh
 ```
+
+Gateway launches:
+- Training Server (Port 8001, GPU)
+- Inference Server (Port 8002, CPU)
 
 ---
 
