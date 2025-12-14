@@ -58,6 +58,8 @@ import numpy as np
 
 import json
 import tiktoken
+import glob
+from flax import serialization
 from dataclasses import dataclass
 
 # Ensure we can import mm_rec (for Dataset)
@@ -148,6 +150,17 @@ def create_train_state(rng, config):
         params=params,
         tx=tx
     ), model
+
+def save_checkpoint(state, epoch, filename):
+    with open(filename, "wb") as f:
+        f.write(serialization.to_bytes(state))
+    print(f"💾 Checkpoint saved: {filename}")
+
+def restore_checkpoint(state, filename):
+    with open(filename, "rb") as f:
+        state = serialization.from_bytes(state, f.read())
+    print(f"♻️  Resumed from checkpoint: {filename}")
+    return state
 
 def train_step(state, batch, memory_state, rng):
     def loss_fn(params):
@@ -288,8 +301,37 @@ def main():
     
     t0 = time.time()
     global_step = 0
+    start_epoch = 0
     
-    for epoch in range(num_epochs):
+    # Check for Checkpoints to Resume
+    # Pattern: {base}_ckpt_epoch_{n}.msgpack
+    # We need 'base' name
+    config_path = args.config if args.config else "default_config.json"
+    base_name = os.path.splitext(config_path)[0]
+    if base_name.endswith("_config"): base_name = base_name.replace("_config", "")
+    
+    ckpt_pattern = f"{base_name}_ckpt_epoch_*.msgpack"
+    ckpts = glob.glob(ckpt_pattern)
+    if ckpts:
+        # Sort by epoch number
+        # Filename format: ..._epoch_{n}.msgpack
+        try:
+            ckpts.sort(key=lambda x: int(x.split('_epoch_')[1].split('.msgpack')[0]))
+            latest = ckpts[-1]
+            print(f"🔎 Found existing checkpoints. Resuming from {latest}...")
+            state = restore_checkpoint(state, latest)
+            
+            # Determine start epoch
+            resumed_epoch = int(latest.split('_epoch_')[1].split('.msgpack')[0])
+            start_epoch = resumed_epoch
+            # global_step approximation if needed, but not critical for AdamW resume (state has step)
+            # Actually TrainState stores step!
+            global_step = int(state.step)
+            print(f"   Resuming at Epoch {start_epoch}, Step {global_step}")
+        except Exception as e:
+            print(f"⚠️ Failed to resume from checkpoint: {e}")
+            
+    for epoch in range(start_epoch, num_epochs):
         print(f"   Epoch {epoch+1}/{num_epochs}")
         
         # Shuffle Data for this Epoch
@@ -333,6 +375,10 @@ def main():
                     vram_mb = "N/A"
                     
                 print(f"Epoch {epoch+1} | Step {global_step} (E:{i}/{num_batches}): Loss {loss:.4f} | Speed: {avg_speed:.2f} it/s | VRAM: {vram_mb} MiB | GNorm: {grad_norm:.2f} | MaxState: {state_max:.2f}{warning_msg}")
+
+        # Save Checkpoint at End of Epoch
+        ckpt_path = f"{base_name}_ckpt_epoch_{epoch+1}.msgpack"
+        save_checkpoint(state, epoch+1, ckpt_path)
 
     # SAVE MODEL
     print("💾 Saving Model...")
