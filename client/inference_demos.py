@@ -29,6 +29,7 @@ except ImportError as e:
 def load_model(model_path, config_path=None):
     """Load model and parameters."""
     print(f"📂 Loading model from {model_path}...")
+    print(f"   Device: {jax.devices()[0]}")
     
     # default config (must match training!)
     config = {
