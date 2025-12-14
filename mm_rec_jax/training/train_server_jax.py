@@ -29,20 +29,16 @@ def get_smart_memory_fraction(reserve_gb=4.0):
         # Return free VRAM in GB for validation
         free_gb = free_mib / 1024.0
         
-        # Strategy: "Safe Minimum"
-        # 4GB was too tight for Compilation/Autotuning.
-        # We target 8 GB, which handles the 2GB chunks safely.
-        target_mib = 8192 # 8 GB fixed
-        
-        # Ensure we don't exceed free memory
-        if target_mib > (free_mib - 500):
-            print(f"⚠️  Warning: 4GB requested but only {free_mib}MiB free. Using available.")
-            target_mib = max(1024, free_mib - 500)
+        # Strategy: Use ~95% of FREE VRAM (not total)
+        # Leave 5% buffer for system overhead and fragmentation
+        usable_mib = max(1024, free_mib - 500)  # Reserve 500MiB for safety
+        target_mib = int(usable_mib * 0.95)      # Use 95% of available
         
         fraction = target_mib / total_mib
         
-        print(f"🧠 Smart Memory: Free={free_mib}MiB, Total={total_mib}MiB")
-        print(f"   Targeting Minimal {target_mib}MiB ({fraction:.2%}) for JAX efficiency.")
+        print(f"🧠 Smart Memory: Total={total_mib}MiB, Free={free_mib}MiB")
+        print(f"   (Pre-existing Usage: {total_mib - free_mib}MiB by System/Other processes)")
+        print(f"   Allocating {target_mib}MiB ({fraction:.2%} of total, ~95% of free) for JAX")
         return f"{fraction:.4f}", free_gb
         
     except Exception as e:
