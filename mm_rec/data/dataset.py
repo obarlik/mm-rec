@@ -127,7 +127,12 @@ class SFTDataCollator:
         labels = [item['labels'] for item in batch]
         
         # Pad
-        pad_id = self.tokenizer.pad_token_id
+        if hasattr(self.tokenizer, 'pad_token_id'):
+            pad_id = self.tokenizer.pad_token_id
+        elif hasattr(self.tokenizer, 'eot_token'):
+            pad_id = self.tokenizer.eot_token
+        else:
+            pad_id = 0 # Fallback for simple tokenizers
         
         input_ids_padded = torch.nn.utils.rnn.pad_sequence(
             input_ids, batch_first=True, padding_value=pad_id
