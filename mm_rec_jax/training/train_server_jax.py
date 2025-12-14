@@ -386,7 +386,7 @@ def main():
                 except:
                     vram_mb = "N/A"
                     
-                print(f"Epoch {epoch+1} | Step {global_step} (E:{i}/{num_batches}): Loss {loss:.4f} | Speed: {avg_speed:.2f} it/s | ETA: {eta_str} | VRAM: {vram_mb} MiB | GNorm: {grad_norm:.2f} | MaxState: {state_max:.2f}{warning_msg}")
+                print(f"Epoch {epoch+1} | Step {global_step} (E:{i}/{num_batches}): Loss {loss:.4f} | Speed: {avg_speed:.2f} it/s | ETA: {eta_str} | VRAM: {vram_mb} MiB | GNorm: {grad_norm:.2f} | MaxState: {state_max:.2f}{warning_msg}", flush=True)
 
         # Save Checkpoint at End of Epoch
         ckpt_path = f"{base_name}_ckpt_epoch_{epoch+1}.msgpack"
