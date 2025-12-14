@@ -78,8 +78,8 @@ class SFTConfig:
     only_predict_assistant: bool = False
     ignore_index: int = -100
 
-def load_real_dataset(data_path, batch_size=32):
-    print(f"📂 Loading dataset from {data_path}...")
+def load_dataset_memory(data_path, max_length=512):
+    print(f"📂 Loading dataset from {data_path} into RAM...")
     
     # 1. Load JSONL
     conversations = []
@@ -87,7 +87,6 @@ def load_real_dataset(data_path, batch_size=32):
         for line in f:
             if line.strip():
                 data = json.loads(line)
-                # Parse messages to ChatMessage objects
                 msgs = [ChatMessage(role=m['role'], content=m['content']) for m in data['messages']]
                 conversations.append(msgs)
     
@@ -95,28 +94,32 @@ def load_real_dataset(data_path, batch_size=32):
     
     # 2. Tokenizer
     tokenizer = tiktoken.get_encoding("cl100k_base")
+    # Robust pad_id
+    pad_id = 0
+    if hasattr(tokenizer, 'pad_token_id'): pad_id = tokenizer.pad_token_id
+    elif hasattr(tokenizer, 'eot_token'): pad_id = tokenizer.eot_token
     
     # 3. Config
-    config = SFTConfig(max_length=512)
+    config = SFTConfig(max_length=max_length)
     
-    # 4. Dataset
+    # 4. Dataset (Use SFTDataset for parsing logic)
     dataset = SFTDataset(conversations, tokenizer, config)
     
-    # 5. Collator
-    collator = SFTDataCollator(tokenizer=tokenizer)
-    
-    # 6. DataLoader
-    loader = DataLoader(
-        dataset, 
-        batch_size=batch_size, 
-        shuffle=True, 
-        collate_fn=collator,
-        num_workers=4,
-        pin_memory=True,
-        drop_last=True # Critical for JAX: Fixed batch shape for compiled functions
-    )
-    
-    return loader
+    # 5. Tokenize & Pad ALL
+    print("   Tokenizing and Padding all samples...")
+    all_input_ids = []
+    for i in range(len(dataset)):
+        item = dataset[i]
+        ids = item['input_ids'] # Already truncated by Dataset
+        # Manual Padding
+        if len(ids) < max_length:
+            ids = ids + [pad_id] * (max_length - len(ids))
+        all_input_ids.append(ids)
+        
+    # Stack to JAX Array
+    full_data = jnp.array(all_input_ids, dtype=jnp.int32)
+    print(f"   ✅ Loaded {full_data.shape} into device memory.")
+    return full_data
 
 def create_train_state(rng, config):
     model = MMRecModel(
@@ -227,9 +230,11 @@ def main():
         print(f"⚠️  Data file {data_path} not found. Using dummy fallback.")
         data_path = 'data/chat_data.jsonl'
         
+    full_data = load_dataset_memory(data_path, max_length=512)
+    num_samples = full_data.shape[0]
     batch_size = config.get('batch_size', 32)
-    train_loader = load_real_dataset(data_path, batch_size=batch_size)
-    num_batches = len(train_loader)
+    num_batches = num_samples // batch_size
+    print(f"   Batch Size: {batch_size}, Batches/Epoch: {num_batches}")
     
     # Setup Model
     rng = jax.random.PRNGKey(0)
@@ -238,23 +243,7 @@ def main():
     state, model = create_train_state(init_rng, config)
     
     # Memory State (Batched)
-    # We init one and broadcast/vmap it?
-    # MMRecModel.initialize_state gives single item.
-    # We need batch of states.
-    # For now, let's assume we pass single state and vmap inside? 
-    # Or just vmap the apply/scan.
-    # To keep it simple: Functional state is passed in.
-    
-    # Let's create a Batched State manually or via vmap
     single_mem_state = model.initialize_state(1)
-    # PyTree leaf broadcast
-    # Use jax.device_put to put on GPU
-    
-    # Actually, simpler: just let JAX handle it inside 'scan' if mapped.
-    # But 'scan' runs PER SEQUENCE. So we need vmap over batch.
-    # Our MMRecBlock code did not allow vmap yet (it takes (B, L, D)).
-    # So we don't need vmap, we process batch directly.
-    # But our MemoryState needs to be batched [Batch, Slots, Dim].
     
     # Init state with batch dim
     short_term = single_mem_state.short_term
@@ -267,7 +256,7 @@ def main():
             k=expand(short_term.k), 
             v=expand(short_term.v), 
             age=expand(short_term.age),
-            idx=jnp.repeat(short_term.idx[None, ...], batch_size, axis=0) # Broadcast scalar idx to [Batch]
+            idx=jnp.repeat(short_term.idx[None, ...], batch_size, axis=0)
         ),
         long_term=long_term.replace(
             k=expand(long_term.k), 
@@ -285,8 +274,7 @@ def main():
     rng, step_rng = jax.random.split(rng)
     
     # Get first batch for warmup/shape inference
-    first_batch = next(iter(train_loader))
-    first_input = jnp.array(first_batch['input_ids'].numpy())
+    first_input = full_data[:batch_size]
     
     state, loss, batched_mem_state, _ = train_step(state, first_input, batched_mem_state, step_rng)
     print(f"   Compilation done in {time.time() - start:.2f}s")
@@ -300,12 +288,22 @@ def main():
     
     for epoch in range(num_epochs):
         print(f"   Epoch {epoch+1}/{num_epochs}")
-        for i, batch in enumerate(train_loader):
+        
+        # Shuffle Data for this Epoch
+        rng, shuffle_rng = jax.random.split(rng)
+        perms = jax.random.permutation(shuffle_rng, num_samples)
+        # We must truncate to multiple of batch_size manually since we don't have drop_last logic here
+        # Actually simplest is to just slice carefully
+        
+        epoch_data = full_data[perms]
+        
+        for i in range(num_batches):
             global_step += 1
-            rng, step_rng = jax.random.split(rng)
+            start_idx = i * batch_size
+            end_idx = start_idx + batch_size
             
-            # Convert PyTorch tensor to JAX array (Zero copy where possible)
-            batch_jax = jnp.array(batch['input_ids'].numpy())
+            # Slice batch (Zero copy in JAX ideally)
+            batch_jax = epoch_data[start_idx:end_idx]
             
             state, loss, batched_mem_state, metrics = train_step(state, batch_jax, batched_mem_state, step_rng)
             
