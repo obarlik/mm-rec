@@ -39,6 +39,7 @@ class TrainingConfig(BaseModel):
     learning_rate: float = 1e-3
     max_length: int = 256
     data_path: Optional[str] = None
+    resume_job_id: Optional[str] = None # For resuming lost jobs
     vocab_size: Optional[int] = None
     warmup_fraction: float = 0.05
     early_stop_patience: int = 3
@@ -235,7 +236,13 @@ async def sync_code(file: UploadFile = File(...)):
 @app.post("/api/train/submit")
 async def submit_training(config: TrainingConfig, background_tasks: BackgroundTasks):
     """Submit a training job."""
-    job_id = str(uuid.uuid4())[:8]
+    # Allow manual job_id for resuming specific jobs
+    if hasattr(config, 'resume_job_id') and config.resume_job_id:
+        job_id = config.resume_job_id
+        print(f"♻️  Resuming Job ID: {job_id}")
+    else:
+        job_id = str(uuid.uuid4())[:8]
+        
     job = TrainingJob(job_id, config)
     jobs[job_id] = job
     
