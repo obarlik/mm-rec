@@ -31,31 +31,41 @@ def load_model(model_path, config_path=None):
     print(f"📂 Loading model from {model_path}...")
     print(f"   Device: {jax.devices()[0]}")
     
-    # default config (must match training!)
-    config = {
-        'vocab_size': 100300,
-        'model_dim': 128,
-        'num_layers': 2,
-        'num_heads': 4,
-    }
-    
-    # Allow overriding via config file if provided
-    if config_path and os.path.exists(config_path):
+    # Load Config properly
+    if config_path:
         with open(config_path) as f:
             file_config = json.load(f)
-            config.update(file_config)
-            
-    print(f"   Config: {config}")
+            # Merge with defaults but prefer file
+            # Ensure MoE/UBOO/Memory flags are passed
+            config = file_config
+            print(f"   Config loaded: {config.keys()}")
+    else:
+        # Fallback defaults
+        config = {
+            'vocab_size': 100300,
+            'model_dim': 512, # Update to match baseline
+            'num_layers': 6,
+            'num_heads': 8,
+            'use_moe': False,
+            'use_uboo': False,
+            'short_mem_len': 512,
+            'long_mem_len': 512
+        }
 
     # Initialize Model
     model = MMRecModel(
-        vocab_size=config['vocab_size'],
-        model_dim=config['model_dim'],
-        num_layers=config['num_layers'],
-        num_heads=config['num_heads']
+        vocab_size=config.get('vocab_size', 100300),
+        model_dim=config.get('model_dim', 512),
+        num_layers=config.get('num_layers', 6),
+        num_heads=config.get('num_heads', 8),
+        max_seq_len=config.get('max_length', 2048),
+        use_moe=config.get('use_moe', False),
+        use_uboo=config.get('use_uboo', False),
+        short_mem_len=config.get('short_mem_len', 512),
+        long_mem_len=config.get('long_mem_len', 512)
     )
     
-    # Init dummy state to get shape
+    # Init dummy state
     rng = jax.random.PRNGKey(0)
     dummy_input = jnp.ones((1, 1), dtype=jnp.int32)
     dummy_mem = model.initialize_state(1)
@@ -64,19 +74,19 @@ def load_model(model_path, config_path=None):
     params = variables['params']
     
     # Load Weights
+    print(f"📂 Loading weights from {model_path}...")
     with open(model_path, "rb") as f:
         params = serialization.from_bytes(params, f.read())
         
-    print("✅ Model loaded successfully.")
+    print("✅ Model loaded.")
     return model, params, dummy_mem
 
 def generate(model, params, memory_state, input_ids, max_new_tokens=50, temperature=0.7):
-    """Simple greedy/sampling generation."""
+    """Simple greedy/sampling generation with state persistence."""
     
     current_ids = input_ids
     
     # JIT-compile the single step application for speed
-    # We pass training=False
     @jax.jit
     def step_fn(params, x, mem):
         logits, new_mem = model.apply(
@@ -91,14 +101,8 @@ def generate(model, params, memory_state, input_ids, max_new_tokens=50, temperat
     
     print("   Thinking...", end="", flush=True)
     
-    # 1. Prefill (Process history)
-    # We run the whole history through to update memory state
-    # Ideally we'd use the efficient scan, but for inference we just run it.
-    # MMRec is RNN-like, so we consume context to update hidden state.
-    
-    # Note: MMRec returns sequence of outputs. We care about the LAST logits for next token prediction.
-    # And we care about the FINAL memory state for the next step.
-    
+    # 1. Prefill (Process history/input)
+    # Update memory with input context
     logits, memory_state = step_fn(params, current_ids, memory_state)
     
     # Get last token's logits
@@ -123,41 +127,58 @@ def generate(model, params, memory_state, input_ids, max_new_tokens=50, temperat
         cur_token = jnp.array([[token_id]], dtype=jnp.int32)
         
     print("\r", end="")
-    return generated
+    return generated, memory_state
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, required=True, help="Path to .msgpack model file")
-    parser.add_argument("--config", type=str, help="Path to training config.json")
+    parser.add_argument("--config", type=str, required=True, help="Path to training config.json")
+    parser.add_argument("--session", type=str, default="default_user", help="Session ID for memory persistence")
     args = parser.parse_args()
     
     # Setup
-    model, params, memory_state = load_model(args.model, args.config)
+    model, params, _ = load_model(args.model, args.config)
     tokenizer = tiktoken.get_encoding("cl100k_base")
     
-    print("\n💬 Chat Ready! (Ctrl+C to exit)")
+    # Session / Memory Management
+    session_path = f"sessions/{args.session}.msgpack"
+    os.makedirs("sessions", exist_ok=True)
+    
+    # Load valid template state (batch size 1)
+    template_state = model.initialize_state(1)
+    
+    if os.path.exists(session_path):
+        print(f"🧠 Loading existing memory for session: {args.session}")
+        from mm_rec_jax.core.memory_state import MemoryState
+        memory_state = MemoryState.load(session_path, template_state)
+    else:
+        print(f"✨ Creating new memory for session: {args.session}")
+        memory_state = template_state
+
+    print("\n💬 Chat Ready! (Ctrl+C to exit, 'save' to force save)")
     print("-" * 50)
     
     while True:
         try:
             user_input = input("You: ")
             if user_input.lower() in ['exit', 'quit']:
+                # Auto save on exit
+                print("💾 Saving memory...")
+                memory_state.save(session_path)
                 break
+            
+            if user_input.lower() == 'save':
+                memory_state.save(session_path)
+                print("💾 Memory Saved.")
+                continue
                 
             # Tokenize
-            # cl100k format: messages -> tokens
-            # For simplicity in demo, we feed raw text tokens
             input_ids = tokenizer.encode(user_input)
             input_tensor = jnp.array([input_ids], dtype=jnp.int32)
             
-            # Generate
-            # Note: We reset memory_state for each new unrelated query in this simple demo
-            # Or we could keep it for multi-turn if we manage it securely.
-            # Let's keep it fresh for now to avoid context pollution from previous random chats.
-            fresh_mem = model.initialize_state(1)
-            
             start = time.time()
-            out_tokens = generate(model, params, fresh_mem, input_tensor)
+            # Pass current memory_state, get updated memory_state back
+            out_tokens, memory_state = generate(model, params, memory_state, input_tensor)
             dt = time.time() - start
             
             # Decode
@@ -167,7 +188,13 @@ def main():
             print("-" * 50)
             
         except KeyboardInterrupt:
-            print("\nBye!")
+            # Save on Interrupt too
+            print("\n💾 Saving memory...")
+            try:
+                memory_state.save(session_path)
+            except:
+                pass
+            print("Bye!")
             break
         except Exception as e:
             print(f"❌ Error: {e}")
