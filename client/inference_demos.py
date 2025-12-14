@@ -89,7 +89,7 @@ def generate(model, params, memory_state, input_ids, max_new_tokens=50, temperat
     # JIT-compile the single step application for speed
     @jax.jit
     def step_fn(params, x, mem):
-        logits, new_mem = model.apply(
+        logits, new_mem, _ = model.apply(
             {'params': params}, 
             x, 
             mem, 

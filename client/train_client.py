@@ -74,177 +74,69 @@ class RemoteTrainer:
             return response.json()
         return None
     
-    def monitor(self, job_id: str, update_interval: int = 10):
-        """Monitor training progress."""
+    def monitor(self, job_id: str, update_interval: int = 2):
+        """Monitor training progress (Robust Stream)."""
         print(f"👀 Monitoring job: {job_id}")
-        print("=" * 80)
+        print(f"🔗 Server: {self.server_url} (Timeout: 2s)")
+        print("=" * 60)
+        
+        import sys
+        import requests
+        import time
+        seen_length = 0
         
         while True:
-            status = self.get_status(job_id)
-            if not status:
-                print("❌ Failed to get status")
-                break
-            
-            if status['status'] == 'completed':
-                print("\n✅ Training completed!")
-                break
-            
-            if status['status'] == 'failed':
-                print(f"\n❌ Training failed: {status['progress'].get('error', 'Unknown error')}")
-                break
-            
-                # Rich TUI update
-                from rich.table import Table
-                from rich.panel import Panel
-                from rich.layout import Layout
-                from rich.console import Console
-                from rich.live import Live
-                from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
-                
-                console = Console(force_terminal=True)
-                layout = Layout()
-                
-                # Split Layout
-                layout.split(
-                    Layout(name="header", size=3),
-                    Layout(name="main", ratio=1),
-                    Layout(name="footer", size=3)
-                )
-                
-                layout["main"].split_row(
-                    Layout(name="metrics"),
-                    Layout(name="progress")
-                )
-                
-                prog = status['progress']
-                
-                # Header
-                status_msg = prog.get('message', status['status'].upper())
-                header = Panel(f"[bold cyan]🚀 Job: {job_id} | Status: {status_msg}[/]", style="white on blue")
-                layout["header"].update(header)
-                
-                # Metrics Table
-                table = Table(title="Training Metrics", expand=True)
-                table.add_column("Metric", style="cyan")
-                table.add_column("Value", style="magenta")
-                
-                table.add_row("Message", f"[yellow]{status_msg}[/]")
-                if 'epoch' in prog:
-                    table.add_row("Epoch", f"{prog.get('epoch', 'N/A')}")
-                    table.add_row("Step", f"{prog.get('step', 'N/A')}/{prog.get('total_steps', 'N/A')}")
-                    table.add_row("Loss", f"{prog.get('loss', 0.0):.4f}")
-                    table.add_row("Speed", f"{prog.get('speed', 'N/A')}")
-                    table.add_row("ETA", f"{prog.get('eta', 'N/A')}")
-                    table.add_row("VRAM", f"{prog.get('vram', 'N/A')}")
-                    table.add_row("GNorm", f"{prog.get('gnorm', 'N/A')}")
-                    table.add_row("State", f"{prog.get('max_state', 'N/A')}")
-                else:
-                    table.add_row("Info", "Waiting for metrics...")
-                
-                layout["metrics"].update(Panel(table))
-                
-                # Progress Bar
-                total = prog.get('total_steps', 0)
-                current = prog.get('step', 0)
-                pct = (current / total * 100) if total > 0 else 0
-                
-                # ASCII Bar
-                bar_len = 30
-                filled = int(pct / 100 * bar_len)
-                bar_str = "█" * filled + "░" * (bar_len - filled)
-                
-                prog_panel = Panel(
-                    f"\n[bold green]{pct:.1f}% Complete[/]\n\n"
-                    f"[{bar_str}]\n\n"
-                    f"[dim]Total Steps: {total}[/]",
-                    title="Progress",
-                    border_style="green"
-                )
-                layout["progress"].update(prog_panel)
-
-                print("✨ Starting Dashboard...", flush=True)
-                
-                # Live Update Loop
-                # Using screen=False for better terminal compatibility
-                with Live(layout, console=console, refresh_per_second=4, screen=False) as live:
-                    while True:
-                        try:
-                            status = self.get_status(job_id)
+            try:
+                # 1. Fetch Logs directly (Priority)
+                try:
+                    # Using Range header if possible, or full fetch
+                    # Simplified full fetch for robustness
+                    resp = requests.get(
+                        f"{self.server_url}/api/logs/file/{job_id}",
+                        timeout=2
+                    )
+                    
+                    if resp.status_code == 200:
+                        text = resp.text
+                        current_len = len(text)
+                        
+                        if current_len > seen_length:
+                            # Only print new content
+                            new_content = text[seen_length:]
+                            print(new_content, end='')
+                            sys.stdout.flush()
+                            seen_length = current_len
                             
-                            # Handle Connection Error
-                            if not status:
-                                import datetime
-                                now_str = datetime.datetime.now().strftime("%H:%M:%S")
-                                layout["header"].update(Panel(f"[bold red]🚀 Job: {job_id} | Status: CONNECTION LOST | Last Upd: {now_str}[/]", style="white on red"))
-                                layout["footer"].update(Panel("[bold red]Connection lost. Retrying...[/]", style="white on red"))
-                                live.refresh()
-                                time.sleep(2) # Wait before retry
-                                continue
-
-                            prog = status['progress']
-                            
-                            # Check completion
-                            if status['status'] != 'training' and status['status'] != 'queued':
-                                # Final update
-                                live.update(layout)
-                                print(f"\nJob finished with status: {status['status']}")
-                                break
-                            
-                            import datetime
-                            # Update Header
-                            now_str = datetime.datetime.now().strftime("%H:%M:%S")
-                            status_msg = prog.get('message', status['status'].upper())
-                            layout["header"].update(Panel(f"[bold cyan]🚀 Job: {job_id} | Status: {status_msg} | Last Upd: {now_str}[/]", style="white on blue"))
-                            
-                            # Explicitly refresh screen for screen=False mode
-                            live.refresh()
-                            
-                            # Update Table
-                            table = Table(title="Training Metrics", expand=True)
-                            table.add_column("Metric", style="cyan")
-                            table.add_column("Value", style="magenta")
-                            table.add_row("Message", f"[yellow]{status_msg}[/]")
-                            
-                            if 'epoch' in prog:
-                                table.add_row("Epoch", f"{prog.get('epoch', 'N/A')}")
-                                table.add_row("Step", f"{prog.get('step', 'N/A')}/{prog.get('total_steps', 'N/A')}")
-                                table.add_row("Loss", f"{prog.get('loss', 0.0):.4f}")
-                                table.add_row("Speed", f"{prog.get('speed', 'N/A')}")
-                                table.add_row("ETA", f"{prog.get('eta', 'N/A')}")
-                                table.add_row("VRAM", f"{prog.get('vram', 'N/A')}")
-                                table.add_row("GNorm", f"{prog.get('gnorm', 'N/A')}")
-                                table.add_row("State", f"{prog.get('max_state', 'N/A')}")
-                            else:
-                                table.add_row("Info", "Waiting for metrics...")
-                                
-                            layout["metrics"].update(Panel(table))
-                            
-                            # Update Progress
-                            total = prog.get('total_steps', 0)
-                            current = prog.get('step', 0)
-                            pct = (current / total * 100) if total > 0 else 0
-                            filled = int(pct / 100 * bar_len)
-                            bar_str = "█" * filled + "░" * (bar_len - filled)
-                            
-                            layout["progress"].update(Panel(
-                                f"\n[bold green]{pct:.1f}% Complete[/]\n\n"
-                                f"[{bar_str}]\n\n"
-                                f"[dim]Total Steps: {total}[/]",
-                                title="Progress",
-                                border_style="green"
-                            ))
-                            
-                            time.sleep(update_interval)
-                            
-                        except KeyboardInterrupt:
+                    elif resp.status_code == 404:
+                         pass # Wait for file creation
+                         
+                except requests.exceptions.RequestException:
+                    pass # Connection glitch, ignore
+                
+                # 2. Status Check (Optional logging)
+                # Fail silently to avoid interrupting log stream
+                try:
+                    status_resp = requests.get(
+                        f"{self.server_url}/api/train/status/{job_id}", 
+                        timeout=1
+                    )
+                    if status_resp.status_code == 200:
+                        s = status_resp.json()
+                        job_stat = s.get('status')
+                        if job_stat in ['completed', 'failed', 'stopped']:
+                            print(f"\n\n🏁 Job finished: {job_stat.upper()}")
                             break
-                        except Exception as e:
-                            # If connection fails, print error but try to continue
-                            # If critical error, break
-                            layout["footer"].update(Panel(f"[bold red]Error: {str(e)}[/]", style="white on red"))
-                            time.sleep(1)
-                # Only return if loop broke
-                return
+                except:
+                    pass
+                    
+                time.sleep(update_interval)
+                
+            except KeyboardInterrupt:
+                print("\n🛑 Monitor stopped.")
+                break
+            except Exception as e:
+                print(f"\n❌ Client Error: {e}")
+                time.sleep(5)
     
     def download_model(self, job_id: str, output_path: str):
         """Download trained model."""
