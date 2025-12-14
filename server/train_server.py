@@ -131,8 +131,17 @@ class TrainingJob:
                             self.progress['vram'] = match.group(7) + " MiB"
                             self.progress['gnorm'] = match.group(8)
                             self.progress['max_state'] = match.group(9)
+                            self.progress['message'] = "Training..."
                         except:
                             pass
+                    else:
+                        # Capture other important lines as status messages
+                        if "Compiling" in line:
+                            self.progress['message'] = "Compiling XLA Kernels... (This may take 1-2 mins)"
+                        elif "Initializing" in line:
+                             self.progress['message'] = "Initializing JAX..."
+                        elif "Loading dataset" in line:
+                             self.progress['message'] = "Loading Dataset..."
                     
                     # Fallback or other formats could go here
                     

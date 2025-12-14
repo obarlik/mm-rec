@@ -119,7 +119,8 @@ class RemoteTrainer:
                 prog = status['progress']
                 
                 # Header
-                header = Panel(f"[bold cyan]🚀 Job: {job_id} | Status: {status['status'].upper()}[/]", style="white on blue")
+                status_msg = prog.get('message', status['status'].upper())
+                header = Panel(f"[bold cyan]🚀 Job: {job_id} | Status: {status_msg}[/]", style="white on blue")
                 layout["header"].update(header)
                 
                 # Metrics Table
@@ -127,6 +128,7 @@ class RemoteTrainer:
                 table.add_column("Metric", style="cyan")
                 table.add_column("Value", style="magenta")
                 
+                table.add_row("Message", f"[yellow]{status_msg}[/]")
                 table.add_row("Epoch", f"{prog['epoch']}")
                 table.add_row("Step", f"{prog['step']}/{prog['total_steps']}")
                 table.add_row("Loss", f"{prog['loss']:.4f}")
@@ -175,12 +177,14 @@ class RemoteTrainer:
                                 break
                             
                             # Update Header
-                            layout["header"].update(Panel(f"[bold cyan]🚀 Job: {job_id} | Status: {status['status'].upper()}[/]", style="white on blue"))
+                            status_msg = prog.get('message', status['status'].upper())
+                            layout["header"].update(Panel(f"[bold cyan]🚀 Job: {job_id} | Status: {status_msg}[/]", style="white on blue"))
                             
                             # Update Table
                             table = Table(title="Training Metrics", expand=True)
                             table.add_column("Metric", style="cyan")
                             table.add_column("Value", style="magenta")
+                            table.add_row("Message", f"[yellow]{status_msg}[/]")
                             table.add_row("Epoch", f"{prog['epoch']}")
                             table.add_row("Step", f"{prog['step']}/{prog['total_steps']}")
                             table.add_row("Loss", f"{prog['loss']:.4f}")
