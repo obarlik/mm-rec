@@ -71,7 +71,7 @@ class TrainingJob:
             # Only set data_path if not already in config
             if 'data_path' not in config_dict or not config_dict['data_path']:
                 # Fallback to default data file
-                data_file = WORKPACE_DIR / "data" / "chat_data_real.jsonl"
+                data_file = WORKSPACE_DIR / "data" / "chat_data_real.jsonl"
                 if not data_file.exists():
                      data_file = WORKSPACE_DIR / "data" / "chat_data.jsonl"
                 config_dict['data_path'] = str(data_file.absolute())
