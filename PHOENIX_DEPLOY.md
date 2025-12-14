@@ -140,6 +140,11 @@ cd ~/mm-rec-training
 ### Force Restart
 ```bash
 # On Phoenix Terminal:
-taskkill /F /IM python.exe
-./phoenix_manual_start.sh
+pkill -f python
+nohup python server/gateway.py > gateway.log 2>&1 &
 ```
+
+### Logging Architecture
+- **gateway.log**: Logs for the Gateway service itself (requests, restarts).
+- **server_internal.log**: Logs for the Training Server (JAX output).
+- **inference_internal.log**: Logs for the Inference Server.

@@ -257,7 +257,32 @@ class RemoteTrainer:
     
     def list_jobs(self):
         """List all jobs on server."""
-        response = requests.get(f"{self.server_url}/api/jobs")
+        try:
+            response = requests.get(f"{self.server_url}/api/train/jobs", timeout=5)
+            if response.status_code == 200:
+                print(json.dumps(response.json(), indent=2))
+            else:
+                print(f"❌ Failed to list jobs: {response.text}")
+        except Exception as e:
+            print(f"❌ Connection error: {e}")
+
+    def update_server(self):
+        """Trigger server update (git pull + restart)."""
+        print("🔄 Triggering remote server update...")
+        try:
+            response = requests.post(f"{self.server_url}/api/update", timeout=30)
+            if response.status_code == 200:
+                result = response.json()
+                print("✅ Update Successful!")
+                print("📝 Git Output:\n" + result.get('git_output', ''))
+                print("⚠️  Server is restarting... connection may drop briefly.")
+            else:
+                print(f"❌ Update failed: {response.text}")
+        except requests.exceptions.ReadTimeout:
+            # Server restarts during request, so timeout is expected/possible
+            print("✅ Update triggered (Timeout expected during restart).")
+        except Exception as e:
+            print(f"❌ Connection error: {e}")
         if response.status_code == 200:
             jobs = response.json()['jobs']
             print("\n📋 Jobs on server:")
