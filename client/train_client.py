@@ -69,7 +69,7 @@ class RemoteTrainer:
     
     def get_status(self, job_id: str) -> dict:
         """Get job status."""
-        response = requests.get(f"{self.server_url}/api/train/status/{job_id}")
+        response = requests.get(f"{self.server_url}/api/train/status/{job_id}", timeout=2)
         if response.status_code == 200:
             return response.json()
         return None
@@ -184,9 +184,14 @@ class RemoteTrainer:
                                 print(f"\nJob finished with status: {status['status']}")
                                 break
                             
+                            import datetime
                             # Update Header
+                            now_str = datetime.datetime.now().strftime("%H:%M:%S")
                             status_msg = prog.get('message', status['status'].upper())
-                            layout["header"].update(Panel(f"[bold cyan]🚀 Job: {job_id} | Status: {status_msg}[/]", style="white on blue"))
+                            layout["header"].update(Panel(f"[bold cyan]🚀 Job: {job_id} | Status: {status_msg} | Last Upd: {now_str}[/]", style="white on blue"))
+                            
+                            # Explicitly refresh screen for screen=False mode
+                            live.refresh()
                             
                             # Update Table
                             table = Table(title="Training Metrics", expand=True)
