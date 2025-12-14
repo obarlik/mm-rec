@@ -69,7 +69,7 @@ class RemoteTrainer:
     
     def get_status(self, job_id: str) -> dict:
         """Get job status."""
-        response = requests.get(f"{self.server_url}/api/train/status/{job_id}", timeout=2)
+        response = requests.get(f"{self.server_url}/api/train/status/{job_id}", timeout=5)
         if response.status_code == 200:
             return response.json()
         return None
@@ -175,6 +175,17 @@ class RemoteTrainer:
                     while True:
                         try:
                             status = self.get_status(job_id)
+                            
+                            # Handle Connection Error
+                            if not status:
+                                import datetime
+                                now_str = datetime.datetime.now().strftime("%H:%M:%S")
+                                layout["header"].update(Panel(f"[bold red]🚀 Job: {job_id} | Status: CONNECTION LOST | Last Upd: {now_str}[/]", style="white on red"))
+                                layout["footer"].update(Panel("[bold red]Connection lost. Retrying...[/]", style="white on red"))
+                                live.refresh()
+                                time.sleep(2) # Wait before retry
+                                continue
+
                             prog = status['progress']
                             
                             # Check completion
