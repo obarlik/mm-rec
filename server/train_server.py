@@ -16,6 +16,8 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Optional
 import time
+import os
+import sys
 
 app = FastAPI(title="MM-Rec Training Server")
 
@@ -179,7 +181,6 @@ class TrainingJob:
                 self.process = process # Store ref for stopping
                 
                 # Immediate check if process started
-                import time
                 time.sleep(0.1)
                 if process.poll() is not None:
                     # Process died immediately
