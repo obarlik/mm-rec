@@ -83,9 +83,15 @@ class MMRecModel(nn.Module):
         # Here we create a simple State PyTree
         # We invoke MemoryState.create (pure function usually)
         
-        return MemoryState.create(
+        base_state = MemoryState.create(
             short_dim=self.model_dim,
             short_len=self.short_mem_len,
             long_dim=self.model_dim,
             long_len=self.long_mem_len
         )
+        
+        # Broadcast to batch dimensions using PyTree map
+        if batch_size > 0:
+            return jax.tree_map(lambda x: jnp.broadcast_to(x, (batch_size,) + x.shape), base_state)
+            
+        return base_state
