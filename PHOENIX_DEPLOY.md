@@ -1,65 +1,54 @@
-# Phoenix Deployment (Windows Server)
+# Phoenix Deployment (Windows Server / WSL)
 
-## Phoenix is Windows Server
-
-Phoenix runs **Windows with cmd.exe**, not Linux bash.
-
----
-
-## Quick Deploy (from Linux)
-
-```bash
-./deploy_to_phoenix.sh
-```
-
-This script handles Windows paths and commands automatically.
+## ⚠️ NO SSH POLICY
+**We do not use SSH for automated deployment.**
+The workflow is strictly **Git-Based**.
 
 ---
 
-## Manual Deployment
+## Deployment Workflow
 
-### 1. Copy Files
+### 1. Local Machine (Development)
+Push your changes to GitHub.
+
 ```bash
-scp -r mm_rec server client configs scripts requirements.txt \
-  onurbarlik@hotmail.com@phoenix:mm-rec-training/
+git add .
+git commit -m "Your update message"
+git push origin main
 ```
 
-### 2. SSH to Phoenix
+### 2. Phoenix Host (Remote)
+Login to Phoenix (WSL Terminal) manually and pull the changes.
+
 ```bash
-ssh onurbarlik@hotmail.com@phoenix
-```
+cd ~/mm-rec-training
+git pull origin main
 
-### 3. Setup (on Phoenix - Windows commands)
-```cmd
-cd mm-rec-training
-
-REM Create virtual environment
-python -m venv .venv
-
-REM Activate
-.venv\Scripts\activate
-
-REM Install PyTorch with CUDA
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-
-REM Install dependencies
+# Update dependencies if needed
+source .venv/bin/activate
 pip install -r requirements.txt
-pip install -r server\requirements.txt
+pip install -r requirements_jax.txt
+
+# Run Training
+python mm_rec_jax/training/train_server_jax.py --config configs/moe_activation.json
 ```
 
-### 4. Verify GPU
-```cmd
-python -c "import torch; print(torch.cuda.is_available())"
-nvidia-smi
+---
+
+## Setup (One Time)
+
+### 1. Clone Repo on Phoenix
+```bash
+git clone https://github.com/obarlik/mm-rec.git ~/mm-rec-training
+cd ~/mm-rec-training
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### 5. Start Server
-```cmd
-REM Foreground (testing)
-python server\train_server.py
-
-REM Background (production)
-start /B python server\train_server.py > server.log 2>&1
+### 2. Verify GPU
+```bash
+python -c "import jax; print(jax.devices())"
 ```
 
 ---

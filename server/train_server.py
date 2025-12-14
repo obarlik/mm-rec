@@ -38,6 +38,8 @@ class TrainingConfig(BaseModel):
     batch_size: int = 16
     learning_rate: float = 1e-3
     max_length: int = 256
+    use_uboo: bool = False
+    use_moe: bool = False
 
 class TrainingJob:
     def __init__(self, job_id: str, config: TrainingConfig):
