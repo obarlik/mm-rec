@@ -11,7 +11,10 @@ def create_reasoning_example(id):
     result = num1 * num2
     
     return {
-        "text": f"User: Calculate {num1} * {num2}.\nModel: <THOUGHT> I need to multiply {num1} by {num2}. Breaking it down: {num1} * {num2} = ({num1//10}0 + {num1%10}) * {num2} = {num1//10*num2}0 + {num1%10*num2} = {result}. </THOUGHT> The answer is {result}. <EOS>"
+        "messages": [
+            {"role": "user", "content": f"Calculate {num1} * {num2}."},
+            {"role": "model", "content": f"<THOUGHT> I need to multiply {num1} by {num2}. Breaking it down: {num1} * {num2} = ({num1//10}0 + {num1%10}) * {num2} = {num1//10*num2}0 + {num1%10*num2} = {result}. </THOUGHT> The answer is {result}. <EOS>"}
+        ]
     }
 
 def create_tool_use_example(id):
@@ -21,7 +24,12 @@ def create_tool_use_example(id):
     temp = random.randint(15, 30)
     
     return {
-        "text": f"User: What is the weather like in {city}?\nModel: <THOUGHT> The user is asking for weather information for {city}. I should use the weather tool. </THOUGHT> <TOOL_CALL> get_weather(city='{city}') <TOOL_END>\nSystem: <TOOL_RESULT> {{'temp': {temp}, 'condition': 'Sunny'}} </TOOL_RESULT>\nModel: It is currently {temp} degrees and Sunny in {city}. <EOS>"
+        "messages": [
+            {"role": "user", "content": f"What is the weather like in {city}?"},
+            {"role": "model", "content": f"<THOUGHT> The user is asking for weather information for {city}. I should use the weather tool. </THOUGHT> <TOOL_CALL> get_weather(city='{city}') <TOOL_END>"},
+            {"role": "system", "content": f"<TOOL_RESULT> {{'temp': {temp}, 'condition': 'Sunny'}} </TOOL_RESULT>"},
+            {"role": "model", "content": f"It is currently {temp} degrees and Sunny in {city}. <EOS>"}
+        ]
     }
 
 def main():
