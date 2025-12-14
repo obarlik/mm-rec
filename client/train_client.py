@@ -128,15 +128,23 @@ class RemoteTrainer:
                 table.add_column("Metric", style="cyan")
                 table.add_column("Value", style="magenta")
                 
+                # Metrics Table
+                table = Table(title="Training Metrics", expand=True)
+                table.add_column("Metric", style="cyan")
+                table.add_column("Value", style="magenta")
+                
                 table.add_row("Message", f"[yellow]{status_msg}[/]")
-                table.add_row("Epoch", f"{prog['epoch']}")
-                table.add_row("Step", f"{prog['step']}/{prog['total_steps']}")
-                table.add_row("Loss", f"{prog['loss']:.4f}")
-                table.add_row("Speed", f"{prog.get('speed', 'N/A')}")
-                table.add_row("ETA", f"{prog.get('eta', 'N/A')}")
-                table.add_row("VRAM", f"{prog.get('vram', 'N/A')}")
-                table.add_row("GNorm", f"{prog.get('gnorm', 'N/A')}")
-                table.add_row("State", f"{prog.get('max_state', 'N/A')}")
+                if 'epoch' in prog:
+                    table.add_row("Epoch", f"{prog.get('epoch', 'N/A')}")
+                    table.add_row("Step", f"{prog.get('step', 'N/A')}/{prog.get('total_steps', 'N/A')}")
+                    table.add_row("Loss", f"{prog.get('loss', 0.0):.4f}")
+                    table.add_row("Speed", f"{prog.get('speed', 'N/A')}")
+                    table.add_row("ETA", f"{prog.get('eta', 'N/A')}")
+                    table.add_row("VRAM", f"{prog.get('vram', 'N/A')}")
+                    table.add_row("GNorm", f"{prog.get('gnorm', 'N/A')}")
+                    table.add_row("State", f"{prog.get('max_state', 'N/A')}")
+                else:
+                    table.add_row("Info", "Waiting for metrics...")
                 
                 layout["metrics"].update(Panel(table))
                 
@@ -185,19 +193,24 @@ class RemoteTrainer:
                             table.add_column("Metric", style="cyan")
                             table.add_column("Value", style="magenta")
                             table.add_row("Message", f"[yellow]{status_msg}[/]")
-                            table.add_row("Epoch", f"{prog['epoch']}")
-                            table.add_row("Step", f"{prog['step']}/{prog['total_steps']}")
-                            table.add_row("Loss", f"{prog['loss']:.4f}")
-                            table.add_row("Speed", f"{prog.get('speed', 'N/A')}")
-                            table.add_row("ETA", f"{prog.get('eta', 'N/A')}")
-                            table.add_row("VRAM", f"{prog.get('vram', 'N/A')}")
-                            table.add_row("GNorm", f"{prog.get('gnorm', 'N/A')}")
-                            table.add_row("State", f"{prog.get('max_state', 'N/A')}")
+                            
+                            if 'epoch' in prog:
+                                table.add_row("Epoch", f"{prog.get('epoch', 'N/A')}")
+                                table.add_row("Step", f"{prog.get('step', 'N/A')}/{prog.get('total_steps', 'N/A')}")
+                                table.add_row("Loss", f"{prog.get('loss', 0.0):.4f}")
+                                table.add_row("Speed", f"{prog.get('speed', 'N/A')}")
+                                table.add_row("ETA", f"{prog.get('eta', 'N/A')}")
+                                table.add_row("VRAM", f"{prog.get('vram', 'N/A')}")
+                                table.add_row("GNorm", f"{prog.get('gnorm', 'N/A')}")
+                                table.add_row("State", f"{prog.get('max_state', 'N/A')}")
+                            else:
+                                table.add_row("Info", "Waiting for metrics...")
+                                
                             layout["metrics"].update(Panel(table))
                             
                             # Update Progress
-                            total = prog['total_steps']
-                            current = prog['step']
+                            total = prog.get('total_steps', 0)
+                            current = prog.get('step', 0)
                             pct = (current / total * 100) if total > 0 else 0
                             filled = int(pct / 100 * bar_len)
                             bar_str = "█" * filled + "░" * (bar_len - filled)
@@ -323,7 +336,7 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description="Remote GPU Training Client")
-    parser.add_argument("--server", default="http://localhost:8000", help="Server URL")
+    parser.add_argument('--server', type=str, default='http://phoenix:8090', help='Server URL')
     parser.add_argument('--action', required=True, 
                         choices=['sync', 'submit', 'monitor', 'download', 'list', 'health', 'update', 'stop', 'upload', 'logs'],
                         help='Action to perform')
