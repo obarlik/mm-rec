@@ -142,9 +142,22 @@ def create_train_state(rng, config):
     
     params = model.init(rng, dummy_input, dummy_state)['params']
     
+    # Adaptive Learning Rate Schedule
+    # Warmup (first 5% of training) + Cosine Decay
+    total_steps = config['num_epochs'] * (1400 // config['batch_size'])  # Approx steps
+    warmup_steps = int(total_steps * config.get('warmup_fraction', 0.05))
+    
+    learning_rate_schedule = optax.warmup_cosine_decay_schedule(
+        init_value=0.0,
+        peak_value=config['learning_rate'],
+        warmup_steps=warmup_steps,
+        decay_steps=total_steps,
+        end_value=config['learning_rate'] * 0.1  # Decay to 10% of peak
+    )
+    
     tx = optax.chain(
         optax.clip_by_global_norm(1.0),
-        optax.adamw(learning_rate=config['learning_rate'])
+        optax.adamw(learning_rate=learning_rate_schedule)
     )
     
     return train_state.TrainState.create(
@@ -342,8 +355,17 @@ def main():
         except Exception as e:
             print(f"⚠️ Failed to resume from checkpoint: {e}")
             
+    # Early Stopping Setup
+    early_stop_patience = config.get('early_stop_patience', 3)  # Stop after 3 epochs without improvement
+    min_delta = config.get('min_delta', 0.02)  # Minimum improvement threshold
+    best_epoch_loss = float('inf')
+    patience_counter = 0
+    epoch_losses = []
+    
     for epoch in range(start_epoch, num_epochs):
         print(f"   Epoch {epoch+1}/{num_epochs}")
+        epoch_loss_sum = 0.0
+        epoch_step_count = 0
         
         # Shuffle Data for this Epoch
         rng, shuffle_rng = jax.random.split(rng)
@@ -362,6 +384,10 @@ def main():
             batch_jax = epoch_data[start_idx:end_idx]
             
             state, loss, batched_mem_state, metrics = train_step(state, batch_jax, batched_mem_state, step_rng)
+            
+            # Accumulate epoch loss
+            epoch_loss_sum += float(loss)
+            epoch_step_count += 1
             
             # Periodic Monitoring
             if i % 10 == 0:
@@ -397,6 +423,27 @@ def main():
                     
                 print(f"Epoch {epoch+1} | Step {global_step} (E:{i}/{num_batches}): Loss {loss:.4f} | Speed: {avg_speed:.2f} it/s | ETA: {eta_str} | VRAM: {vram_mb} MiB | GNorm: {grad_norm:.2f} | MaxState: {state_max:.2f}{warning_msg}", flush=True)
 
+        # Calculate Epoch Average Loss
+        epoch_avg_loss = epoch_loss_sum / max(epoch_step_count, 1)
+        epoch_losses.append(epoch_avg_loss)
+        
+        # Early Stopping Check
+        improvement = best_epoch_loss - epoch_avg_loss
+        
+        if improvement > min_delta:
+            # Significant improvement
+            best_epoch_loss = epoch_avg_loss
+            patience_counter = 0
+            print(f"📈 Epoch {epoch+1} Avg Loss: {epoch_avg_loss:.4f} (↓ {improvement:.4f}) - Best so far!")
+        else:
+            patience_counter += 1
+            print(f"📉 Epoch {epoch+1} Avg Loss: {epoch_avg_loss:.4f} (↓ {improvement:.4f}) - Patience: {patience_counter}/{early_stop_patience}")
+            
+            if patience_counter >= early_stop_patience:
+                print(f"\n⏹️  Early Stopping: No improvement for {early_stop_patience} epochs (min_delta={min_delta})")
+                print(f"   Best Epoch Loss: {best_epoch_loss:.4f}")
+                break
+        
         # Save Checkpoint at End of Epoch
         ckpt_path = f"{base_name}_ckpt_epoch_{epoch+1}.msgpack"
         save_checkpoint(state, epoch+1, ckpt_path)
