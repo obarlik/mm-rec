@@ -14,9 +14,9 @@ print("=" * 80)
 print("Foundation Dataset Preparation (Chat + Tool Use)")
 print("=" * 80)
 
-# Create directories
-Path("data/raw").mkdir(parents=True, exist_ok=True)
-Path("data/converted").mkdir(parents=True, exist_ok=True)
+# Create directories - training server looks in workspace/data/
+Path("workspace/data/raw").mkdir(parents=True, exist_ok=True)
+Path("workspace/data/converted").mkdir(parents=True, exist_ok=True)
 
 # ===== STEP 1: Find ShareGPT cache =====
 print("\n📥 [1/5] Searching for ShareGPT cache...")
@@ -138,8 +138,8 @@ if not combined:
 
 random.shuffle(combined)
 
-# Save combined dataset
-output_file = "data/combined_foundation.jsonl"
+# Save combined dataset - training server looks in workspace/data/
+output_file = "workspace/data/combined_foundation.jsonl"
 with open(output_file, 'w', encoding='utf-8') as f:
     for item in combined:
         f.write(json.dumps(item, ensure_ascii=False) + '\n')
