@@ -162,7 +162,7 @@ class RemoteTrainer:
                 )
                 layout["progress"].update(prog_panel)
 
-                print("✨ Starting Dashboard...")
+                print("✨ Starting Dashboard...", flush=True)
                 
                 # Live Update Loop
                 # Use screen=True for proper full-screen dashboard
