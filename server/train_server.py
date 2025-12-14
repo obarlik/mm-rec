@@ -303,19 +303,22 @@ async def stream_logs(job_id: str):
 @app.get("/api/train/download/{job_id}")
 async def download_model(job_id: str):
     """Download trained model."""
+    # First check memory
     job = jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
     
-    if job.status != "completed":
-        raise HTTPException(status_code=400, detail="Training not completed")
+    # Check disk for model file (Persistence fallback)
+    model_path = WORKSPACE_DIR / f"{job_id}_model.msgpack"
     
-    if not job.model_path or not job.model_path.exists():
+    # Legacy fallback for old .pt files if needed
+    if not model_path.exists():
+        model_path = WORKSPACE_DIR / f"{job_id}_model.pt"
+
+    if not model_path.exists():
         raise HTTPException(status_code=404, detail="Model file not found")
     
     return FileResponse(
-        job.model_path,
-        filename=f"{job_id}_model.pt",
+        model_path,
+        filename=model_path.name,
         media_type="application/octet-stream"
     )
 
