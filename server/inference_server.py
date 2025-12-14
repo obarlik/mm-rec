@@ -179,13 +179,60 @@ def health():
     return {"status": "ok", "model_loaded": model is not None}
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8002)
-    parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--config", type=str, required=True)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--model", type=str, help="Specific model path")
+    group.add_argument("--job-id", type=str, help="Job ID to auto-locate latest checkpoint")
+    
+    parser.add_argument("--config", type=str, help="Config path (optional if using --job-id)")
     args = parser.parse_args()
     
-    load_model_and_params(args.model, args.config)
+    model_path = args.model
+    config_path = args.config
     
-    print("🚀 Starting Inference Server...")
+    if args.job_id:
+        # Auto-locate logic (copied from cpu_chat.py / train_server.py knowledge)
+        import shutil
+        workspace = Path("workspace")
+        files = list(workspace.glob(f"{args.job_id}_ckpt_epoch_*.msgpack"))
+        
+        if not files:
+            print(f"❌ No checkpoints found for job {args.job_id}")
+            sys.exit(1)
+            
+        # Sort by epoch
+        def get_epoch(p):
+            try: return int(p.name.split('_epoch_')[1].replace('.msgpack', ''))
+            except: return -1
+        files.sort(key=get_epoch, reverse=True)
+        latest_ckpt = files[0]
+        
+        # Lock it
+        safe_ckpt = latest_ckpt.with_suffix(".saved.msgpack")
+        if not safe_ckpt.exists():
+            print(f"💾 Locking checkpoint {latest_ckpt.name} -> {safe_ckpt.name}...")
+            shutil.copy2(latest_ckpt, safe_ckpt)
+        else:
+            print(f"🔒 Using locked checkpoint: {safe_ckpt.name}")
+            
+        model_path = str(safe_ckpt)
+        
+        # Auto-locate config
+        # Try finding config in same dir
+        # config is typically {job_id}_config.json
+        if not config_path:
+            cand_config = workspace / f"{args.job_id}_config.json"
+            if cand_config.exists():
+                config_path = str(cand_config)
+            else:
+                print("❌ Could not search config file. Please provide --config")
+                sys.exit(1)
+                
+    if not model_path or not config_path:
+        print("❌ Model/Config path required")
+        sys.exit(1)
+
+    load_model_and_params(model_path, config_path)
+    
+    print(f"🚀 Starting Inference Server on port {args.port}...")
     uvicorn.run(app, host="0.0.0.0", port=args.port)
