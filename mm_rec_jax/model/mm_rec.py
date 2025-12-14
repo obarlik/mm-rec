@@ -16,6 +16,12 @@ class MMRecModel(nn.Module):
     num_layers: int
     num_heads: int
     max_seq_len: int = 32768
+    dropout_rate: float = 0.1
+    
+    # Memory Config
+    short_mem_len: int = 512
+    long_mem_len: int = 512
+
     use_uboo: bool = False
     use_moe: bool = False
     lambda_p: float = 0.1 # Penalty scaling factor

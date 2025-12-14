@@ -133,7 +133,7 @@ class SparseMMRecBlock(nn.Module):
         # Expert Weights: [Experts, Dim, Dim]
         self.expert_w1 = self.param('expert_w1', nn.initializers.xavier_uniform(), 
                                     (self.num_experts, self.model_dim, self.model_dim * 4))
-        self.expert_w2 = self.param('expert_w2', nn.initializers.xavier_uniform(), 
+        self.expert_w2 = self.param('expert_w2', nn.initializers.zeros, 
                                     (self.num_experts, self.model_dim * 4, self.model_dim))
 
     def __call__(self, x, training: bool = False):
