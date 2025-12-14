@@ -328,7 +328,7 @@ def main():
             # global_step approximation if needed, but not critical for AdamW resume (state has step)
             # Actually TrainState stores step!
             global_step = int(state.step)
-    initial_step = global_step
+            initial_step = global_step
             print(f"   Resuming at Epoch {start_epoch}, Step {global_step}")
         except Exception as e:
             print(f"⚠️ Failed to resume from checkpoint: {e}")
