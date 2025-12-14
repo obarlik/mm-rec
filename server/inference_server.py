@@ -80,9 +80,24 @@ def load_model_and_params(model_path: str, config_path: str):
     variables = model.init(rng, dummy_input, dummy_mem)
     params = variables['params']
     
-    # Load weights
+    # Load weights from checkpoint
+    # Training saves full TrainState (params + optimizer), we need to extract params
     with open(model_path, "rb") as f:
-        params = serialization.from_bytes(params, f.read())
+        checkpoint_bytes = f.read()
+        
+    try:
+        # Try loading as raw params first (legacy format)
+        params = serialization.from_bytes(params, checkpoint_bytes)
+    except (ValueError, KeyError) as e:
+        # If that fails, it's likely a TrainState - extract params
+        print(f"   ⚠️  Direct params load failed, extracting from TrainState...")
+        checkpoint_dict = serialization.msgpack_restore(checkpoint_bytes)
+        
+        if 'params' in checkpoint_dict:
+            # TrainState format: {'step', 'params', 'opt_state', ...}
+            params = checkpoint_dict['params']
+        else:
+            raise ValueError(f"Could not find 'params' in checkpoint. Keys: {checkpoint_dict.keys()}")
         
     tokenizer = tiktoken.get_encoding("cl100k_base")
     print(f"✅ Model Loaded on {jax.devices()[0]}")
