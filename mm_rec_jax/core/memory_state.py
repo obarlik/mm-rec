@@ -133,11 +133,80 @@ class MemoryState(struct.PyTreeNode):
         new_bank = self.short_term.replace(k=new_k, v=new_v, age=new_age, idx=new_idx)
         return self.replace(short_term=new_bank)
 
-    def update_long(self, k_new, v_new, mask=None):
-        """Functional update for long-term memory (LIFO/Usage based)."""
-        # Placeholder for simple update (replace least used or oldest)
-        # For now, let's assume no-op or simple slot overwrite for migration start
-        return self
+    def decay_usage(self, decay_factor: float = 0.999):
+        """Apply exponential decay to long-term memory usage."""
+        new_usage = self.long_term.usage * decay_factor
+        new_bank = self.long_term.replace(usage=new_usage)
+        return self.replace(long_term=new_bank)
+
+    def update_access(self, access_logits: jnp.ndarray):
+        """
+        Bump usage for accessed memories.
+        Args:
+           access_logits: [Batch, Long_Len] (Attention weights or similar)
+        """
+        # Soft increment based on attention weights
+        # access_logits is likely [Batch, Heads, Seq, Mem_Len]. 
+        # We need a summarized "access score" per memory slot [Batch, Mem_Len].
+        # Implementation depends on how attention passes this info.
+        # For now, placeholder for manual bumping.
+        pass
+
+    def update_long(self, k_new: jnp.ndarray, v_new: jnp.ndarray):
+        """
+        Consolidate memories into Long-Term storage using 'Survival of the Fittest'.
+        Evicts the least used items.
+        
+        Args:
+            k_new: [Batch, N, Dim] or [Batch, Dim]
+            v_new: [Batch, N, Dim] or [Batch, Dim]
+        """
+        # Normalize to [Batch, N, Dim]
+        if k_new.ndim == 2:
+            k_new = k_new[:, None, :]
+            v_new = v_new[:, None, :]
+            
+        def update_single_long(k_bank, v_bank, usage_bank, k_in, v_in):
+            # k_bank: [Slots, Dim]
+            # usage_bank: [Slots]
+            # k_in: [N, Dim]
+            
+            num_incoming = k_in.shape[0]
+            
+            # 1. Identify victims: Lowest usage indices
+            # usage_bank is [Slots]. We want top-k (bottom-k) indices.
+            # jax.lax.top_k returns largest, so we negate usage.
+            neg_usage = -usage_bank
+            _, victim_indices = jax.lax.top_k(neg_usage, num_incoming)
+            
+            # 2. Update Bank
+            k_bank = k_bank.at[victim_indices].set(k_in)
+            v_bank = v_bank.at[victim_indices].set(v_in)
+            
+            # 3. Reset Usage for new items
+            # Set to 1.0 (fresh)
+            usage_bank = usage_bank.at[victim_indices].set(1.0)
+            
+            return k_bank, v_bank, usage_bank
+
+        # VMAP over batch
+        current_k = self.long_term.k
+        current_v = self.long_term.v
+        current_usage = self.long_term.usage
+        
+        # Broadcast if unbatched state
+        if current_k.ndim == 2:
+            batch_size = k_new.shape[0]
+            current_k = jnp.broadcast_to(current_k[None, ...], (batch_size, *current_k.shape))
+            current_v = jnp.broadcast_to(current_v[None, ...], (batch_size, *current_v.shape))
+            current_usage = jnp.broadcast_to(current_usage[None, ...], (batch_size, *current_usage.shape))
+
+        new_k, new_v, new_usage = jax.vmap(update_single_long)(
+            current_k, current_v, current_usage, k_new, v_new
+        )
+        
+        new_bank = self.long_term.replace(k=new_k, v=new_v, usage=new_usage)
+        return self.replace(long_term=new_bank)
 
     # ========================================================================
     # Persistence & Serialization (Phase 8: Decoupled Storage)
