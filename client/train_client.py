@@ -160,7 +160,8 @@ class RemoteTrainer:
                 layout["progress"].update(prog_panel)
                 
                 # Live Update Loop
-                with Live(layout, refresh_per_second=1, screen=True) as live:
+                # Use screen=False so it doesn't clear on exit (good for persistent logs)
+                with Live(layout, refresh_per_second=1, screen=False) as live:
                     while True:
                         try:
                             status = self.get_status(job_id)
