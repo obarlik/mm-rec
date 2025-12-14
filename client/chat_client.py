@@ -65,7 +65,7 @@ def main():
                 
                 if response.status_code == 200:
                     data = response.json()
-                    print("\rBot:", data['response'])
+                    print("\r" + " " * 20 + "\rBot:", data['response'])  # Clear "Thinking..." fully
                     print(f"   (Speed: {data.get('speed_tok_sec', 0):.1f} tok/s)")
                 else:
                     print(f"\r❌ Error {response.status_code}: {response.text}")
