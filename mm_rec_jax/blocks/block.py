@@ -6,6 +6,7 @@ from typing import Tuple, Any
 from ..core.memory_state import MemoryState
 from ..core.hds import HDS
 from .attention import MultiMemoryAttention
+from .sparse_block import SparseMMRecBlock
 
 class MMRecBlock(nn.Module):
     """
@@ -16,14 +17,37 @@ class MMRecBlock(nn.Module):
     num_heads: int = 8
     ffn_dim: int = 2048
     dropout_rate: float = 0.1
+    use_uboo: bool = False # Unbiased Optimization flag
+    use_moe: bool = False  # Mixture of Experts flag
     
     def setup(self):
+        # ... (Previous code) ...
+        
+        # FFN Configuration
+        if self.use_moe:
+            # Replaces standard FFN with MoE Block
+            self.moe_ffn = SparseMMRecBlock(
+                model_dim=self.model_dim,
+                num_experts=8, # Default, can be parameterized
+                capacity_factor=1.25 # Slight over-capacity to reduce drops
+            )
+            # We still need dropout for the output of MoE
+            self.ffn_drop2 = nn.Dropout(self.dropout_rate)
+        else:
+            # Standard Dense FFN
+            self.ffn_dense1 = nn.Dense(self.ffn_dim, kernel_init=nn.initializers.xavier_uniform())
+            self.ffn_act = nn.gelu
+            self.ffn_drop1 = nn.Dropout(self.dropout_rate)
+            self.ffn_dense2 = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform())
+            self.ffn_drop2 = nn.Dropout(self.dropout_rate)
+            
+        self.dropout = nn.Dropout(self.dropout_rate)
         # Projections
         # Using Xavier Uniform to match PyTorch
-        self.W_q = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform())
-        self.W_k = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform())
-        self.W_v = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform())
-        self.W_z = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform())
+        # Projections (HEM: Hardware Efficient Memory - Fused Kernel)
+        # We fuse Q, K, V, Z into a single projection for efficiency
+        # Output dim = 4 * model_dim
+        self.W_fused = nn.Dense(self.model_dim * 4, kernel_init=nn.initializers.xavier_uniform())
         
         # Gating (Split for efficient MDI)
         # Matches PyTorch's Linear(2*dim, dim) by summing two projections
@@ -67,6 +91,13 @@ class MMRecBlock(nn.Module):
         # Recurrence Norm (Critical for MDI stability)
         self.norm_recurrence = nn.RMSNorm()
         
+        # UBOO Projections (Planning Error)
+        if self.use_uboo:
+            # Error Pred: h_new (detached) -> Error Space
+            self.W_planning_error = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform())
+            # Target: h_prev -> Error Space
+            self.W_planning_target = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform())
+        
         # FFN (Explicit definition to handle 'deterministic' arg correctly)
         self.ffn_dense1 = nn.Dense(self.ffn_dim, kernel_init=nn.initializers.xavier_uniform())
         self.ffn_act = nn.gelu
@@ -79,7 +110,7 @@ class MMRecBlock(nn.Module):
     def __call__(self, 
                  x: jnp.ndarray, 
                  state: MemoryState, 
-                 training: bool = False) -> Tuple[jnp.ndarray, MemoryState]:
+                 training: bool = False) -> Tuple[jnp.ndarray, MemoryState, jnp.ndarray]:
         """
         Forward pass with Scan.
         
@@ -92,12 +123,15 @@ class MMRecBlock(nn.Module):
         """
         batch_size, seq_len, _ = x.shape
         
-        # 1. Projections (Parallel)
+        # 1. Projections (HEM: Fused Kernel)
         x_norm = self.norm1(x)
-        q = self.W_q(x_norm)
-        k = self.W_k(x_norm)
-        v = self.W_v(x_norm)
-        z = self.W_z(x_norm)
+        
+        # Single fused matmul [Batch, Seq, 4*Dim]
+        fused_out = self.W_fused(x_norm)
+        
+        # Split into components
+        # jnp.split is efficient in JAX (view-based or XLA fused)
+        q, k, v, z = jnp.split(fused_out, 4, axis=-1)
         
         # Pre-compute Gamma (MDI)
         # Gamma = Sigmoid(W2(GELU(W1(z))))
@@ -185,21 +219,49 @@ class MMRecBlock(nn.Module):
         combined = h_sequence + mem_out + (v * 0.1)
         x_residual = x + self.dropout(combined, deterministic=not training)
         
-        # FFN
+        # FFN Execution
         x_norm2 = self.norm2(x_residual)
         
-        # Manual FFN execution
-        h_ffn = self.ffn_dense1(x_norm2)
-        h_ffn = self.ffn_act(h_ffn)
-        h_ffn = self.ffn_drop1(h_ffn, deterministic=not training)
-        h_ffn = self.ffn_dense2(h_ffn)
-        ffn_out = self.ffn_drop2(h_ffn, deterministic=not training)
+        if self.use_moe:
+            # MoE Path
+            ffn_out = self.moe_ffn(x_norm2, training=training)
+            ffn_out = self.ffn_drop2(ffn_out, deterministic=not training)
+        else:
+            # Dense Path
+            h_ffn = self.ffn_dense1(x_norm2)
+            h_ffn = self.ffn_act(h_ffn)
+            h_ffn = self.ffn_drop1(h_ffn, deterministic=not training)
+            h_ffn = self.ffn_dense2(h_ffn)
+            ffn_out = self.ffn_drop2(h_ffn, deterministic=not training)
         
         output = x_residual + ffn_out
         
         # 4. State Update (Functional)
         # Return new state with updated Short Term Memory
-        # We update with the calculated h_sequence (Keys/Values for next blocks)
         new_state = state.update_short(k_new=h_sequence, v_new=h_sequence)
+
+        # 5. UBOO Auxiliary Loss
+        aux_loss = jnp.array(0.0)
+        if self.use_uboo:
+            # Planning Error: || W_err(stop_grad(h_t)) - W_tgt(h_{t-1}) ||^2
+            # h_sequence is [Batch, Seq, Dim] (This is h_t)
+            
+            # Detach h_t to prevent gradient flow back through recurrence/gate from Planning Error
+            h_detached = jax.lax.stop_gradient(h_sequence)
+            
+            # Target is h_{t-1}.
+            # We need to construct h_{t-1} sequence.
+            # Shift h_sequence right by 1, pad with h0 (zeros)
+            # h0 is [Batch, Dim]. Expand to [Batch, 1, Dim]
+            h0_expanded = jnp.zeros((batch_size, 1, self.model_dim))
+            h_prev_seq = jnp.concatenate([h0_expanded, h_sequence[:, :-1, :]], axis=1)
+            
+            # Projections
+            p_pred = self.W_planning_error(h_detached)
+            p_target = self.W_planning_target(h_prev_seq)
+            
+            # MSE Loss
+            error = p_pred - p_target
+            aux_loss = jnp.mean(jnp.square(error))
         
-        return output, new_state
+        return output, new_state, aux_loss

@@ -131,7 +131,9 @@ def create_train_state(rng, config):
         vocab_size=config['vocab_size'],
         model_dim=config['model_dim'],
         num_layers=config['num_layers'],
-        num_heads=config['num_heads']
+        num_heads=config['num_heads'],
+        use_uboo=config.get('use_uboo', False),
+        use_moe=config.get('use_moe', False)
     )
     
     # Initialize parameters
@@ -165,7 +167,8 @@ def restore_checkpoint(state, filename):
 def train_step(state, batch, memory_state, rng):
     def loss_fn(params):
         # Forward
-        logits, new_mem_state = state.apply_fn(
+        # Forward (Returns: logits, new_state, aux_loss)
+        logits, new_mem_state, aux_loss = state.apply_fn(
             {'params': params}, 
             batch, 
             memory_state, 
@@ -178,11 +181,15 @@ def train_step(state, batch, memory_state, rng):
         shift_labels = batch[:, 1:]
         
         # Cross Entropy
-        loss = optax.softmax_cross_entropy_with_integer_labels(shift_logits, shift_labels).mean()
-        return loss, new_mem_state
+        main_loss = optax.softmax_cross_entropy_with_integer_labels(shift_logits, shift_labels).mean()
+        
+        # Total Loss = Main Loss + Aux Loss
+        loss = main_loss + aux_loss
+        
+        return loss, (new_mem_state, main_loss, aux_loss)
     
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-    (loss, new_mem_state), grads = grad_fn(state.params)
+    (loss, (new_mem_state, main_loss, aux_loss)), grads = grad_fn(state.params)
     state = state.apply_gradients(grads=grads)
     
     # Check Health Metrics for NaN prediction
@@ -193,7 +200,9 @@ def train_step(state, batch, memory_state, rng):
     
     metrics = {
         'grad_norm': grad_norm,
-        'state_max': state_max
+        'state_max': state_max,
+        'main_loss': main_loss,
+        'aux_loss': aux_loss
     }
     
     return state, loss, new_mem_state, metrics

@@ -1,0 +1,14 @@
+{
+    "job_name": "moe_smoke_test",
+    "model_dim": 256,
+    "num_layers": 2,
+    "num_heads": 4,
+    "use_uboo": true,
+    "use_moe": true,
+    "ffn_dim": 1024,
+    "num_epochs": 1,
+    "batch_size": 4,
+    "learning_rate": 1e-4,
+    "max_length": 128,
+    "vocab_size": 100300
+}

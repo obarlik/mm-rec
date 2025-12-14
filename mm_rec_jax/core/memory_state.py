@@ -1,7 +1,8 @@
 import jax
 import jax.numpy as jnp
-from flax import struct
-from typing import Dict, Optional
+from flax import struct, serialization
+from typing import Dict, Optional, Tuple, Any
+import os
 
 # Define MemoryState as a PyTreeNode so it can be passed through JIT/Scan boundaries
 @struct.dataclass
@@ -137,3 +138,38 @@ class MemoryState(struct.PyTreeNode):
         # Placeholder for simple update (replace least used or oldest)
         # For now, let's assume no-op or simple slot overwrite for migration start
         return self
+
+    # ========================================================================
+    # Persistence & Serialization (Phase 8: Decoupled Storage)
+    # ========================================================================
+    
+    def to_bytes(self) -> bytes:
+        """Serialize memory state to msgpack bytes."""
+        return serialization.to_bytes(self)
+        
+    @classmethod
+    def from_bytes(cls, data: bytes, template: 'MemoryState') -> 'MemoryState':
+        """
+        Deserialize memory state from msgpack bytes.
+        
+        Args:
+            data: Binary msgpack data.
+            template: A dummy MemoryState instance with the same structure/shapes.
+                      JAX/Flax needs this to know the structure.
+        """
+        return serialization.from_bytes(template, data)
+        
+    def save(self, path: str):
+        """Save to disk (atomic write)."""
+        temp_path = f"{path}.tmp"
+        with open(temp_path, "wb") as f:
+            f.write(self.to_bytes())
+        os.rename(temp_path, path)
+        
+    @classmethod
+    def load(cls, path: str, template: 'MemoryState') -> 'MemoryState':
+        """Load from disk."""
+        if not os.path.exists(path):
+            return None
+        with open(path, "rb") as f:
+            return cls.from_bytes(f.read(), template)

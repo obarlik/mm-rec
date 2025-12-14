@@ -16,12 +16,10 @@ class MMRecModel(nn.Module):
     num_layers: int
     num_heads: int
     max_seq_len: int = 32768
-    dropout_rate: float = 0.1
-    
-    # Memory Config
-    short_mem_len: int = 512 # Reduced from 2048 for benchmark stability
-    long_mem_len: int = 512
-    
+    use_uboo: bool = False
+    use_moe: bool = False
+    lambda_p: float = 0.1 # Penalty scaling factor
+
     def setup(self):
         # Tied Weights: Embedding and LM Head share the same matrix
         self.shared_embed = SharedEmbedding(self.vocab_size, self.model_dim)
@@ -32,6 +30,8 @@ class MMRecModel(nn.Module):
                 num_heads=self.num_heads,
                 ffn_dim=self.model_dim * 4,
                 dropout_rate=self.dropout_rate,
+                use_uboo=self.use_uboo,
+                use_moe=self.use_moe, # Pass MoE flag
                 name=f'block_{i}'
             ) for i in range(self.num_layers)
         ]
@@ -41,24 +41,32 @@ class MMRecModel(nn.Module):
     def __call__(self, 
                  x: jnp.ndarray, 
                  state: MemoryState, 
-                 training: bool = False) -> Tuple[jnp.ndarray, MemoryState]:
+                 training: bool = False) -> Tuple[jnp.ndarray, MemoryState, jnp.ndarray]:
         """
         ...
+        Returns: logits, state, aux_loss
         """
         # Embeddings (Mode='embed')
         h = self.shared_embed(x, mode='embed')
         h = self.dropout(h, deterministic=not training)
         
+        total_aux_loss = jnp.array(0.0)
+        
         # Pass through blocks
         for i, block in enumerate(self.blocks):
-            h, state = block(h, state, training=training)
+            # Block now returns (h, state, layer_aux_loss)
+            h, state, layer_aux_loss = block(h, state, training=training)
+            total_aux_loss += layer_aux_loss
             
         h = self.norm_final(h)
         
         # Output Head (Mode='projection') - Reuses embedding matrix
         logits = self.shared_embed(h, mode='projection')
         
-        return logits, state
+        # Scale Total Aux Loss
+        weighted_aux_loss = total_aux_loss * self.lambda_p
+        
+        return logits, state, weighted_aux_loss
     
     def initialize_state(self, batch_size: int):
         """Helper to create initial zero state (used by training loop)."""
