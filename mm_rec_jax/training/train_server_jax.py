@@ -260,10 +260,10 @@ def validate_and_adjust_config(config, free_vram_gb):
     # Find appropriate batch size for available VRAM
     max_safe_batch = 2  # Default minimum
     for vram_threshold in sorted(SAFE_BATCH_SIZES.keys()):
-        if free_vram_gb \u003e= vram_threshold:
+        if free_vram_gb >= vram_threshold:
             max_safe_batch = SAFE_BATCH_SIZES[vram_threshold]
     
-    if original_batch_size \u003e max_safe_batch:
+    if original_batch_size > max_safe_batch:
         config['batch_size'] = max_safe_batch
         was_adjusted = True
         warning_msg = f"⚠️  VRAM SAFETY: Batch size reduced from {original_batch_size} to {max_safe_batch} (Free VRAM: {free_vram_gb:.1f}GB)"
