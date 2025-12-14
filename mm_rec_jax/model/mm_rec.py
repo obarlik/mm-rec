@@ -92,6 +92,6 @@ class MMRecModel(nn.Module):
         
         # Broadcast to batch dimensions using PyTree map
         if batch_size > 0:
-            return jax.tree_map(lambda x: jnp.broadcast_to(x, (batch_size,) + x.shape), base_state)
+            return jax.tree_util.tree_map(lambda x: jnp.broadcast_to(x, (batch_size,) + x.shape), base_state)
             
         return base_state
