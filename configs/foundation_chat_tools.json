@@ -1,5 +1,6 @@
 {
     "job_name": "foundation_chat_88k",
+    "data_path": "data/combined_foundation.jsonl",
     "model_dim": 512,
     "num_layers": 6,
     "num_heads": 8,
