@@ -78,82 +78,58 @@ python client/train_client.py \
 
 ---
 
-## Server Management
+## Server Management (via Gateway)
 
-### Check if Running
+The Gateway (Port 8090) manages the Training Server (Port 8001) and Inference Server (Port 8002).
+
+### 1. View System Status
 ```bash
-ssh onurbarlik@hotmail.com@phoenix "tasklist | findstr python"
+python client/train_client.py --server http://phoenix:8090 --action health
 ```
 
-### View Logs
+### 2. View Logs
+View the internal logs of the underlying servers.
+
 ```bash
-ssh onurbarlik@hotmail.com@phoenix "type mm-rec-training\server.log"
+# Gateway Log
+python client/train_client.py --server http://phoenix:8090 --action logs --type gateway
+
+# Training Server Log
+python client/train_client.py --server http://phoenix:8090 --action logs --type server
 ```
 
-### Stop Server
+### 3. Update Code (Hot Reload)
+This triggers a `git pull` on the server and restarts the training process automatically.
+
 ```bash
-ssh onurbarlik@hotmail.com@phoenix "taskkill /F /IM python.exe"
+python client/train_client.py --server http://phoenix:8090 --action update
+```
+
+### 4. Direct Inference (JAX)
+Talk to the model directly via Gateway. (Requires `client/chat_client.py` - Coming Soon)
+
+```bash
+curl -X POST http://phoenix:8090/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello world"}'
 ```
 
 ---
 
 ## Troubleshooting
 
-### Python Not Found
-```cmd
-REM On Phoenix, check Python
-where python
-python --version
-```
-
-### CUDA Not Available
-```cmd
-REM Check NVIDIA driver
-nvidia-smi
-
-REM Reinstall PyTorch
-pip uninstall torch torchvision torchaudio
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-```
-
-### Port 8000 in Use
-```cmd
-REM Find process
-netstat -ano | findstr :8000
-
-REM Kill process (replace PID)
-taskkill /F /PID <pid>
-```
-
----
-
-## Complete Workflow
+### If Gateway is Down
+If `curl http://phoenix:8090` fails, you must access the terminal manually:
 
 ```bash
-# 1. Deploy
-./deploy_to_phoenix.sh
-
-# 2. Test
-python client/train_client.py --server http://phoenix:8000 --action health
-
-# 3. Submit
-python client/train_client.py \
-  --server http://phoenix:8000 \
-  --action submit \
-  --config configs/stage1_gpu.json
-
-# 4. Monitor
-python client/train_client.py \
-  --server http://phoenix:8000 \
-  --action monitor \
-  --job-id abc12345
-
-# 5. Download
-python client/train_client.py \
-  --server http://phoenix:8000 \
-  --action download \
-  --job-id abc12345 \
-  --output models/stage1.pt
+# On Phoenix Terminal:
+cd ~/mm-rec-training
+./phoenix_manual_start.sh
 ```
 
-**Ready!** 🚀
+### Force Restart
+```bash
+# On Phoenix Terminal:
+taskkill /F /IM python.exe
+./phoenix_manual_start.sh
+```

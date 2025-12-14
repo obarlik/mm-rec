@@ -34,13 +34,8 @@ pkill -f gateway.py || true
 pkill -f train_server.py || true
 
 # 5. Start Servers
-echo "▶️  Starting Training Server (Worker L2) on Port 8001..."
-nohup python server/train_server.py --port 8001 > train_server.log 2>&1 &
-PID_SERVER=$!
-echo "   ✅ Server PID: $PID_SERVER"
-
-echo "▶️  Starting Gateway (L1) on port $GATEWAY_PORT..."
-# Gateway proxies to localhost:8001 by default
+echo "▶️  Starting Gateway (Manager) on port $GATEWAY_PORT..."
+# Gateway manages Training (:8001) and Inference (:8002) subprocesses
 nohup python server/gateway.py --port $GATEWAY_PORT > gateway.log 2>&1 &
 PID_GATEWAY=$!
 echo "   ✅ Gateway PID: $PID_GATEWAY"
@@ -48,7 +43,8 @@ echo "   ✅ Gateway PID: $PID_GATEWAY"
 echo ""
 echo "📝 Logs:"
 echo "   tail -f gateway.log"
-echo "   tail -f train_server.log"
+echo "   tail -f server_internal.log"
+echo "   tail -f inference_internal.log"
 echo ""
 echo "✅ Stack is UP."
 echo "   Gateway Health: curl http://localhost:$GATEWAY_PORT/gateway/health"
