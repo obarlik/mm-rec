@@ -112,7 +112,8 @@ def load_real_dataset(data_path, batch_size=32):
         shuffle=True, 
         collate_fn=collator,
         num_workers=4,
-        pin_memory=True
+        pin_memory=True,
+        drop_last=True # Critical for JAX: Fixed batch shape for compiled functions
     )
     
     return loader
