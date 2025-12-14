@@ -111,6 +111,9 @@ def load_dataset_memory(data_path, max_length=512):
     for i in range(len(dataset)):
         item = dataset[i]
         ids = item['input_ids'] # Already truncated by Dataset
+        if hasattr(ids, 'tolist'):
+            ids = ids.tolist()
+            
         # Manual Padding
         if len(ids) < max_length:
             ids = ids + [pad_id] * (max_length - len(ids))
