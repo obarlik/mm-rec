@@ -112,17 +112,33 @@ class TrainingJob:
                     log_f.flush()
                     
                     # Optional: Parse line to update self.progress for API
-                    # Expected format: "Epoch X | Step Y ... Loss L ... Speed S"
-                    if "Loss" in line and "Step" in line:
+                    # Optional: Parse line to update self.progress for API
+                    # New JAX Format: "Epoch 3 | Step 175 (E:0/87): Loss 1.6201 | Speed: 4.18 it/s | VRAM: 19635 MiB | GNorm: 0.14 | MaxState: 6.55"
+                    import re
+                    # Regex to capture: Epoch, Step, TotalSteps(in paren), Loss, Speed, VRAM, GNorm, MaxState
+                    # Epoch (\d+) \| Step (\d+) \(E:\d+/(\d+)\): Loss ([\d\.]+) \| Speed: ([\d\.]+) it/s \| VRAM: ([\d]+) MiB \| GNorm: ([\d\.]+) \| MaxState: ([\d\.]+)
+                    match = re.search(r'Epoch (\d+) \| Step (\d+) \(E:\d+/(\d+)\): Loss ([\d\.]+) \| Speed: ([\d\.]+) it/s \| VRAM: ([\w/]+) MiB \| GNorm: ([\d\.]+) \| MaxState: ([\d\.]+)', line)
+                    if match:
                         try:
-                            parts = line.split('|')
-                            # Crude parsing
-                            loss_str = [p for p in parts if "Loss" in p][0].split('Loss')[1].strip()
-                            speed_str = [p for p in parts if "Speed" in p][0].split('Speed:')[1].strip()
-                            self.progress['loss'] = float(loss_str)
-                            self.progress['speed'] = speed_str
+                            self.progress['epoch'] = int(match.group(1))
+                            self.progress['step'] = int(match.group(2)) # Global Step
+                            # For total steps, we can approximate Step * (TotalEpochs/CurrentEpoch) or retrieve batch count
+                            # Actually group(3) is batches_per_epoch. Total steps = batches_per_epoch * num_epochs. 
+                            # We don't have num_epochs here easily without parsing config again or assuming. 
+                            # Let's just store what we have.
+                            batches_per_epoch = int(match.group(3))
+                            total_epochs = self.config.num_epochs
+                            self.progress['total_steps'] = batches_per_epoch * total_epochs
+                            
+                            self.progress['loss'] = float(match.group(4))
+                            self.progress['speed'] = match.group(5) + " it/s"
+                            self.progress['vram'] = match.group(6) + " MiB"
+                            self.progress['gnorm'] = match.group(7)
+                            self.progress['max_state'] = match.group(8)
                         except:
                             pass
+                    
+                    # Fallback or other formats could go here
                     
                     # Check for external stop signal (Gateway API set status='stopped')
                     if self.status == "stopped":
