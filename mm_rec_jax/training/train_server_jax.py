@@ -230,6 +230,49 @@ def train_step(state, batch, memory_state, rng):
 # Manually JIT compilation to avoid decorator issues with arguments
 train_step = jax.jit(train_step, donate_argnums=(0, 2))
 
+def validate_and_adjust_config(config, free_vram_gb):
+    """
+    Validate training config against available GPU memory.
+    Auto-adjust batch_size if needed to prevent OOM.
+    
+    Returns: (adjusted_config, was_adjusted, warning_msg)
+    """
+    # Estimated VRAM usage formula (rough heuristic):
+    # VRAM ≈ model_params + activations + optimizer_states + data
+    # For safe operation, we use empirically determined limits:
+    # Batch Size 16 requires ~8-10GB VRAM (from previous tests)
+    # Batch Size 8 requires ~4-6GB VRAM
+    
+    SAFE_BATCH_SIZES = {
+        # free_vram_gb: max_safe_batch_size
+        24: 16,  # RTX 4090 with 24GB can handle batch 16
+        20: 16,
+        16: 12,
+        12: 8,
+        8: 4,
+        4: 2,
+    }
+    
+    was_adjusted = False
+    warning_msg = ""
+    original_batch_size = config.get('batch_size', 8)
+    
+    # Find appropriate batch size for available VRAM
+    max_safe_batch = 2  # Default minimum
+    for vram_threshold in sorted(SAFE_BATCH_SIZES.keys()):
+        if free_vram_gb \u003e= vram_threshold:
+            max_safe_batch = SAFE_BATCH_SIZES[vram_threshold]
+    
+    if original_batch_size \u003e max_safe_batch:
+        config['batch_size'] = max_safe_batch
+        was_adjusted = True
+        warning_msg = f"⚠️  VRAM SAFETY: Batch size reduced from {original_batch_size} to {max_safe_batch} (Free VRAM: {free_vram_gb:.1f}GB)"
+        print(warning_msg)
+    else:
+        print(f"✅ VRAM Check Passed: Batch size {original_batch_size} is safe for {free_vram_gb:.1f}GB free VRAM")
+    
+    return config, was_adjusted, warning_msg
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='configs/stage1_gpu.json')

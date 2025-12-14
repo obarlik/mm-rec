@@ -266,32 +266,6 @@ class RemoteTrainer:
         except Exception as e:
             print(f"❌ Connection error: {e}")
 
-    def update_server(self):
-        """Trigger server update (git pull + restart)."""
-        print("🔄 Triggering remote server update...")
-        try:
-            response = requests.post(f"{self.server_url}/api/update", timeout=30)
-            if response.status_code == 200:
-                result = response.json()
-                print("✅ Update Successful!")
-                print("📝 Git Output:\n" + result.get('git_output', ''))
-                print("⚠️  Server is restarting... connection may drop briefly.")
-            else:
-                print(f"❌ Update failed: {response.text}")
-        except requests.exceptions.ReadTimeout:
-            # Server restarts during request, so timeout is expected/possible
-            print("✅ Update triggered (Timeout expected during restart).")
-        except Exception as e:
-            print(f"❌ Connection error: {e}")
-        if response.status_code == 200:
-            jobs = response.json()['jobs']
-            print("\n📋 Jobs on server:")
-            print("=" * 80)
-            for job in jobs:
-                print(f"  {job['job_id']}: {job['status']} - {job['config']['job_name']}")
-            return jobs
-        return []
-    
     def health_check(self):
         """Check server health."""
         try:
@@ -311,17 +285,25 @@ class RemoteTrainer:
         """Trigger server to pull latest code from git."""
         print("🔄 Updating server code...")
         try:
-            response = requests.post(f"{self.server_url}/api/update")
+            response = requests.post(f"{self.server_url}/api/update", timeout=60)
             if response.status_code == 200:
                 result = response.json()
-                print(f"✅ {result['message']}")
-                print(f"📝 Git output: {result.get('git_output', 'No output')}")
-                if result.get('note'):
-                    print(f"⚠️  {result['note']}")
+                status = result.get('status', 'unknown')
+                print(f"✅ Update {status}!")
+                git_output = result.get('git_output', 'No output')
+                if git_output and git_output.strip():
+                    print(f"📝 Git output: {git_output}")
+                note = result.get('note')
+                if note:
+                    print(f"⚠️  {note}")
                 return True
             else:
                 print(f"❌ Update failed: {response.text}")
                 return False
+        except requests.exceptions.Timeout:
+            print("⚠️  Update request timed out (server may be restarting)")
+            print("💡 Wait a few seconds and check with: python client/train_client.py --action health")
+            return False
         except Exception as e:
             print(f"❌ Update failed: {e}")
             return False
