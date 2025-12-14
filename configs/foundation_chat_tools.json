@@ -1,5 +1,5 @@
 {
-    "job_name": "foundation_chat_tools",
+    "job_name": "foundation_chat_88k",
     "model_dim": 512,
     "num_layers": 6,
     "num_heads": 8,
