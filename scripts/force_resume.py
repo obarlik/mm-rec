@@ -5,14 +5,19 @@ import sys
 
 def resume_specific_job(job_id, config_path="configs/baseline.json"):
     url = "http://phoenix:8090/api/train/submit"
+    # Job ID to Resume (Based on LS output: fa5d0cb5 has Epoch 9 checkpoint)
+    JOB_ID = "fa5d0cb5" 
+    
+    SUBMIT_URL = "http://phoenix:8090/api/train/submit"
+    STATUS_URL = f"http://phoenix:8090/api/train/status/{JOB_ID}"
     
     with open(config_path) as f:
         config = json.load(f)
     
     # Add the magic field
-    config['resume_job_id'] = job_id
+    config['resume_job_id'] = JOB_ID # Changed to use JOB_ID
     
-    print(f"🚀 Resubmitting Job {job_id} to {url}...")
+    print(f"🚀 Resubmitting Job {JOB_ID} to {SUBMIT_URL}...") # Changed to use JOB_ID and SUBMIT_URL
     try:
         resp = requests.post(url, json=config)
         if resp.status_code == 200:

@@ -11,6 +11,7 @@ def get_smart_memory_fraction(reserve_gb=4.0):
     """
     Calculates the optimal JAX memory fraction based on currently free GPU memory.
     Reserves 'reserve_gb' for system/other processes.
+    Returns: (fraction_string, free_vram_gb)
     """
     try:
         # Get Memory Info: [Free, Total] in MiB from nvidia-smi
@@ -24,6 +25,10 @@ def get_smart_memory_fraction(reserve_gb=4.0):
         
         print(f"🧠 Smart Memory: Total={total_mib}MiB, Free={free_mib}MiB")
         print(f"   (Pre-existing Usage: {used_before}MiB by System/Other processes)")
+        
+        # Return free VRAM in GB for validation
+        free_gb = free_mib / 1024.0
+        
         # Strategy: "Safe Minimum"
         # 4GB was too tight for Compilation/Autotuning.
         # We target 8 GB, which handles the 2GB chunks safely.
@@ -38,16 +43,18 @@ def get_smart_memory_fraction(reserve_gb=4.0):
         
         print(f"🧠 Smart Memory: Free={free_mib}MiB, Total={total_mib}MiB")
         print(f"   Targeting Minimal {target_mib}MiB ({fraction:.2%}) for JAX efficiency.")
-        return f"{fraction:.4f}"
+        return f"{fraction:.4f}", free_gb
         
     except Exception as e:
         print(f"⚠️  Could not detect GPU memory: {e}")
         print("   Fallback to default 30%")
-        return ".30"
+        return ".30", 16.0  # Assume 16GB if detection fails
+
 
 # Configure JAX Memory
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'true'
-os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = get_smart_memory_fraction(reserve_gb=2.0)
+MEMORY_FRACTION, FREE_VRAM_GB = get_smart_memory_fraction(reserve_gb=2.0)
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = MEMORY_FRACTION
 
 import jax
 import jax.numpy as jnp
@@ -261,6 +268,20 @@ def main():
     else:
         print("⚠️  No config file provided. Using Defaults.")
 
+    # ==== SMART VRAM VALIDATION ====
+    # Validate config against actual GPU capacity and auto-adjust if needed
+    print("\n🔍 Validating Config Against GPU Capacity...")
+    config, was_adjusted, warning_msg = validate_and_adjust_config(config, FREE_VRAM_GB)
+    
+    if was_adjusted:
+        # Save adjusted config back to file for transparency
+        if args.config:
+            adjusted_path = args.config.replace('.json', '_adjusted.json')
+            with open(adjusted_path, 'w') as f:
+                json.dump(config, f, indent=2)
+            print(f"💾 Saved adjusted config to: {adjusted_path}")
+
+
     # Setup Data (Real)
     data_path = config.get('data_path', 'data/chat_data_real.jsonl')
     if not os.path.exists(data_path):
@@ -303,6 +324,57 @@ def main():
             idx=jnp.repeat(long_term.idx[None, ...], batch_size, axis=0)
         )
     )
+
+    # RESUME LOGIC
+    # Look for existing checkpoints for this job or generic ones
+    # Checkpoint format expected: "{job_id}_ckpt_epoch_{e}.msgpack" OR "ckpt_epoch_{e}.msgpack"
+    start_epoch = 0
+    global_step = 0
+    
+    # We need the JOB ID from config to be specific
+    current_job_id = config.get('job_name', 'default') # Weak fallback
+    # Better: Scan directory for ANY msgpack that looks like a checkpoint
+    checkpoint_dir = "workspace"
+    if not os.path.exists(checkpoint_dir):
+        os.makedirs(checkpoint_dir)
+        
+    checkpoints = [f for f in os.listdir(checkpoint_dir) if f.endswith('.msgpack') and 'ckpt_epoch' in f]
+    
+    if checkpoints:
+        # Sort by modification time (latest first)
+        checkpoints.sort(key=lambda x: os.path.getmtime(os.path.join(checkpoint_dir, x)), reverse=True)
+        latest_ckpt = os.path.join(checkpoint_dir, checkpoints[0])
+        
+        try:
+            print(f"♻️  Found checkpoint: {latest_ckpt}. Attempting resume...")
+            state = restore_checkpoint(state, latest_ckpt)
+            
+            # Extract Epoch from filename if possible
+            # Format: 'd1f21a35_ckpt_epoch_1.msgpack'
+            import re
+            match = re.search(r'ckpt_epoch_(\d+)', latest_ckpt)
+            if match:
+                resumed_epoch = int(match.group(1))
+                start_epoch = resumed_epoch # Continue from NEXT epoch? No, usually saved at END of epoch.
+                # So if we saved Epoch 1, we start Epoch 1? Or 2?
+                # Usually we save AFTER epoch finishes. So we should start at next.
+                # But let's assume we start AT that epoch index if 0-indexed.
+                # Let's say we saved epoch 1 (0-indexed 1 means 2nd epoch done).
+                # Actually, safety first: restart the epoch or assume finished?
+                # Let's rely on global_step if stored, but we don't store it in filename.
+                # JAX TrainState stores 'step' internally!
+                
+                # Get step from loaded state
+                global_step = int(state.step)
+                print(f"   Resumed at Step {global_step} (Epoch ~{start_epoch})")
+                
+                # Update start_epoch based on global_step
+                start_epoch = global_step // num_batches
+                print(f"   Corrected Start Epoch to {start_epoch}")
+                
+        except Exception as e:
+             print(f"⚠️  Resume failed: {e}. Starting from scratch.")
+
     
     print("🔥 Starting Training Loop...")
     

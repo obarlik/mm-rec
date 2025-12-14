@@ -24,9 +24,59 @@ WORKSPACE_DIR = Path("./workspace")
 CHECKPOINTS_DIR = Path("./checkpoints")
 WORKSPACE_DIR.mkdir(exist_ok=True)
 CHECKPOINTS_DIR.mkdir(exist_ok=True)
+JOBS_STATE_FILE = WORKSPACE_DIR / "jobs_state.json"
 
 # Job storage
+# Job storage
 jobs: Dict[str, 'TrainingJob'] = {}
+
+def save_jobs_to_disk():
+    """Persist jobs state to disk."""
+    try:
+        state = {
+            job_id: {
+                "status": job.status,
+                "config": job.config.dict(),
+                "progress": job.progress,
+                "created_at": job.start_time
+            }
+            for job_id, job in jobs.items()
+        }
+        with open(JOBS_STATE_FILE, 'w') as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        print(f"⚠️ Failed to save jobs state: {e}")
+
+def load_jobs_from_disk():
+    """Load jobs state from disk on startup."""
+    if not JOBS_STATE_FILE.exists():
+        return
+    
+    try:
+        with open(JOBS_STATE_FILE, 'r') as f:
+            state = json.load(f)
+            
+        for job_id, data in state.items():
+            # Reconstruct TrainingConfig
+            try:
+                config = TrainingConfig(**data['config'])
+                job = TrainingJob(job_id, config)
+                job.status = data.get('status', 'unknown')
+                job.progress = data.get('progress', {})
+                job.start_time = data.get('created_at')
+                
+                # If it was 'training' or 'queued', mark as 'interrupted' on load
+                if job.status in ['training', 'queued']:
+                    job.status = 'interrupted'
+                    job.progress['message'] = 'Interrupted by server restart'
+                    
+                jobs[job_id] = job
+            except Exception as e:
+                print(f"⚠️ Failed to restore job {job_id}: {e}")
+                
+        print(f"♻️  Restored {len(jobs)} jobs from disk.")
+    except Exception as e:
+        print(f"⚠️ Failed to load jobs state: {e}")
 
 class TrainingConfig(BaseModel):
     job_name: str
@@ -143,7 +193,12 @@ class TrainingJob:
                             self.progress['vram'] = match.group(7) + " MiB"
                             self.progress['gnorm'] = match.group(8)
                             self.progress['max_state'] = match.group(9)
+                            self.progress['max_state'] = match.group(9)
                             self.progress['message'] = "Training..."
+                            
+                            # Persist state periodically (every 10 steps to reduce I/O)
+                            if self.progress['step'] % 10 == 0:
+                                save_jobs_to_disk()
                         except:
                             pass
                     else:
@@ -249,6 +304,9 @@ async def submit_training(config: TrainingConfig, background_tasks: BackgroundTa
     # Start training in background (in a thread to avoid blocking API)
     from fastapi.concurrency import run_in_threadpool
     background_tasks.add_task(run_in_threadpool, job.run)
+    
+    # Persist state
+    save_jobs_to_disk()
     
     return {
         "job_id": job_id,
@@ -421,5 +479,10 @@ if __name__ == "__main__":
     print(f"📁 Workspace: {WORKSPACE_DIR.absolute()}")
     print(f"🔧 Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
     print(f"📡 Listening on: {args.host}:{args.port}")
+    
+    print(f"test 📡 Listening on: {args.host}:{args.port}")
+    
+    # Load persisted jobs
+    load_jobs_from_disk()
     
     uvicorn.run(app, host=args.host, port=args.port)

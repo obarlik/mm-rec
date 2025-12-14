@@ -8,5 +8,6 @@
     "batch_size": 8,
     "learning_rate": 3e-4,
     "max_length": 512,
-    "vocab_size": 100300
+    "vocab_size": 100300,
+    "data_path": "data/combined_foundation.jsonl"
 }
