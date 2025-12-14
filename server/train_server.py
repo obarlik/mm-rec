@@ -58,6 +58,8 @@ def load_jobs_from_disk():
         with open(JOBS_STATE_FILE, 'r') as f:
             state = json.load(f)
             
+        jobs_to_resume = []
+            
         for job_id, data in state.items():
             # Reconstruct TrainingConfig
             try:
@@ -67,16 +69,40 @@ def load_jobs_from_disk():
                 job.progress = data.get('progress', {})
                 job.start_time = data.get('created_at')
                 
-                # If it was 'training' or 'queued', mark as 'interrupted' on load
+                # Check for interrupted jobs
                 if job.status in ['training', 'queued']:
-                    job.status = 'interrupted'
-                    job.progress['message'] = 'Interrupted by server restart'
+                    print(f"🔄 Found interrupted job {job_id}. Queueing regarding auto-resume...")
+                    jobs_to_resume.append(job)
+                    # We leave status as is, or set to 'resuming'
+                    job.status = 'resuming' 
+                    job.progress['message'] = 'Auto-resuming after server restart...'
                     
                 jobs[job_id] = job
             except Exception as e:
                 print(f"⚠️ Failed to restore job {job_id}: {e}")
                 
         print(f"♻️  Restored {len(jobs)} jobs from disk.")
+        
+        # Trigger Resumes
+        for job in jobs_to_resume:
+            print(f"🚀 Auto-Resuming Job {job.job_id}...")
+            # Safety Kill existing if any (orphan check)
+            try:
+                # Naive kill by grep
+                subprocess.run(["pkill", "-f", f"train_server_jax.py.*{job.job_id}"], capture_output=True)
+            except:
+                pass
+                
+            # Run in background (non-blocking)
+            # Since we are in startup, we can just call run() which uses Popen (non-blocking)
+            # BUT run() updates status to 'training'.
+            try:
+                job.run()
+            except Exception as e:
+                print(f"❌ Failed to resume {job.job_id}: {e}")
+                job.status = 'failed'
+                job.progress['error'] = f"Auto-resume failed: {e}"
+                
     except Exception as e:
         print(f"⚠️ Failed to load jobs state: {e}")
 
