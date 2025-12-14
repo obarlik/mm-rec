@@ -101,7 +101,7 @@ class RemoteTrainer:
                 from rich.live import Live
                 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
                 
-                console = Console()
+                console = Console(force_terminal=True)
                 layout = Layout()
                 
                 # Split Layout
@@ -128,11 +128,6 @@ class RemoteTrainer:
                 table.add_column("Metric", style="cyan")
                 table.add_column("Value", style="magenta")
                 
-                # Metrics Table
-                table = Table(title="Training Metrics", expand=True)
-                table.add_column("Metric", style="cyan")
-                table.add_column("Value", style="magenta")
-                
                 table.add_row("Message", f"[yellow]{status_msg}[/]")
                 if 'epoch' in prog:
                     table.add_row("Epoch", f"{prog.get('epoch', 'N/A')}")
@@ -148,11 +143,9 @@ class RemoteTrainer:
                 
                 layout["metrics"].update(Panel(table))
                 
-                # Progress Bar (Simulated using Rich Progress for visual only)
-                # We construct a manual progress bar string or use Rich's Progress object if easier.
-                # For simplicity in Layout, let's use a Panel with a big text representation.
-                total = prog['total_steps']
-                current = prog['step']
+                # Progress Bar
+                total = prog.get('total_steps', 0)
+                current = prog.get('step', 0)
                 pct = (current / total * 100) if total > 0 else 0
                 
                 # ASCII Bar
@@ -168,10 +161,12 @@ class RemoteTrainer:
                     border_style="green"
                 )
                 layout["progress"].update(prog_panel)
+
+                print("✨ Starting Dashboard...")
                 
                 # Live Update Loop
-                # Use screen=False so it doesn't clear on exit (good for persistent logs)
-                with Live(layout, refresh_per_second=1, screen=False) as live:
+                # Use screen=True for proper full-screen dashboard
+                with Live(layout, console=console, refresh_per_second=4, screen=True) as live:
                     while True:
                         try:
                             status = self.get_status(job_id)
