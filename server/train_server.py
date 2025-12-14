@@ -38,6 +38,11 @@ class TrainingConfig(BaseModel):
     batch_size: int = 16
     learning_rate: float = 1e-3
     max_length: int = 256
+    data_path: Optional[str] = None
+    vocab_size: Optional[int] = None
+    warmup_fraction: float = 0.05
+    early_stop_patience: int = 3
+    min_delta: float = 0.01
     use_uboo: bool = False
     use_moe: bool = False
 
