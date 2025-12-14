@@ -165,8 +165,8 @@ class RemoteTrainer:
                 print("✨ Starting Dashboard...", flush=True)
                 
                 # Live Update Loop
-                # Use screen=True for proper full-screen dashboard
-                with Live(layout, console=console, refresh_per_second=4, screen=True) as live:
+                # Using screen=False for better terminal compatibility
+                with Live(layout, console=console, refresh_per_second=4, screen=False) as live:
                     while True:
                         try:
                             status = self.get_status(job_id)

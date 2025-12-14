@@ -46,16 +46,26 @@ def start_inference_server():
     """Start the inference server (CPU) as a subprocess."""
     global inference_process
     
-    # Hardcoded/Default paths for now - ideally configurable
     # We use CPU for inference to avoid VRAM clash
     env = os.environ.copy()
     env["JAX_PLATFORM_NAME"] = "cpu"
     
-    # Check for model/config availability
-    # Fallback to defaults if specific files don't exist?
-    # For Phase 9, we assume standard paths
-    model_path = "checkpoints/last_ckpt.msgpack" # or best_model.msgpack
-    config_path = "configs/moe_activation.json"
+    # Find the most recent checkpoint in workspace/
+    workspace_dir = SERVER_DIR / "workspace"
+    if workspace_dir.exists():
+        checkpoints = list(workspace_dir.glob("*_ckpt_epoch_*.msgpack"))
+        if checkpoints:
+            # Sort by modification time, get latest
+            model_path = str(max(checkpoints, key=lambda p: p.stat().st_mtime))
+            print(f"🧠 Gateway: Found checkpoint: {model_path}")
+        else:
+            print("⚠️ Gateway: No checkpoints found in workspace/, skipping Inference Server.")
+            return None
+    else:
+        print("⚠️ Gateway: workspace/ directory not found, skipping Inference Server.")
+        return None
+    
+    config_path = "configs/baseline.json"  # Use baseline config that matches training
     
     cmd = [
         sys.executable, "server/inference_server.py",
