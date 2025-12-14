@@ -432,6 +432,16 @@ async def stream_logs(job_id: str):
         media_type="text/event-stream"
     )
 
+@app.get("/api/logs/file/{job_id}")
+async def get_text_logs(job_id: str):
+    """Get raw log file content from disk."""
+    log_file = WORKSPACE_DIR / f"{job_id}.log"
+    
+    if not log_file.exists():
+        raise HTTPException(status_code=404, detail=f"Log file not found for {job_id}")
+        
+    return FileResponse(log_file, media_type="text/plain")
+
 @app.get("/api/train/download/{job_id}")
 async def download_model(job_id: str):
     """Download trained model."""
