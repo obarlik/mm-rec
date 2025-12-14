@@ -1,0 +1,15 @@
+{
+    "job_name": "cpu_debug_moe",
+    "model_dim": 64,
+    "num_layers": 1,
+    "num_heads": 2,
+    "use_uboo": true,
+    "use_moe": true,
+    "ffn_dim": 128,
+    "num_epochs": 1,
+    "batch_size": 2,
+    "learning_rate": 1e-4,
+    "max_length": 64,
+    "vocab_size": 1000,
+    "data_path": "data/chat_data.jsonl"
+}
