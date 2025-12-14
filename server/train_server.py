@@ -66,16 +66,19 @@ class TrainingJob:
             # 1. Prepare Config File
             config_path = WORKSPACE_DIR / f"{self.job_id}_config.json"
             
-            # Add data path to config so JAX script knows where to look
-            # Check for available data file
-            data_file = WORKSPACE_DIR / "data" / "chat_data_real.jsonl"
-            if not data_file.exists():
-                 data_file = WORKSPACE_DIR / "data" / "chat_data.jsonl" # Fallback
-            
             config_dict = self.config.dict()
-            config_dict['data_path'] = str(data_file.absolute())
+            
+            # Only set data_path if not already in config
+            if 'data_path' not in config_dict or not config_dict['data_path']:
+                # Fallback to default data file
+                data_file = WORKPACE_DIR / "data" / "chat_data_real.jsonl"
+                if not data_file.exists():
+                     data_file = WORKSPACE_DIR / "data" / "chat_data.jsonl"
+                config_dict['data_path'] = str(data_file.absolute())
+            
             # Explicitly set vocab_size for JAX (tiktoken cl100k_base + margin)
-            config_dict['vocab_size'] = 100300 
+            config_dict['vocab_size'] = 100300
+ 
             
             with open(config_path, 'w') as f:
                 json.dump(config_dict, f, indent=2)
