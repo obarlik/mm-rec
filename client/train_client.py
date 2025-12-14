@@ -74,69 +74,163 @@ class RemoteTrainer:
             return response.json()
         return None
     
-    def monitor(self, job_id: str, update_interval: int = 2):
-        """Monitor training progress (Robust Stream)."""
-        print(f"👀 Monitoring job: {job_id}")
-        print(f"🔗 Server: {self.server_url} (Timeout: 2s)")
-        print("=" * 60)
-        
-        import sys
-        import requests
+    def monitor(self, job_id: str, update_interval: int = 1):
+        """Monitor training progress (Curses TUI)."""
+        import curses
         import time
-        seen_length = 0
-        
-        while True:
-            try:
-                # 1. Fetch Logs directly (Priority)
+        import requests
+        from collections import deque
+        import datetime
+        import sys
+
+        def tui(stdscr):
+            # Setup
+            curses.curs_set(0) # Hide cursor
+            stdscr.nodelay(True) # Non-blocking input
+            # Timeout handles the loop sleep (1000ms = 1s)
+            stdscr.timeout(1000) 
+            
+            history = deque(maxlen=30) # Store enough for large screens
+            last_step = -1
+            
+            # Colors if supported
+            if curses.has_colors():
+                curses.start_color()
+                curses.init_pair(1, curses.COLOR_CYAN, curses.COLOR_BLACK) # Header
+                curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK) # Good
+                curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK) # Warning
+                curses.init_pair(4, curses.COLOR_RED, curses.COLOR_BLACK) # Err
+            
+            while True:
+                # 1. Fetch Data
+                status_txt = "CONNECTING..."
                 try:
-                    # Using Range header if possible, or full fetch
-                    # Simplified full fetch for robustness
                     resp = requests.get(
-                        f"{self.server_url}/api/logs/file/{job_id}",
-                        timeout=2
+                        f"{self.server_url}/api/train/status/{job_id}",
+                        timeout=1
                     )
                     
                     if resp.status_code == 200:
-                        text = resp.text
-                        current_len = len(text)
+                        data = resp.json()
+                        status = data.get('status', 'unknown')
+                        status_txt = status.upper()
                         
-                        if current_len > seen_length:
-                            # Only print new content
-                            new_content = text[seen_length:]
-                            print(new_content, end='')
-                            sys.stdout.flush()
-                            seen_length = current_len
+                        progress = data.get('progress', {})
+                        
+                        if status == 'training' and isinstance(progress, dict) and 'loss' in progress:
+                            # Extract
+                            ep = str(progress.get('epoch', '?'))
+                            st = int(progress.get('step', 0))
+                            total_st = int(progress.get('total_steps', 1)) # Prevent div/0
                             
-                    elif resp.status_code == 404:
-                         pass # Wait for file creation
-                         
+                            # Percentage
+                            percent = (st / total_st) * 100 if total_st > 0 else 0
+                            prog_str = f"{percent:.1f}%"
+                            
+                            loss = float(progress.get('loss', 0.0))
+                            spd = str(progress.get('speed', '?'))
+                            eta = str(progress.get('eta', '?'))
+                            
+                            # VRAM (Assuming RTX 4090 - 24GB)
+                            vram_val = progress.get('vram', 'N/A')
+                            vram_str = "N/A"
+                            if vram_val != 'N/A':
+                                try:
+                                    vram_num = float(str(vram_val).split()[0])
+                                    vram_gb = vram_num / 1024
+                                    vram_pct = (vram_gb / 24.0) * 100
+                                    vram_str = f"{vram_gb:.1f}G ({int(vram_pct)}%)"
+                                except:
+                                    vram_str = str(vram_val)
+                            
+                            gnorm = str(progress.get('gnorm', progress.get('grad_norm', '?')))
+                            mstate = str(progress.get('max_state', progress.get('MaxState', '?')))
+
+                            # Update history
+                            current_step_num = st
+                            if current_step_num != last_step or last_step == -1:
+                                loss_str = f"{loss:.4f}"
+                                # COLUMNS: EP | STEP | PROG | LOSS | GNORM | MST | VRAM | SPEED | ETA
+                                row = f"{ep:<4} {st:<6} {prog_str:<6} {loss_str:<8} {gnorm:<8} {mstate:<8} {vram_str:<12} {spd:<10} {eta:<10}"
+                                history.appendleft(row)
+                                last_step = current_step_num
+                        
+                        elif status in ['completed', 'failed', 'stopped']:
+                             history.appendleft(f"JOB FINISHED: {status.upper()}")
+                             status_txt = status.upper()
+
                 except requests.exceptions.RequestException:
-                    pass # Connection glitch, ignore
+                    status_txt = "NETWORK ERROR"
+
+                # 2. Draw UI
+                stdscr.erase()
+                height, width = stdscr.getmaxyx()
                 
-                # 2. Status Check (Optional logging)
-                # Fail silently to avoid interrupting log stream
-                try:
-                    status_resp = requests.get(
-                        f"{self.server_url}/api/train/status/{job_id}", 
-                        timeout=1
-                    )
-                    if status_resp.status_code == 200:
-                        s = status_resp.json()
-                        job_stat = s.get('status')
-                        if job_stat in ['completed', 'failed', 'stopped']:
-                            print(f"\n\n🏁 Job finished: {job_stat.upper()}")
-                            break
-                except:
-                    pass
+                # Title Bar
+                title = f" JAX MONITOR: {job_id} | STATUS: {status_txt} | {datetime.datetime.now().strftime('%H:%M:%S')}"
+                safe_addstr(stdscr, 0, 0, title[:width], curses.color_pair(1) | curses.A_BOLD)
+                safe_addstr(stdscr, 1, 0, "=" * (width), curses.color_pair(1))
+                
+                # Column Headers
+                headers = f"{'EP':<4} {'STEP':<6} {'PROG':<6} {'LOSS':<8} {'GNORM':<8} {'MST':<8} {'VRAM':<12} {'SPEED':<10} {'ETA':<10}"
+                safe_addstr(stdscr, 2, 0, headers[:width], curses.A_UNDERLINE)
+                
+                # Data Rows
+                # Max rows specific to screen
+                max_rows = height - 8 # Reserve 8 lines for header/footer/legend
+                
+                for i, row in enumerate(history):
+                    if i >= max_rows: break
+                    y = 3 + i
+                    safe_addstr(stdscr, y, 0, row[:width])
+
+                # Legend / Info Panel (Bottom)
+                # Ensure we have space
+                if height > 12:
+                    info_y = height - 5
+                    safe_addstr(stdscr, info_y, 0, "-" * width, curses.color_pair(1))
                     
-                time.sleep(update_interval)
+                    # Row 1
+                    s1 = " GUIDANCE: "
+                    safe_addstr(stdscr, info_y + 1, 0, s1, curses.A_BOLD)
+                    safe_addstr(stdscr, info_y + 1, len(s1), "LOSS: Decoding Error (Lower is better, Target < 2.0)")
+                    
+                    # Row 2
+                    s2 = "           "
+                    safe_addstr(stdscr, info_y + 2, 0, s2)
+                    safe_addstr(stdscr, info_y + 2, len(s2), "GNORM: Stability (Should be ~1.0, >10.0 is unstable)")
+                    
+                    # Row 3
+                    safe_addstr(stdscr, info_y + 3, 0, s2)
+                    # Use color warning for MST explanation
+                    safe_addstr(stdscr, info_y + 3, len(s2), "MST (MaxState): Activation Magnitude (Risk if > 100)")
+
+                # Footer
+                footer = " [q] Quit | [r] Refresh"
+                safe_addstr(stdscr, height-1, 0, footer[:width], curses.color_pair(1) | curses.A_REVERSE)
+
+                stdscr.refresh()
                 
-            except KeyboardInterrupt:
-                print("\n🛑 Monitor stopped.")
-                break
-            except Exception as e:
-                print(f"\n❌ Client Error: {e}")
-                time.sleep(5)
+                # Input Handling
+                c = stdscr.getch()
+                if c == ord('q'):
+                    break
+        
+        def safe_addstr(win, y, x, s, attr=0):
+            """Robust addstr that avoids errors at screen corners."""
+            h, w = win.getmaxyx()
+            if y >= h or x >= w: return
+            try:
+                # Clip string if too long
+                if len(s) > w - x: s = s[:w-x]
+                win.addstr(y, x, s, attr)
+            except curses.error:
+                pass
+
+        try:
+            curses.wrapper(tui)
+        except Exception as e:
+            print(f"Curses Error: {e}")
     
     def download_model(self, job_id: str, output_path: str):
         """Download trained model."""
