@@ -277,8 +277,6 @@ def main():
     print("🚀 Initializing JAX Training...", flush=True)
     print(f"   JAX Devices: {jax.devices()}", flush=True)
     
-    print(f"   JAX Devices: {jax.devices()}")
-
     # Parse Arguments
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, required=False, help='Path to JSON config file')
