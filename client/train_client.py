@@ -104,6 +104,7 @@ class RemoteTrainer:
             while True:
                 # 1. Fetch Data
                 status_txt = "CONNECTING..."
+                vram_str = "N/A"
                 try:
                     resp = requests.get(
                         f"{self.server_url}/api/train/status/{job_id}",
@@ -150,8 +151,8 @@ class RemoteTrainer:
                             current_step_num = st
                             if current_step_num != last_step or last_step == -1:
                                 loss_str = f"{loss:.4f}"
-                                # COLUMNS: EP | STEP | PROG | LOSS | GNORM | MST | VRAM | SPEED | ETA
-                                row = f"{ep:<4} {st:<6} {prog_str:<6} {loss_str:<8} {gnorm:<8} {mstate:<8} {vram_str:<12} {spd:<10} {eta:<10}"
+                                # COLUMNS: EP | STEP | PROG | LOSS | GNORM | MST | SPEED | ETA
+                                row = f"{ep:<4} {st:<6} {prog_str:<6} {loss_str:<8} {gnorm:<8} {mstate:<8} {spd:<10} {eta:<10}"
                                 history.appendleft(row)
                                 last_step = current_step_num
                         
@@ -167,12 +168,13 @@ class RemoteTrainer:
                 height, width = stdscr.getmaxyx()
                 
                 # Title Bar
-                title = f" JAX MONITOR: {job_id} | STATUS: {status_txt} | {datetime.datetime.now().strftime('%H:%M:%S')}"
+                title = f" JAX MONITOR: {job_id} | STATUS: {status_txt} | VRAM: {vram_str} | {datetime.datetime.now().strftime('%H:%M:%S')}"
                 safe_addstr(stdscr, 0, 0, title[:width], curses.color_pair(1) | curses.A_BOLD)
                 safe_addstr(stdscr, 1, 0, "=" * (width), curses.color_pair(1))
                 
                 # Column Headers
-                headers = f"{'EP':<4} {'STEP':<6} {'PROG':<6} {'LOSS':<8} {'GNORM':<8} {'MST':<8} {'VRAM':<12} {'SPEED':<10} {'ETA':<10}"
+                # Column Headers
+                headers = f"{'EP':<4} {'STEP':<6} {'PROG':<6} {'LOSS':<8} {'GNORM':<8} {'MST':<8} {'SPEED':<10} {'ETA':<10}"
                 safe_addstr(stdscr, 2, 0, headers[:width], curses.A_UNDERLINE)
                 
                 # Data Rows
