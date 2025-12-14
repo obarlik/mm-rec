@@ -334,5 +334,25 @@ def main():
                     
                 print(f"Epoch {epoch+1} | Step {global_step} (E:{i}/{num_batches}): Loss {loss:.4f} | Speed: {avg_speed:.2f} it/s | VRAM: {vram_mb} MiB | GNorm: {grad_norm:.2f} | MaxState: {state_max:.2f}{warning_msg}")
 
+    # SAVE MODEL
+    print("💾 Saving Model...")
+    from flax import serialization
+    
+    # Check config source to determine filename
+    if args.config:
+        # e.g. workspace/1234abcd_config.json -> workspace/1234abcd_model.msgpack
+        base = os.path.splitext(args.config)[0]
+        if base.endswith("_config"):
+            save_path = base.replace("_config", "_model") + ".msgpack"
+        else:
+            save_path = base + "_model.msgpack"
+    else:
+        save_path = "model.msgpack"
+        
+    with open(save_path, "wb") as f:
+        f.write(serialization.to_bytes(state.params))
+    
+    print(f"✅ Model saved to {save_path}")
+
 if __name__ == '__main__':
     main()

@@ -154,7 +154,13 @@ class TrainingJob:
             return_code = process.wait()
             if return_code == 0:
                 self.status = "completed"
-                print(f"✅ Job {self.job_id} Completed Successfully.")
+                # Locate Saved Model (Expected: {job_id}_model.msgpack)
+                expected_model_path = WORKSPACE_DIR / f"{self.job_id}_model.msgpack"
+                if expected_model_path.exists():
+                    self.model_path = expected_model_path
+                    print(f"✅ Job {self.job_id} Completed. Model available at {self.model_path}")
+                else:
+                    print(f"⚠️ Job {self.job_id} Completed but model file not found at {expected_model_path}")
             else:
                 self.status = "failed"
                 print(f"❌ Job {self.job_id} Failed with code {return_code}.")
