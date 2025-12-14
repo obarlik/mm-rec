@@ -344,7 +344,7 @@ def main():
     parser = argparse.ArgumentParser(description="Remote GPU Training Client")
     parser.add_argument('--server', type=str, default='http://phoenix:8090', help='Server URL')
     parser.add_argument('--action', required=True, 
-                        choices=['sync', 'submit', 'monitor', 'download', 'list', 'health', 'update', 'stop', 'upload', 'logs'],
+                        choices=['sync', 'submit', 'resume', 'monitor', 'download', 'list', 'health', 'update', 'stop', 'upload', 'logs'],
                         help='Action to perform')
     parser.add_argument("--job-id", help="Job ID (for monitor/download/logs)")
     parser.add_argument("--config", help="Config file (for submit)")
@@ -435,6 +435,25 @@ def main():
     
     elif args.action == 'update':
         trainer.update_server()
+    
+    elif args.action == 'resume':
+        if not args.job_id:
+            print("❌ --job-id required for resume")
+            return
+        
+        # Load config if provided, otherwise use baseline
+        config_path = args.config if args.config else 'configs/baseline.json'
+        with open(config_path) as f:
+            config = json.load(f)
+        
+        # Add resume field
+        config['resume_job_id'] = args.job_id
+        
+        print(f"♻️  Resuming job {args.job_id}...")
+        job_id = trainer.submit_job(config)
+        if job_id:
+            print(f"✅ Job resumed successfully!")
+            print(f"💡 Monitor with: python client/train_client.py --action monitor --job-id {job_id}")
     
     elif args.action == 'list':
         trainer.list_jobs()
