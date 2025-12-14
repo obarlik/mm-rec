@@ -73,13 +73,14 @@ class TrainingJob:
             
             config_dict = self.config.dict()
             
-            # Only set data_path if not already in config
+            # Enforce data_path presence - NO FALLBACKS
             if 'data_path' not in config_dict or not config_dict['data_path']:
-                # Fallback to default data file
-                data_file = WORKSPACE_DIR / "data" / "chat_data_real.jsonl"
-                if not data_file.exists():
-                     data_file = WORKSPACE_DIR / "data" / "chat_data.jsonl"
-                config_dict['data_path'] = str(data_file.absolute())
+                raise ValueError("CRITICAL: 'data_path' is missing in config! Default dataset fallback is disabled.")
+            
+            # Verify file exists
+            data_file = Path(config_dict['data_path'])
+            if not data_file.exists():
+                raise FileNotFoundError(f"CRITICAL: Dataset file not found at: {data_file}")
             
             # Explicitly set vocab_size for JAX (tiktoken cl100k_base + margin)
             config_dict['vocab_size'] = 100300
