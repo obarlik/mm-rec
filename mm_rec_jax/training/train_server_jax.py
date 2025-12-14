@@ -278,8 +278,8 @@ def main():
     parser.add_argument('--config', type=str, default='configs/stage1_gpu.json')
     args = parser.parse_args()
     
-    print("🚀 Initializing JAX Training...")
-    print(f"   JAX Devices: {jax.devices()}")
+    print("🚀 Initializing JAX Training...", flush=True)
+    print(f"   JAX Devices: {jax.devices()}", flush=True)
     
     print(f"   JAX Devices: {jax.devices()}")
 
@@ -303,7 +303,7 @@ def main():
     # Load Config from File (Merge with Defaults)
     config = default_config.copy()
     if args.config and os.path.exists(args.config):
-        print(f"📄 Loading config from {args.config}")
+        print(f"📄 Loading config from {args.config}", flush=True)
         with open(args.config) as f:
             file_config = json.load(f)
             # Update defaults with file config (only for keys that exist or new keys)
@@ -313,7 +313,7 @@ def main():
 
     # ==== SMART VRAM VALIDATION ====
     # Validate config against actual GPU capacity and auto-adjust if needed
-    print("\n🔍 Validating Config Against GPU Capacity...")
+    print("\n🔍 Validating Config Against GPU Capacity...", flush=True)
     config, was_adjusted, warning_msg = validate_and_adjust_config(config, FREE_VRAM_GB)
     
     if was_adjusted:

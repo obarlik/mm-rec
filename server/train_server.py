@@ -152,24 +152,48 @@ class TrainingJob:
             
             print(f"🚀 Launching JAX Training: {' '.join(cmd)}")
             
-            # 3. Launch Process
+
+            # 3. Launch Process with Enhanced Logging
+            # Use unbuffered Python to ensure immediate log output
+            python_cmd = [sys.executable, "-u"]  # -u for unbuffered
+            full_cmd = python_cmd + cmd[1:]  # Replace 'python' with unbuffered version
+            
             with open(self.log_file, 'w') as log_f:
+                # Write startup marker
+                log_f.write(f"=== TRAINING JOB {self.job_id} STARTED ===\n")
+                log_f.write(f"Command: {' '.join(full_cmd)}\n")
+                log_f.write(f"=" * 80 + "\n\n")
+                log_f.flush()
+                
                 process = subprocess.Popen(
-                    cmd,
+                    full_cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
-                    bufsize=1, # Line buffered
-                    cwd=str(Path.cwd())
+                    bufsize=0,  # Unbuffered
+                    cwd=str(Path.cwd()),
+                    env=dict(os.environ, PYTHONUNBUFFERED="1")  # Force unbuffered
                 )
                 
                 # 4. Monitor & Stream Logs
                 self.process = process # Store ref for stopping
                 
+                # Immediate check if process started
+                import time
+                time.sleep(0.1)
+                if process.poll() is not None:
+                    # Process died immediately
+                    log_f.write(f"\n❌ CRITICAL: Process died immediately with code {process.returncode}\n")
+                    log_f.flush()
+                    self.status = "failed"
+                    self.progress['error'] = f"Process died immediately (code {process.returncode})"
+                    save_jobs_to_disk()
+                    return
+                
                 for line in iter(process.stdout.readline, ''):
                     if not line: break
                     
-                    # Write to log file
+                    # Write to log file immediately
                     log_f.write(line)
                     log_f.flush()
                     
