@@ -537,6 +537,13 @@ def main():
                     vram_mb = "N/A"
                     
                 print(f"Epoch {epoch+1} | Step {global_step} (E:{i}/{num_batches}): Loss {loss:.4f} | Speed: {avg_speed:.2f} it/s | ETA: {eta_str} | VRAM: {vram_mb} MiB | GNorm: {grad_norm:.2f} | MaxState: {state_max:.2f}{warning_msg}", flush=True)
+            
+            # Periodic Step-Based Checkpoint (every 1000 steps = ~12 mins @ 1.4 it/s)
+            checkpoint_interval = config.get('checkpoint_interval', 1000)
+            if global_step % checkpoint_interval == 0:
+                step_ckpt_path = f"{base_name}_ckpt_step_{global_step}.msgpack"
+                save_checkpoint(state, epoch+1, step_ckpt_path)
+                print(f"💾 Checkpoint saved at step {global_step}", flush=True)
 
         # Calculate Epoch Average Loss
         epoch_avg_loss = epoch_loss_sum / max(epoch_step_count, 1)
