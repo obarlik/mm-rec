@@ -97,15 +97,6 @@ class MMRecBlock(nn.Module):
             self.W_planning_error = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform())
             # Target: h_prev -> Error Space
             self.W_planning_target = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform())
-        
-        # FFN (Explicit definition to handle 'deterministic' arg correctly)
-        self.ffn_dense1 = nn.Dense(self.ffn_dim, kernel_init=nn.initializers.xavier_uniform())
-        self.ffn_act = nn.gelu
-        self.ffn_drop1 = nn.Dropout(self.dropout_rate)
-        self.ffn_dense2 = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform())
-        # self.ffn_drop2 is defined above or should be unified.
-        
-        # self.dropout is defined at line 44. Removing duplicate here.
 
     def __call__(self, 
                  x: jnp.ndarray, 

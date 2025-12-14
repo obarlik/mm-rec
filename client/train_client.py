@@ -325,7 +325,7 @@ class RemoteTrainer:
                     print("❌ Error: --job-id required for job logs")
                     return
                 url = f"{self.server_url}/api/logs/file/{job_id}"
-            elif log_type in ['gateway', 'server']:
+            elif log_type in ['gateway', 'server', 'inference']:
                 # Gateway logs might only work if connected to gateway port
                 url = f"{self.server_url}/gateway/logs/{log_type}"
             else:
@@ -358,7 +358,7 @@ def main():
     parser.add_argument("--output", help="Output path (for download)")
     parser.add_argument("--project-dir", default=".", help="Project directory (for sync)")
     parser.add_argument('--file', type=str, help='File path for upload')
-    parser.add_argument('--type', type=str, choices=['job', 'gateway', 'server'], help='Log type')
+    parser.add_argument('--type', type=str, choices=['job', 'gateway', 'server', 'inference'], help='Log type')
     parser.add_argument('--force', action='store_true', help='Force operation (check active jobs)')
     
     args = parser.parse_args()
