@@ -9,7 +9,7 @@
     "learning_rate": 3e-4,
     "max_length": 1024,
     "vocab_size": 100300,
-    "data_path": "data/production_100m.jsonl",
+    "data_path": "workspace/data/production_100m.jsonl",
     "checkpoint_interval": 1000,
     "warmup_fraction": 0.05,
     "early_stop_patience": 5,
