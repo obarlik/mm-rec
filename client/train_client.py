@@ -93,18 +93,127 @@ class RemoteTrainer:
                 print(f"\n❌ Training failed: {status['progress'].get('error', 'Unknown error')}")
                 break
             
-            if status['status'] == 'training':
+                # Rich TUI update
+                from rich.table import Table
+                from rich.panel import Panel
+                from rich.layout import Layout
+                from rich.console import Console
+                from rich.live import Live
+                from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
+                
+                console = Console()
+                layout = Layout()
+                
+                # Split Layout
+                layout.split(
+                    Layout(name="header", size=3),
+                    Layout(name="main", ratio=1),
+                    Layout(name="footer", size=3)
+                )
+                
+                layout["main"].split_row(
+                    Layout(name="metrics"),
+                    Layout(name="progress")
+                )
+                
                 prog = status['progress']
-                print(f"\r[Epoch {prog['epoch']}, Step {prog['step']}/{prog['total_steps']}] "
-                      f"Loss: {prog['loss']:.4f} | "
-                      f"Speed: {prog.get('speed', 'N/A')} | "
-                      f"ETA: {prog.get('eta', 'N/A')} | "
-                      f"VRAM: {prog.get('vram', 'N/A')} | "
-                      f"GNorm: {prog.get('gnorm', 'N/A')} | "
-                      f"State: {prog.get('max_state', 'N/A')}    ", 
-                      end='', flush=True)
-            
-            time.sleep(update_interval)
+                
+                # Header
+                header = Panel(f"[bold cyan]🚀 Job: {job_id} | Status: {status['status'].upper()}[/]", style="white on blue")
+                layout["header"].update(header)
+                
+                # Metrics Table
+                table = Table(title="Training Metrics", expand=True)
+                table.add_column("Metric", style="cyan")
+                table.add_column("Value", style="magenta")
+                
+                table.add_row("Epoch", f"{prog['epoch']}")
+                table.add_row("Step", f"{prog['step']}/{prog['total_steps']}")
+                table.add_row("Loss", f"{prog['loss']:.4f}")
+                table.add_row("Speed", f"{prog.get('speed', 'N/A')}")
+                table.add_row("ETA", f"{prog.get('eta', 'N/A')}")
+                table.add_row("VRAM", f"{prog.get('vram', 'N/A')}")
+                table.add_row("GNorm", f"{prog.get('gnorm', 'N/A')}")
+                table.add_row("State", f"{prog.get('max_state', 'N/A')}")
+                
+                layout["metrics"].update(Panel(table))
+                
+                # Progress Bar (Simulated using Rich Progress for visual only)
+                # We construct a manual progress bar string or use Rich's Progress object if easier.
+                # For simplicity in Layout, let's use a Panel with a big text representation.
+                total = prog['total_steps']
+                current = prog['step']
+                pct = (current / total * 100) if total > 0 else 0
+                
+                # ASCII Bar
+                bar_len = 30
+                filled = int(pct / 100 * bar_len)
+                bar_str = "█" * filled + "░" * (bar_len - filled)
+                
+                prog_panel = Panel(
+                    f"\n[bold green]{pct:.1f}% Complete[/]\n\n"
+                    f"[{bar_str}]\n\n"
+                    f"[dim]Total Steps: {total}[/]",
+                    title="Progress",
+                    border_style="green"
+                )
+                layout["progress"].update(prog_panel)
+                
+                # Live Update Loop
+                with Live(layout, refresh_per_second=1, screen=True) as live:
+                    while True:
+                        try:
+                            status = self.get_status(job_id)
+                            prog = status['progress']
+                            
+                            # Check completion
+                            if status['status'] != 'training' and status['status'] != 'queued':
+                                # Final update
+                                live.update(layout)
+                                print(f"\nJob finished with status: {status['status']}")
+                                break
+                            
+                            # Update Header
+                            layout["header"].update(Panel(f"[bold cyan]🚀 Job: {job_id} | Status: {status['status'].upper()}[/]", style="white on blue"))
+                            
+                            # Update Table
+                            table = Table(title="Training Metrics", expand=True)
+                            table.add_column("Metric", style="cyan")
+                            table.add_column("Value", style="magenta")
+                            table.add_row("Epoch", f"{prog['epoch']}")
+                            table.add_row("Step", f"{prog['step']}/{prog['total_steps']}")
+                            table.add_row("Loss", f"{prog['loss']:.4f}")
+                            table.add_row("Speed", f"{prog.get('speed', 'N/A')}")
+                            table.add_row("ETA", f"{prog.get('eta', 'N/A')}")
+                            table.add_row("VRAM", f"{prog.get('vram', 'N/A')}")
+                            table.add_row("GNorm", f"{prog.get('gnorm', 'N/A')}")
+                            table.add_row("State", f"{prog.get('max_state', 'N/A')}")
+                            layout["metrics"].update(Panel(table))
+                            
+                            # Update Progress
+                            total = prog['total_steps']
+                            current = prog['step']
+                            pct = (current / total * 100) if total > 0 else 0
+                            filled = int(pct / 100 * bar_len)
+                            bar_str = "█" * filled + "░" * (bar_len - filled)
+                            
+                            layout["progress"].update(Panel(
+                                f"\n[bold green]{pct:.1f}% Complete[/]\n\n"
+                                f"[{bar_str}]\n\n"
+                                f"[dim]Total Steps: {total}[/]",
+                                title="Progress",
+                                border_style="green"
+                            ))
+                            
+                            time.sleep(update_interval)
+                            
+                        except KeyboardInterrupt:
+                            break
+                        except Exception as e:
+                            # If connection fails, just break live loop to show error
+                            break
+                # Only return if loop broke
+                return
     
     def download_model(self, job_id: str, output_path: str):
         """Download trained model."""
