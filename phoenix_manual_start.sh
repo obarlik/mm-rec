@@ -30,8 +30,9 @@ pip install -r server/requirements.txt
 
 # 4. Stop existing processes
 echo "🛑 Stopping old processes..."
-pkill -f gateway.py || true
-pkill -f train_server.py || true
+pkill -9 -f gateway.py || true
+pkill -9 -f train_server.py || true
+pkill -9 -f inference_server.py || true
 
 # 5. Start Servers
 echo "▶️  Starting Gateway (Manager) on port $GATEWAY_PORT..."
