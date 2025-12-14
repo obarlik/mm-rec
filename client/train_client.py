@@ -228,8 +228,10 @@ class RemoteTrainer:
                         except KeyboardInterrupt:
                             break
                         except Exception as e:
-                            # If connection fails, just break live loop to show error
-                            break
+                            # If connection fails, print error but try to continue
+                            # If critical error, break
+                            layout["footer"].update(Panel(f"[bold red]Error: {str(e)}[/]", style="white on red"))
+                            time.sleep(1)
                 # Only return if loop broke
                 return
     
