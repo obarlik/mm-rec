@@ -1,20 +1,23 @@
-# MM-Rec Model Configuration
+# MM-Rec Kernel-Alpha Configuration (15M Params)
 
 # Architecture
-vocab_size=1000
-hidden_dim=64
-mem_dim=64
-ffn_dim=128
-num_layers=3
+vocab_size=32000
+hidden_dim=256
+mem_dim=256
+ffn_dim=1024
+num_layers=6
+# Expert Specialization
+num_experts=4
+top_k=2
 
 # Training
-learning_rate=0.0001
-batch_size=4
-max_seq_len=128
+learning_rate=0.001
+batch_size=32
+max_seq_len=512
 
 # UBOO
 uboo_weight=0.5
 
 # Paths
-checkpoint_path=checkpoint.bin
+checkpoint_path=kernel_alpha_v1.bin
 vocab_path=vocab.txt

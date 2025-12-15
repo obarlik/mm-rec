@@ -43,6 +43,8 @@ ModelConfig ModelConfig::from_file(const std::string& path) {
         else if (key == "ffn_dim") config.ffn_dim = std::stoll(value);
         else if (key == "num_layers") config.num_layers = std::stoll(value);
         else if (key == "learning_rate") config.learning_rate = std::stof(value);
+        else if (key == "num_experts") config.num_experts = std::stoll(value);
+        else if (key == "top_k") config.top_k = std::stoll(value);
         else if (key == "batch_size") config.batch_size = std::stoll(value);
         else if (key == "max_seq_len") config.max_seq_len = std::stoll(value);
         else if (key == "uboo_weight") config.uboo_weight = std::stof(value);
@@ -66,7 +68,9 @@ void ModelConfig::save(const std::string& path) const {
     file << "hidden_dim=" << hidden_dim << "\n";
     file << "mem_dim=" << mem_dim << "\n";
     file << "ffn_dim=" << ffn_dim << "\n";
-    file << "num_layers=" << num_layers << "\n\n";
+    file << "num_layers=" << num_layers << "\n";
+    file << "num_experts=" << num_experts << "\n";
+    file << "top_k=" << top_k << "\n\n";
     
     file << "# Training\n";
     file << "learning_rate=" << learning_rate << "\n";
@@ -89,6 +93,8 @@ void ModelConfig::print() const {
     std::cout << "  mem_dim: " << mem_dim << std::endl;
     std::cout << "  ffn_dim: " << ffn_dim << std::endl;
     std::cout << "  num_layers: " << num_layers << std::endl;
+    std::cout << "  num_experts: " << num_experts << std::endl;
+    std::cout << "  top_k: " << top_k << std::endl;
     std::cout << "\nTraining:" << std::endl;
     std::cout << "  learning_rate: " << learning_rate << std::endl;
     std::cout << "  batch_size: " << batch_size << std::endl;

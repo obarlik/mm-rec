@@ -24,6 +24,10 @@ struct ModelConfig {
     int64_t batch_size = 16;
     int64_t max_seq_len = 512;
     
+    // MoE
+    int64_t num_experts = 4;
+    int64_t top_k = 2;
+    
     // UBOO
     float uboo_weight = 0.5f;  // 0.5 final + 0.5 auxiliary
     
