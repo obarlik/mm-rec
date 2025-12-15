@@ -73,10 +73,11 @@ void MMRecModel::reset_memory(int64_t batch_size) {
     }
 }
 
-Tensor MMRecModel::forward(const Tensor& input_ids) {
+Tensor MMRecModel::forward(Tensor input_ids) {  // Changed: pass by value
     // input_ids: [batch, seq]
     std::cout << "[DEBUG forward] START" << std::endl;
     std::cout << "[DEBUG forward] input_ids.ndim() = " << input_ids.ndim() << std::endl;
+    std::cout << "[DEBUG forward] input_ids.shape_.size() = " << input_ids.sizes().size() << std::endl;
     
     int64_t batch = input_ids.size(0);
     int64_t seq = input_ids.size(1);

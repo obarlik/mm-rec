@@ -7,6 +7,7 @@
 #include "mm_rec/core/tensor.h"
 #include <Eigen/Dense>
 #include <random>
+#include <iostream>
 
 namespace mm_rec {
 
@@ -14,9 +15,12 @@ namespace mm_rec {
 // Constructors & Factory Methods
 // ============================================================================
 
-Tensor::Tensor() : shape_({}), data_{} {}
+Tensor::Tensor() : shape_({}), data_{} {
+    std::cout << "[Tensor] Default constructor, shape_.size()=" << shape_.size() << std::endl;
+}
 
 Tensor::Tensor(std::vector<int64_t> shape) : shape_(std::move(shape)) {
+    std::cout << "[Tensor] Constructor with shape, shape_.size()=" << shape_.size() << std::endl;
     int64_t n = 1;
     for (auto s : shape_) n *= s;
     data_.resize(n);

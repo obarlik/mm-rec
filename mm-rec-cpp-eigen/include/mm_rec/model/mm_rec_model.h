@@ -28,20 +28,11 @@ class MMRecModel {
 public:
     MMRecModel(const MMRecModelConfig& config);
     
-    /**
-     * Forward pass (training mode - returns all layer logits)
-     * 
-     * @param input_ids Token IDs [batch, seq]
-     * @return All layer logits [num_layers, batch, seq, vocab] for UBOO loss
-     */
-    Tensor forward(const Tensor& input_ids);
+    // Forward pass (training mode)
+    // Returns: [num_layers, batch, seq, vocab_size]
+    Tensor forward(Tensor input_ids);  // Changed: pass by value
     
-    /**
-     * Generate next token (inference mode)
-     * 
-     * @param input_ids Token IDs [batch, seq]
-     * @return Logits from final layer [batch, vocab]
-     */
+    // Inference helper (only returns final layer logits)
     Tensor generate(const Tensor& input_ids);
     
     /**
