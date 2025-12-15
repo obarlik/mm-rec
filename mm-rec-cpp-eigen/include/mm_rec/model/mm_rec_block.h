@@ -12,6 +12,7 @@
 #include "mm_rec/core/tensor.h"
 #include "mm_rec/core/linear.h"
 #include "mm_rec/core/gated_memory.h"
+#include "mm_rec/model/moe.h"
 #include <memory>
 
 namespace mm_rec {
@@ -21,6 +22,8 @@ struct MMRecBlockConfig {
     int64_t mem_dim;
     int64_t ffn_dim;
     int64_t vocab_size;
+    int64_t num_experts = 4; // Default to 4 experts
+    int64_t top_k = 2;       // Default to Top-2
 };
 
 struct BlockCache; // Forward decl
@@ -72,9 +75,11 @@ private:
     MMRecBlockConfig config_;
     
     // Components
+    // Components
     std::unique_ptr<GatedMemoryUpdate> gated_memory_;
-    std::unique_ptr<Linear> ffn_up_;
-    std::unique_ptr<Linear> ffn_down_;
+    // Replaced standard FFN with MoE Layer
+    std::unique_ptr<MoELayer> moe_layer_;
+    
     std::unique_ptr<Linear> output_proj_;  // UBOO: vocab projection
 };
 

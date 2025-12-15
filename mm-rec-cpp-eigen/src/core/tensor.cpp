@@ -15,7 +15,7 @@ namespace mm_rec {
 // Constructors & Factory Methods
 // ============================================================================
 
-Tensor::Tensor() : shape_({}), data_{} {
+Tensor::Tensor() : data_{}, shape_({}) {
 }
 
 Tensor::Tensor(std::vector<int64_t> shape) : shape_(std::move(shape)) {
@@ -56,6 +56,36 @@ Tensor Tensor::from_data(std::vector<float> data, std::vector<int64_t> shape) {
         throw std::runtime_error("Data size mismatch");
     }
     t.data_ = std::move(data);
+    return t;
+}
+
+Tensor Tensor::reshape(std::vector<int64_t> new_shape) const {
+    int64_t new_numel = 1;
+    for(auto s : new_shape) new_numel *= s;
+    
+    if(new_numel != numel() && new_numel != -1) {
+         throw std::runtime_error("Reshape size mismatch");
+    }
+    
+    // Handle -1 inference
+    if(new_numel == -1) {
+        int64_t known = 1;
+        int unknown_idx = -1;
+        for(size_t i=0; i<new_shape.size(); ++i) {
+            if(new_shape[i] == -1) {
+                if(unknown_idx != -1) throw std::runtime_error("Multiple -1 in reshape");
+                unknown_idx = i;
+            } else {
+                known *= new_shape[i];
+            }
+        }
+        
+        if(numel() % known != 0) throw std::runtime_error("Invalid reshape");
+        new_shape[unknown_idx] = numel() / known;
+    }
+    
+    Tensor t = *this; // Copy data
+    t.shape_ = new_shape;
     return t;
 }
 

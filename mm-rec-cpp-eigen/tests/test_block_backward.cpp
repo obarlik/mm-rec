@@ -43,7 +43,7 @@ void test_block_backward_shapes() {
     
     // Gradients container
     BlockGradients grads;
-    grads.init(hidden, mem, ffn, vocab);
+    grads.init(hidden, mem, ffn, vocab, 4); // 4 experts by default in config
     
     // Run Backward
     std::cout << "Running backward..." << std::endl;
@@ -73,12 +73,22 @@ void test_block_backward_shapes() {
     assert(has_gru_grad);
     std::cout << "✅ GRU gradients populated" << std::endl;
     
-    bool has_ffn_grad = false;
-    for(int i=0; i<grads.ffn_up_grads.dW.numel(); ++i) {
-        if (grads.ffn_up_grads.dW.data()[i] != 0.0f) has_ffn_grad = true;
+    bool has_moe_grad = false;
+    // Check Gate Gradient
+    for(int i=0; i<grads.moe_grads.d_gate.numel(); ++i) {
+        if (grads.moe_grads.d_gate.data()[i] != 0.0f) has_moe_grad = true;
     }
-    assert(has_ffn_grad);
-    std::cout << "✅ FFN gradients populated" << std::endl;
+    // Check Expert Gradient (at least one expert should be active)
+    bool has_expert_grad = false;
+    for(const auto& t : grads.moe_grads.d_expert_up_weights) {
+        for(int i=0; i<t.numel(); ++i) {
+            if (t.data()[i] != 0.0f) has_expert_grad = true;
+        }
+    }
+    
+    assert(has_moe_grad);
+    assert(has_expert_grad);
+    std::cout << "✅ MoE gradients (Gate & Experts) populated" << std::endl;
     
     bool has_out_grad = false;
     for(int i=0; i<grads.output_proj_grads.dW.numel(); ++i) {

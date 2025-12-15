@@ -43,15 +43,16 @@ set(CORE_SOURCES
 set(MODEL_SOURCES
     src/model/mm_rec_block.cpp
     src/model/mm_rec_model.cpp
+    src/model/moe.cpp
 )
 
 set(TRAINING_SOURCES
     src/training/uboo_loss.cpp
+    src/training/backward.cpp
+    src/training/gru_backward.cpp
     src/training/gradient_utils.cpp
     src/training/scheduler.cpp
     src/training/trainer.cpp
-    src/training/backward.cpp
-    src/training/gru_backward.cpp
 )
 
 set(CONFIG_SOURCES
@@ -142,6 +143,10 @@ add_test(NAME test_model_backward COMMAND test_model_backward)
 add_executable(test_real_training tests/test_real_training.cpp)
 target_link_libraries(test_real_training mm_rec_eigen)
 add_test(NAME test_real_training COMMAND test_real_training)
+
+add_executable(test_moe tests/test_moe.cpp)
+target_link_libraries(test_moe mm_rec_eigen)
+add_test(NAME test_moe COMMAND test_moe)
 
 # Inference executable
 add_executable(inference_demo src/inference_demo.cpp)

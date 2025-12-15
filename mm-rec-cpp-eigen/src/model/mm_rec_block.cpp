@@ -21,9 +21,13 @@ MMRecBlock::MMRecBlock(const MMRecBlockConfig& config)
         config.mem_dim
     );
     
-    // FFN (expand then contract)
-    ffn_up_ = std::make_unique<Linear>(config.hidden_dim, config.ffn_dim);
-    ffn_down_ = std::make_unique<Linear>(config.ffn_dim, config.hidden_dim);
+    // MoE Layer (replaces standard FFN)
+    MoEConfig moe_config;
+    moe_config.hidden_dim = config.hidden_dim;
+    moe_config.ffn_dim = config.ffn_dim;
+    moe_config.num_experts = config.num_experts;
+    moe_config.top_k = config.top_k;
+    moe_layer_ = std::make_unique<MoELayer>(moe_config);
     
     // UBOO output projection (every layer!)
     output_proj_ = std::make_unique<Linear>(config.hidden_dim, config.vocab_size);
@@ -113,24 +117,69 @@ std::tuple<Tensor, Tensor, Tensor> MMRecBlock::forward(
         }
         current_memory = new_memory;
         
-        // FFN: expand and contract
-        Tensor ffn_hidden = ffn_up_->forward(h_t).relu();
-        Tensor h_out = ffn_down_->forward(ffn_hidden);
+        // MoE Layer Forward
+        // Note: Logic here supports sequence processing.
+        // Usually MoE operates on tokens. Our MoELayer::forward handles [Batch, Seq, Hidden].
+        // However, here we are iterating token-by-token (t loop). 
+        // Calling MoE forward on single token slice [Batch, 1, Hidden].
         
+        // Reshape h_t to [Batch, 1, Hidden] for MoE
+        Tensor h_t_seq = h_t.reshape({batch, 1, hidden_dim});
+        MoECache* t_moe_cache = nullptr; 
+        
+        // We can't easily pass the full cache->moe_cache pointer because it expects full sequence.
+        // Implementing sequence-level MoE inside the loop is inefficient if we call it per token.
+        // BUT, since MMRecBlock::forward iterates t=0..seq, we have to call it per step.
+        // We need to manage the cache manually or create a temporary cache.
+        // Let's create a temporary cache for this step, and copy results to main cache.
+        
+        Tensor h_out_seq;
         if (cache) {
-           for (int64_t b = 0; b < batch; ++b) {
-               // ffn_hidden [batch, ffn_dim]
-               for (int64_t f = 0; f < config_.ffn_dim; ++f) {
-                   cache->ffn_hidden.data()[b * seq * config_.ffn_dim + t * config_.ffn_dim + f] =
-                       ffn_hidden.data()[b * config_.ffn_dim + f];
-               }
-               // ffn_output [batch, hidden_dim]
-               for (int64_t h = 0; h < hidden_dim; ++h) {
-                   cache->ffn_output.data()[b * seq * hidden_dim + t * hidden_dim + h] =
-                       h_out.data()[b * hidden_dim + h];
-               }
-           }
+             MoECache step_cache;
+             h_out_seq = moe_layer_->forward(h_t_seq, &step_cache);
+             
+             // Copy step cache to main block cache
+             // We need to implement copy logic or let MoELayer handle full sequence?
+             // Since MMRecBlock is autoregressive (due to GRU), we MUST iterate.
+             // So we must manually aggregate MoE cache.
+             
+             // This is a bit tricky. Let's see MoECache structure.
+             // logits, indices, weights: [batch, 1, k]
+             // We copy to [batch, seq, k] at index t.
+             int64_t top_k = config_.top_k;
+             int64_t num_experts = config_.num_experts;
+             
+             // Initialization of MoE cache in BlockCache happened? No, we need to resize it?
+             // Or assume fixed size.
+             // Let's assume we handle it. But BlockCache::moe_cache expects full tensors.
+             // We should init them if first step.
+             if (t == 0) {
+                 cache->moe_cache.router_logits = Tensor::zeros({batch, seq, num_experts});
+                 cache->moe_cache.routing_weights = Tensor::zeros({batch, seq, top_k});
+                 cache->moe_cache.selected_indices = Tensor::zeros({batch, seq, top_k});
+             }
+             
+             // Copy
+             for(int b=0; b<batch; ++b) {
+                 // Logits
+                 for(int e=0; e<num_experts; ++e) {
+                     cache->moe_cache.router_logits.data()[b*seq*num_experts + t*num_experts + e] = 
+                         step_cache.router_logits.data()[b*num_experts + e];
+                 }
+                 // Weights/Indices
+                 for(int k=0; k<top_k; ++k) {
+                     cache->moe_cache.routing_weights.data()[b*seq*top_k + t*top_k + k] = 
+                         step_cache.routing_weights.data()[b*top_k + k];
+                     cache->moe_cache.selected_indices.data()[b*seq*top_k + t*top_k + k] = 
+                         step_cache.selected_indices.data()[b*top_k + k];
+                 }
+             }
+        } else {
+            h_out_seq = moe_layer_->forward(h_t_seq, nullptr);
         }
+        
+        // Reshape back to [Batch, Hidden]
+        Tensor h_out = h_out_seq.reshape({batch, hidden_dim});
         
         // UBOO: output projection (every layer predicts!)
         Tensor logits = output_proj_->forward(h_out);
@@ -278,52 +327,41 @@ std::pair<Tensor, Tensor> MMRecBlock::backward(
         Tensor d_h_out = Tensor::zeros(d_out_t.sizes());
         for(int64_t i=0; i<d_h_out.numel(); ++i) d_h_out.data()[i] = d_out_t.data()[i] + d_h_out_1.data()[i];
         
-        // 5. FFN Backward
-        Tensor d_ffn_hidden_relu = Tensor::zeros({batch, ffn_dim});
-        Tensor dW_down_t, db_down_t;
-        linear_backward(
-            ffn_hidden_t, 
-            ffn_down_->weight(),
-            d_h_out,
-            d_ffn_hidden_relu,
-            dW_down_t,
-            db_down_t
+        // 5. MoE Backward (Replaces FFN Backward)
+        // Need to extract slice of MoE Cache for this step
+        MoECache step_cache;
+        int64_t num_experts = config_.num_experts;
+        int64_t top_k = config_.top_k;
+        
+        step_cache.router_logits = Tensor::zeros({batch, 1, num_experts});
+        step_cache.routing_weights = Tensor::zeros({batch, 1, top_k});
+        step_cache.selected_indices = Tensor::zeros({batch, 1, top_k});
+        
+        // Fill step cache from block cache
+        for(int b=0; b<batch; ++b) {
+             for(int e=0; e<num_experts; ++e) {
+                 step_cache.router_logits.data()[b*num_experts + e] = 
+                     cache.moe_cache.router_logits.data()[b*seq*num_experts + t*num_experts + e];
+             }
+             for(int k=0; k<top_k; ++k) {
+                 step_cache.routing_weights.data()[b*top_k + k] = 
+                     cache.moe_cache.routing_weights.data()[b*seq*top_k + t*top_k + k];
+                 step_cache.selected_indices.data()[b*top_k + k] = 
+                     cache.moe_cache.selected_indices.data()[b*seq*top_k + t*top_k + k];
+             }
+        }
+        
+        Tensor x_t_seq = x_t.reshape({batch, 1, hidden_dim});
+        Tensor d_h_out_seq = d_h_out.reshape({batch, 1, hidden_dim});
+        
+        Tensor d_x_moe_seq = moe_layer_->backward(
+            d_h_out_seq,
+            x_t_seq,
+            step_cache,
+            grads.moe_grads 
         );
         
-        // Accumulate FFN Down
-        dW_param = grads.ffn_down_grads.dW.data();
-        db_param = grads.ffn_down_grads.db.data();
-        dW_step = dW_down_t.data();
-        db_step = db_down_t.data();
-        size_W = dW_down_t.numel();
-        size_b = db_down_t.numel();
-        for(int64_t i=0; i<size_W; ++i) dW_param[i] += dW_step[i];
-        for(int64_t i=0; i<size_b; ++i) db_param[i] += db_step[i];
-        
-        // Backprop through ReLU
-        Tensor d_ffn_up_out = relu_backward(ffn_hidden_t, d_ffn_hidden_relu);
-        
-        // Backprop through ffn_up
-        Tensor d_x_ffn = Tensor::zeros({batch, hidden_dim});
-        Tensor dW_up_t, db_up_t;
-        linear_backward(
-            x_t,
-            ffn_up_->weight(),
-            d_ffn_up_out,
-            d_x_ffn,
-            dW_up_t,
-            db_up_t
-        );
-        
-        // Accumulate FFN Up
-        dW_param = grads.ffn_up_grads.dW.data();
-        db_param = grads.ffn_up_grads.db.data();
-        dW_step = dW_up_t.data();
-        db_step = db_up_t.data();
-        size_W = dW_up_t.numel();
-        size_b = db_up_t.numel();
-        for(int64_t i=0; i<size_W; ++i) dW_param[i] += dW_step[i];
-        for(int64_t i=0; i<size_b; ++i) db_param[i] += db_step[i];
+        Tensor d_x_ffn = d_x_moe_seq.reshape({batch, hidden_dim}); // Reusing name d_x_ffn for compatibility with below sum
         
         // 6. GRU Backward
         Tensor d_x_gru, d_h_prev_gru;
@@ -356,12 +394,8 @@ std::pair<Tensor, Tensor> MMRecBlock::backward(
 }
 
 void MMRecBlock::update_parameters(SGD& optimizer, const BlockGradients& grads) {
-    // 1. Update FFNs
-    optimizer.step(ffn_up_->weight(), grads.ffn_up_grads.dW);
-    optimizer.step(ffn_up_->bias(), grads.ffn_up_grads.db);
-    
-    optimizer.step(ffn_down_->weight(), grads.ffn_down_grads.dW);
-    optimizer.step(ffn_down_->bias(), grads.ffn_down_grads.db);
+    // 1. Update MoE
+    moe_layer_->update_parameters(optimizer, grads.moe_grads);
     
     // 2. Update Output Projection (UBOO)
     optimizer.step(output_proj_->weight(), grads.output_proj_grads.dW);

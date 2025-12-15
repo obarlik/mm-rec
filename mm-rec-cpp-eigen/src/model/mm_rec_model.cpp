@@ -27,7 +27,9 @@ MMRecModel::MMRecModel(const MMRecModelConfig& config)
         config.hidden_dim,
         config.mem_dim,
         config.ffn_dim,
-        config.vocab_size
+        config.vocab_size,
+        config.num_experts,
+        config.top_k
     };
     
     for (int64_t i = 0; i < config.num_layers; ++i) {
@@ -152,7 +154,8 @@ ModelGradients MMRecModel::backward(const Tensor& targets, const ForwardCache& c
         config_.vocab_size,
         config_.hidden_dim,
         config_.mem_dim,
-        config_.ffn_dim
+        config_.ffn_dim,
+        config_.num_experts
     );
     
     // 2. Compute UBOO Loss Gradients (d_logits for all layers)

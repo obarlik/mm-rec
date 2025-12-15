@@ -7,6 +7,7 @@
 #pragma once
 
 #include "mm_rec/core/tensor.h"
+#include "mm_rec/model/moe.h"
 #include <vector>
 
 namespace mm_rec {
@@ -69,30 +70,40 @@ struct GRUGradients {
 struct BlockGradients {
     GRUGradients gru_grads;
     
-    // FFN
-    LinearGradients ffn_up_grads;
-    LinearGradients ffn_down_grads;
+    // MoE (replaces standard FFN)
+    MoEGradients moe_grads;
     
     // Output Projector (UBOO)
     LinearGradients output_proj_grads;
     
     void init(int64_t hidden_dim, int64_t mem_dim, int64_t ffn_dim, int64_t vocab_size) {
-        gru_grads.init(mem_dim, hidden_dim); // input is hidden_dim, memory is mem_dim
+        gru_grads.init(mem_dim, hidden_dim);
         
-        // FFN Up: hidden -> ffn
-        ffn_up_grads = LinearGradients({ffn_dim, hidden_dim}, {ffn_dim});
+        // MoE Initialization
+        // We need expert count from somewhere.
+        // Option: Pass full config or extra params.
+        // For now, let's assume default 4 experts/2 topk if not provided?
+        // Better: Update init signature.
+    }
+    
+    // Overload for proper initialization
+    void init(int64_t hidden_dim, int64_t mem_dim, int64_t ffn_dim, int64_t vocab_size, int64_t num_experts) {
+        gru_grads.init(mem_dim, hidden_dim);
         
-        // FFN Down: ffn -> hidden
-        ffn_down_grads = LinearGradients({hidden_dim, ffn_dim}, {hidden_dim});
+        MoEConfig moe_config;
+        moe_config.hidden_dim = hidden_dim;
+        moe_config.ffn_dim = ffn_dim;
+        moe_config.num_experts = num_experts;
+        moe_config.top_k = 1; // Not needed for gradients size init
         
-        // Output: hidden -> vocab
+        moe_grads.init(moe_config);
+        
         output_proj_grads = LinearGradients({vocab_size, hidden_dim}, {vocab_size});
     }
     
     void zero() {
         gru_grads.zero();
-        ffn_up_grads.zero();
-        ffn_down_grads.zero();
+        moe_grads.zero();
         output_proj_grads.zero();
     }
 };
@@ -104,11 +115,12 @@ struct ModelGradients {
     Tensor embedding_grads;
     std::vector<BlockGradients> block_grads;
     
-    void init(int64_t num_layers, int64_t vocab, int64_t hidden, int64_t mem, int64_t ffn) {
+    // Updated init with MoE support
+    void init(int64_t num_layers, int64_t vocab, int64_t hidden, int64_t mem, int64_t ffn, int64_t num_experts) {
         embedding_grads = Tensor::zeros({vocab, hidden});
         block_grads.resize(num_layers);
         for (auto& bg : block_grads) {
-            bg.init(hidden, mem, ffn, vocab);
+            bg.init(hidden, mem, ffn, vocab, num_experts);
         }
     }
 

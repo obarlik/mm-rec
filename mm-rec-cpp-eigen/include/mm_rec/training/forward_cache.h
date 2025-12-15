@@ -7,6 +7,7 @@
 #pragma once
 
 #include "mm_rec/core/tensor.h"
+#include "mm_rec/model/moe.h"
 #include <vector>
 
 namespace mm_rec {
@@ -38,6 +39,9 @@ struct BlockCache {
     // Output of this block
     Tensor output;  // [batch, seq, hidden]
     Tensor logits;  // [batch, seq, vocab]
+
+    // MoE Cache
+    MoECache moe_cache;
 };
 
 /**

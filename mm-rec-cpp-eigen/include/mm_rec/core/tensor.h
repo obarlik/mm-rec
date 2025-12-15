@@ -65,6 +65,9 @@ public:
         for (auto s : shape_) n *= s;
         return n;
     }
+
+    // Reshape
+    Tensor reshape(std::vector<int64_t> new_shape) const;
     
     // Validity check
     void check_valid(const std::string& name = "Tensor") const {

@@ -23,6 +23,8 @@ struct MMRecModelConfig {
     int64_t mem_dim;
     int64_t ffn_dim;
     int64_t num_layers;
+    int64_t num_experts = 4; // Models default to MoE now
+    int64_t top_k = 2;
 };
 
 struct ForwardCache; // Forward declaration
