@@ -179,6 +179,19 @@ async def get_system_logs(log_type: str):
          
     return FileResponse(log_file, media_type="text/plain")
 
+@app.get("/gateway/logs/job/{job_id}")
+async def get_job_logs(job_id: str):
+    """Get job logs directly from workspace (bypassing Train Server)."""
+    # Security: basic sanitization
+    if "/" in job_id or ".." in job_id:
+        raise HTTPException(status_code=400, detail="Invalid job ID")
+        
+    log_file = SERVER_DIR / "workspace" / f"{job_id}.log"
+    if not log_file.exists():
+         raise HTTPException(status_code=404, detail="Job log file not found.")
+         
+    return FileResponse(log_file, media_type="text/plain")
+
 @app.post("/api/update")
 async def update_server():
     """Update code and restart servers."""
