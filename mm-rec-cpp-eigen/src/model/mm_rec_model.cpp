@@ -67,29 +67,45 @@ Tensor MMRecModel::embed(const Tensor& input_ids) {
 }
 
 void MMRecModel::reset_memory(int64_t batch_size) {
+    std::cout << "[DEBUG reset_memory] START, batch_size=" << batch_size << std::endl;
     // Reset all layer memories to zero
     for (int64_t i = 0; i < config_.num_layers; ++i) {
+        std::cout << "[DEBUG] Creating zeros for layer " << i << std::endl;
         memory_states_[i] = Tensor::zeros({batch_size, config_.mem_dim});
+        std::cout << "[DEBUG] Layer " << i << " memory shape: " << memory_states_[i].ndim() << "D" << std::endl;
     }
+    std::cout << "[DEBUG reset_memory] END" << std::endl;
 }
 
 Tensor MMRecModel::forward(Tensor input_ids) {  // Changed: pass by value
     // input_ids: [batch, seq]
     std::cout << "[DEBUG forward] START" << std::endl;
     std::cout << "[DEBUG forward] input_ids.ndim() = " << input_ids.ndim() << std::endl;
-    std::cout << "[DEBUG forward] input_ids.shape_.size() = " << input_ids.sizes().size() << std::endl;
+    std::cout << "[DEBUG forward] shape_.size() = " << input_ids.sizes().size() << std::endl;
     
+    std::cout << "[DEBUG] About to call size(0)..." << std::endl;
     int64_t batch = input_ids.size(0);
+    std::cout << "[DEBUG] size(0) OK, batch=" << batch << std::endl;
+    
+    std::cout << "[DEBUG] About to call size(1)..." << std::endl;
     int64_t seq = input_ids.size(1);
+    std::cout << "[DEBUG] size(1) OK, seq=" << seq << std::endl;
     
     // Initialize memory if needed
-    if (memory_states_[0].numel() == 0 || 
+    std::cout << "[DEBUG] Checking memory..." << std::endl;
+    std::cout << "[DEBUG] memory_states_[0].ndim() = " << memory_states_[0].ndim() << std::endl;
+    
+    if (memory_states_[0].ndim() == 0 ||  // Changed: use ndim() not numel()
         memory_states_[0].size(0) != batch) {
+        std::cout << "[DEBUG] Resetting memory..." << std::endl;
         reset_memory(batch);
+        std::cout << "[DEBUG] Memory reset OK" << std::endl;
     }
     
     // Embed tokens
+    std::cout << "[DEBUG] About to embed..." << std::endl;
     Tensor x = embed(input_ids);
+    std::cout << "[DEBUG] Embed OK, x.ndim()=" << x.ndim() << std::endl;
     
     // Collect logits from all layers (UBOO!)
     std::vector<Tensor> all_layer_logits;
