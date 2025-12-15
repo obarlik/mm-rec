@@ -101,8 +101,8 @@ struct BlockGradients {
  * Complete model gradients
  */
 struct ModelGradients {
-    Tensor embedding_grads;                      // Embedding table gradients
-    std::vector<BlockGradients> block_grads;     // Per-block gradients
+    Tensor embedding_grads;
+    std::vector<BlockGradients> block_grads;
     
     void init(int64_t num_layers, int64_t vocab, int64_t hidden, int64_t mem, int64_t ffn) {
         embedding_grads = Tensor::zeros({vocab, hidden});
@@ -111,7 +111,7 @@ struct ModelGradients {
             bg.init(hidden, mem, ffn, vocab);
         }
     }
-    
+
     void zero() {
         embedding_grads.zero_();
         for (auto& bg : block_grads) bg.zero();

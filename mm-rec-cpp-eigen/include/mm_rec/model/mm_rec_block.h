@@ -25,6 +25,7 @@ struct MMRecBlockConfig {
 
 struct BlockCache; // Forward decl
 struct BlockGradients; // Forward decl
+class SGD; // Forward decl
 
 class MMRecBlock {
 public:
@@ -61,6 +62,11 @@ public:
         const BlockCache& cache,
         BlockGradients& grads
     );
+
+    /**
+     * Update parameters using optimizer and gradients
+     */
+    void update_parameters(SGD& optimizer, const BlockGradients& grads);
 
 private:
     MMRecBlockConfig config_;

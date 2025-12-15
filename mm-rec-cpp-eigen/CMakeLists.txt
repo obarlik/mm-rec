@@ -139,6 +139,10 @@ add_executable(test_model_backward tests/test_model_backward.cpp)
 target_link_libraries(test_model_backward mm_rec_eigen)
 add_test(NAME test_model_backward COMMAND test_model_backward)
 
+add_executable(test_real_training tests/test_real_training.cpp)
+target_link_libraries(test_real_training mm_rec_eigen)
+add_test(NAME test_real_training COMMAND test_real_training)
+
 # Inference executable
 add_executable(inference_demo src/inference_demo.cpp)
 target_link_libraries(inference_demo mm_rec_eigen)

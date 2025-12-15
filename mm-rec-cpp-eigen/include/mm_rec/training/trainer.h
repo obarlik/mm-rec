@@ -8,6 +8,7 @@
 
 #include "mm_rec/model/mm_rec_model.h"
 #include "mm_rec/training/scheduler.h"
+#include "mm_rec/training/optimizer.h"
 #include <string>
 #include <memory>
 
@@ -65,10 +66,13 @@ public:
     void increment_step() { step_++; }
     int get_step() const { return step_; }
     
+    SGD* get_optimizer() { return optimizer_.get(); }
+    
 private:
     MMRecModel& model_;
     TrainingConfig config_;
     std::unique_ptr<LRScheduler> scheduler_;
+    std::unique_ptr<SGD> optimizer_;
     int step_;
 };
 

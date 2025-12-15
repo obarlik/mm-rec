@@ -7,6 +7,7 @@
 #include "mm_rec/training/gradients.h"
 #include "mm_rec/training/backward.h"
 #include "mm_rec/training/gru_backward.h"
+#include "mm_rec/training/optimizer.h"
 #include <iostream>
 
 namespace mm_rec {
@@ -354,4 +355,63 @@ std::pair<Tensor, Tensor> MMRecBlock::backward(
     return {dx, dmemory};
 }
 
+void MMRecBlock::update_parameters(SGD& optimizer, const BlockGradients& grads) {
+    // 1. Update FFNs
+    optimizer.step(ffn_up_->weight(), grads.ffn_up_grads.dW);
+    optimizer.step(ffn_up_->bias(), grads.ffn_up_grads.db);
+    
+    optimizer.step(ffn_down_->weight(), grads.ffn_down_grads.dW);
+    optimizer.step(ffn_down_->bias(), grads.ffn_down_grads.db);
+    
+    // 2. Update Output Projection (UBOO)
+    optimizer.step(output_proj_->weight(), grads.output_proj_grads.dW);
+    optimizer.step(output_proj_->bias(), grads.output_proj_grads.db);
+    
+    // 3. Update GRU
+    // Helper to concat grads [out, in1] + [out, in2] -> [out, in1+in2]
+    auto concat_grads = [](const Tensor& dW, const Tensor& dU) {
+        int64_t rows = dW.size(0);
+        int64_t cols1 = dW.size(1);
+        int64_t cols2 = dU.size(1);
+        
+        Tensor d_total = Tensor::zeros({rows, cols1 + cols2});
+        
+        // Copy dW
+        for(int64_t r=0; r<rows; ++r) {
+            for(int64_t c=0; c<cols1; ++c) {
+                d_total.data()[r*(cols1+cols2) + c] = dW.data()[r*cols1 + c];
+            }
+        }
+        // Copy dU
+        for(int64_t r=0; r<rows; ++r) {
+            for(int64_t c=0; c<cols2; ++c) {
+                d_total.data()[r*(cols1+cols2) + cols1 + c] = dU.data()[r*cols2 + c];
+            }
+        }
+        return d_total;
+    };
+    
+    // Update W_z (Update Gate)
+    {
+        Tensor d_total = concat_grads(grads.gru_grads.dW_u, grads.gru_grads.dU_u);
+        optimizer.step(gated_memory_->get_W_z()->weight(), d_total);
+        optimizer.step(gated_memory_->get_W_z()->bias(), grads.gru_grads.db_u);
+    }
+    
+    // Update W_r (Reset Gate)
+    {
+        Tensor d_total = concat_grads(grads.gru_grads.dW_r, grads.gru_grads.dU_r);
+        optimizer.step(gated_memory_->get_W_r()->weight(), d_total);
+        optimizer.step(gated_memory_->get_W_r()->bias(), grads.gru_grads.db_r);
+    }
+    
+    // Update W_m (Candidate)
+    {
+        Tensor d_total = concat_grads(grads.gru_grads.dW_h, grads.gru_grads.dU_h);
+        optimizer.step(gated_memory_->get_W_m()->weight(), d_total);
+        optimizer.step(gated_memory_->get_W_m()->bias(), grads.gru_grads.db_h);
+    }
+}
+
 } // namespace mm_rec
+

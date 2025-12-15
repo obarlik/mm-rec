@@ -5,6 +5,7 @@
 #include "mm_rec/model/mm_rec_model.h"
 #include "mm_rec/training/forward_cache.h"
 #include "mm_rec/training/backward.h"
+#include "mm_rec/training/optimizer.h"
 #include <random>
 #include <iostream>
 
@@ -249,6 +250,18 @@ ModelGradients MMRecModel::backward(const Tensor& targets, const ForwardCache& c
     }
     
     return grads;
+}
+
+void MMRecModel::update_parameters(SGD& optimizer, const ModelGradients& grads) {
+    // 1. Update Embeddings
+    optimizer.step(embedding_weights_, grads.embedding_grads);
+    
+    // 2. Update Layers
+    for (size_t i = 0; i < blocks_.size(); ++i) {
+        if (i < grads.block_grads.size()) {
+            blocks_[i]->update_parameters(optimizer, grads.block_grads[i]);
+        }
+    }
 }
 
 Tensor MMRecModel::generate(const Tensor& input_ids) {

@@ -26,6 +26,7 @@ struct MMRecModelConfig {
 };
 
 struct ForwardCache; // Forward declaration
+class SGD; // Forward decl
 
 class MMRecModel {
 public:
@@ -46,6 +47,11 @@ public:
      * @return ModelGradients
      */
     ModelGradients backward(const Tensor& targets, const ForwardCache& cache);
+
+    /**
+     * Update all model parameters
+     */
+    void update_parameters(SGD& optimizer, const ModelGradients& grads);
 
     /**
      * Reset memory states (start new sequence)
