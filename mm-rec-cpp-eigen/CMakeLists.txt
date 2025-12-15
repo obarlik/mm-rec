@@ -53,12 +53,18 @@ set(CONFIG_SOURCES
     src/config/model_config.cpp
 )
 
+set(UTILS_SOURCES
+    src/utils/session.cpp
+    src/utils/checkpoint.cpp
+)
+
 # Main library
 add_library(mm_rec_eigen SHARED 
     ${CORE_SOURCES}
     ${MODEL_SOURCES}
     ${TRAINING_SOURCES}
     ${CONFIG_SOURCES}
+    ${UTILS_SOURCES}
 )
 
 target_link_libraries(mm_rec_eigen
@@ -91,6 +97,14 @@ add_test(NAME test_uboo_loss COMMAND test_uboo_loss)
 add_executable(test_error_handling tests/test_error_handling.cpp)
 target_link_libraries(test_error_handling mm_rec_eigen)
 add_test(NAME test_error_handling COMMAND test_error_handling)
+
+add_executable(test_session tests/test_session.cpp)
+target_link_libraries(test_session mm_rec_eigen)
+add_test(NAME test_session COMMAND test_session)
+
+add_executable(test_checkpoint tests/test_checkpoint.cpp)
+target_link_libraries(test_checkpoint mm_rec_eigen)
+add_test(NAME test_checkpoint COMMAND test_checkpoint)
 
 # Inference executable
 add_executable(inference_demo src/inference_demo.cpp)

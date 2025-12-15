@@ -40,8 +40,6 @@ Tensor MMRecModel::embed(const Tensor& input_ids) {
     // input_ids: [batch, seq] (integers)
     // output: [batch, seq, hidden_dim]
     
-    std::cout << "[DEBUG embed] input_ids.ndim() = " << input_ids.ndim() << std::endl;
-    std::cout << "[DEBUG embed] input_ids.numel() = " << input_ids.numel() << std::endl;
     
     int64_t batch = input_ids.size(0);
     int64_t seq = input_ids.size(1);
@@ -67,19 +65,14 @@ Tensor MMRecModel::embed(const Tensor& input_ids) {
 }
 
 void MMRecModel::reset_memory(int64_t batch_size) {
-    std::cout << "[DEBUG reset_memory] START, batch_size=" << batch_size << std::endl;
     // Reset all layer memories to zero
     for (int64_t i = 0; i < config_.num_layers; ++i) {
         memory_states_[i] = Tensor::zeros({batch_size, config_.mem_dim});
     }
-    std::cout << "[DEBUG reset_memory] END" << std::endl;
 }
 
 Tensor MMRecModel::forward(Tensor input_ids) {  // Changed: pass by value
     // input_ids: [batch, seq]
-    std::cout << "[DEBUG forward] START" << std::endl;
-    std::cout << "[DEBUG forward] input_ids.ndim() = " << input_ids.ndim() << std::endl;
-    std::cout << "[DEBUG forward] shape_.size() = " << input_ids.sizes().size() << std::endl;
     
     int64_t batch = input_ids.size(0);
     

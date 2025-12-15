@@ -39,6 +39,13 @@ public:
      * Reset memory states (start new sequence)
      */
     void reset_memory(int64_t batch_size);
+    
+    // Checkpoint accessors (for save/load)
+    const MMRecModelConfig& get_config() const { return config_; }
+    const Tensor& get_embedding_weights() const { return embedding_weights_; }
+    Tensor& get_embedding_weights() { return embedding_weights_; }
+    const std::vector<std::unique_ptr<MMRecBlock>>& get_blocks() const { return blocks_; }
+    std::vector<std::unique_ptr<MMRecBlock>>& get_blocks() { return blocks_; }
 
 private:
     MMRecModelConfig config_;
