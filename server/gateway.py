@@ -19,8 +19,20 @@ INFERENCE_SERVER_URL = f"http://{TRAIN_SERVER_HOST}:{INFERENCE_SERVER_PORT}"
 SERVER_DIR = Path(__file__).resolve().parent.parent
 
 app = FastAPI(title="MM-Rec Training & Inference Gateway")
-train_client = httpx.AsyncClient(base_url=TRAIN_SERVER_URL, timeout=None)
-inference_client = httpx.AsyncClient(base_url=INFERENCE_SERVER_URL, timeout=None)
+
+# Configure httpx clients with connection retry
+# Use limits to allow connection pool to refresh dead connections
+transport = httpx.AsyncHTTPTransport(retries=3)
+train_client = httpx.AsyncClient(
+    base_url=TRAIN_SERVER_URL, 
+    timeout=30.0,  # Reasonable timeout instead of None
+    transport=transport
+)
+inference_client = httpx.AsyncClient(
+    base_url=INFERENCE_SERVER_URL, 
+    timeout=30.0,
+    transport=httpx.AsyncHTTPTransport(retries=3)
+)
 
 # Process Management
 train_process: Optional[subprocess.Popen] = None
@@ -105,23 +117,6 @@ def stop_processes():
 @app.on_event("startup")
 async def startup_event():
     start_train_server()
-    
-    # Wait for Training Server to be ready
-    print("⏳ Gateway: Waiting for Training Server to become ready...")
-    for attempt in range(30):  # 30 seconds max
-        await asyncio.sleep(1)
-        try:
-            resp = await train_client.get("/api/health", timeout=1.0)
-            if resp.status_code == 200:
-                print("✅ Gateway: Training Server is ready!")
-                break
-        except Exception:
-            if attempt % 5 == 0:
-                print(f"   Still waiting... (attempt {attempt+1}/30)")
-            continue
-    else:
-        print("⚠️ Gateway: Training Server didn't respond in time, continuing anyway...")
-    
     # Check if necessary files exist before starting inference
     if (SERVER_DIR / "configs/moe_activation.json").exists():
         start_inference_server()
