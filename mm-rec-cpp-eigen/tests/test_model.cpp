@@ -33,8 +33,6 @@ int main() {
     
     Tensor input_ids = Tensor::zeros({batch, seq});
     
-    std::cout << "[test_model] After zeros, input_ids.ndim()=" << input_ids.ndim() << std::endl;
-    std::cout << "[test_model] input_ids.numel()=" << input_ids.numel() << std::endl;
     
     // Fill with random token IDs
     for (int64_t i = 0; i < batch * seq; ++i) {
