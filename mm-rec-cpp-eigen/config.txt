@@ -1,0 +1,20 @@
+# MM-Rec Model Configuration
+
+# Architecture
+vocab_size=1000
+hidden_dim=64
+mem_dim=64
+ffn_dim=128
+num_layers=3
+
+# Training
+learning_rate=0.0001
+batch_size=4
+max_seq_len=128
+
+# UBOO
+uboo_weight=0.5
+
+# Paths
+checkpoint_path=checkpoint.bin
+vocab_path=vocab.txt
