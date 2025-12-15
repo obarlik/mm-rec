@@ -327,14 +327,35 @@ class RemoteTrainer:
                 print(f"❌ Unknown log type: {log_type}")
                 return
 
-            response = requests.get(url)
-            
-            if response.status_code == 200:
+            try:
+                response = requests.get(url)
+            except requests.exceptions.RequestException:
+                response = None
+
+            if response and response.status_code == 200:
                 print("\n" + "="*80)
                 print(response.text)
                 print("="*80 + "\n")
             else:
-                print(f"❌ Failed to fetch logs: {response.status_code} - {response.text}")
+                # Fallback Logic
+                if log_type == 'job':
+                    print("⚠️  Primary API failed. Trying direct Gateway access...")
+                    fallback_url = f"{self.server_url}/gateway/logs/job/{job_id}"
+                    try:
+                        fb_resp = requests.get(fallback_url)
+                        if fb_resp.status_code == 200:
+                            print("\n" + "="*80)
+                            print(fb_resp.text)
+                            print("="*80 + "\n")
+                            return
+                        else:
+                            print(f"❌ Fallback also failed: {fb_resp.status_code}")
+                    except Exception as e:
+                        print(f"❌ Fallback error: {e}")
+                        
+                msg = response.text if response else "Connection Error"
+                code = response.status_code if response else "N/A"
+                print(f"❌ Failed to fetch logs: {code} - {msg}")
                 
         except Exception as e:
             print(f"❌ Error fetching logs: {e}")
@@ -346,7 +367,7 @@ def main():
     parser = argparse.ArgumentParser(description="Remote GPU Training Client")
     parser.add_argument('--server', type=str, default='http://phoenix:8090', help='Server URL')
     parser.add_argument('--action', required=True, 
-                        choices=['sync', 'submit', 'resume', 'monitor', 'download', 'list', 'health', 'update', 'stop', 'upload', 'logs'],
+                        choices=['sync', 'submit', 'resume', 'monitor', 'download', 'list', 'health', 'update', 'stop', 'upload', 'logs', 'restart-gateway'],
                         help='Action to perform')
     parser.add_argument("--job-id", help="Job ID (for monitor/download/logs)")
     parser.add_argument("--config", help="Config file (for submit)")
@@ -428,6 +449,79 @@ def main():
         
         trainer.monitor(args.job_id)
     
+    elif args.action == 'chat':
+        if not args.job_id:
+            print("❌ --job-id required for chat")
+            return
+            
+        print(f"🚀 Connecting to Inference Server for Job {args.job_id}...")
+        
+        # 1. Ensure Server is Running (SSH Tunnel / Remote Start)
+        # We try to hit the inference port (8002) on the server.
+        # If it's not running, we start it via SSH in background.
+        
+        INFERENCE_PORT = 8002
+        INFERENCE_URL = f"{args.server.rsplit(':', 1)[0]}:{INFERENCE_PORT}"
+        
+        import requests
+        import time
+        try:
+            requests.get(f"{INFERENCE_URL}/health", timeout=1)
+        except:
+            print("⏳ Starting remote inference server (one-time setup)...")
+            # Start it
+            import subprocess
+            cmd = [
+                "ssh", "phoenix",
+                f"nohup python3 ~/mm-rec-training/server/inference_server.py --job-id {args.job_id} --port {INFERENCE_PORT} > ~/mm-rec-training/inference.log 2>&1 &"
+            ]
+            subprocess.run(cmd)
+            print("   Waiting for model update...", end="", flush=True)
+            for _ in range(30):
+                time.sleep(1)
+                try:
+                    if requests.get(f"{INFERENCE_URL}/health", timeout=1).status_code == 200:
+                        print(" Ready!")
+                        break
+                except:
+                    print(".", end="", flush=True)
+            else:
+                print("\n❌ Failed to start inference server. Check logs: ssh phoenix 'cat inference.log'")
+                return
+
+        # 2. Chat Loop
+        print(f"✅ Connected! (Session ID: {args.job_id}_test)")
+        print("💬 Type 'exit' to quit.\n")
+        
+        session_id = f"cli_{int(time.time())}"
+        
+        while True:
+            try:
+                msg = input("You: ")
+                if msg.lower() in ['exit', 'quit']: break
+                
+                resp = requests.post(
+                    f"{INFERENCE_URL}/chat", 
+                    json={
+                        "session_id": session_id,
+                        "message": msg,
+                        "max_new_tokens": 100
+                    }
+                )
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    print(f"MM-Rec: {data['response']}")
+                    print(f"        (Speed: {data['speed_tok_sec']:.1f} t/s)")
+                else:
+                    print(f"❌ Error: {resp.text}")
+                    
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                print(f"❌ Error: {e}")
+                break
+
     elif args.action == 'download':
         if not args.job_id or not args.output:
             print("❌ --job-id and --output required for download")
@@ -435,8 +529,38 @@ def main():
         
         trainer.download_model(args.job_id, args.output)
     
+    elif args.action == 'list':
+        trainer.list_jobs()
+    
     elif args.action == 'update':
         trainer.update_server()
+    
+    elif args.action == 'restart-gateway':
+        print("🔄 Restarting Gateway...")
+        import subprocess
+        try:
+            # Extract hostname from server URL (e.g., http://phoenix:8090 -> phoenix)
+            hostname = args.server.split('://')[1].split(':')[0]
+            
+            # Kill Gateway
+            print("   Stopping Gateway...")
+            subprocess.run(["ssh", hostname, "pkill -f gateway.py"], check=False)
+            
+            # Wait a moment
+            import time
+            time.sleep(2)
+            
+            # Restart Gateway
+            print("   Starting Gateway...")
+            cmd = f"cd ~/mm-rec-training && nohup python server/gateway.py --port 8090 > gateway.log 2>&1 &"
+            subprocess.run(["ssh", hostname, cmd], check=False)
+            
+            time.sleep(3)
+            print("✅ Gateway restart initiated!")
+            print("💡 Check health: python client/train_client.py --action health")
+            
+        except Exception as e:
+            print(f"❌ Restart failed: {e}")
     
     elif args.action == 'resume':
         if not args.job_id:

@@ -105,6 +105,23 @@ def stop_processes():
 @app.on_event("startup")
 async def startup_event():
     start_train_server()
+    
+    # Wait for Training Server to be ready
+    print("⏳ Gateway: Waiting for Training Server to become ready...")
+    for attempt in range(30):  # 30 seconds max
+        await asyncio.sleep(1)
+        try:
+            resp = await train_client.get("/api/health", timeout=1.0)
+            if resp.status_code == 200:
+                print("✅ Gateway: Training Server is ready!")
+                break
+        except Exception:
+            if attempt % 5 == 0:
+                print(f"   Still waiting... (attempt {attempt+1}/30)")
+            continue
+    else:
+        print("⚠️ Gateway: Training Server didn't respond in time, continuing anyway...")
+    
     # Check if necessary files exist before starting inference
     if (SERVER_DIR / "configs/moe_activation.json").exists():
         start_inference_server()
