@@ -50,7 +50,7 @@ Tensor Tensor::randn(std::vector<int64_t> shape, float mean, float std) {
 
 Tensor Tensor::from_data(std::vector<float> data, std::vector<int64_t> shape) {
     Tensor t(shape);
-    if (data.size() != static_cast<size_t>(t.numel_)) {
+    if (data.size() != static_cast<size_t>(t.numel())) {
         throw std::runtime_error("Data size mismatch");
     }
     t.data_ = std::move(data);
@@ -120,7 +120,7 @@ Tensor Tensor::operator+(const Tensor& other) const {
     Tensor result(shape_);
     
     #pragma omp simd
-    for (int64_t i = 0; i < numel_; ++i) {
+    for (int64_t i = 0; i < numel(); ++i) {
         result.data_[i] = data_[i] + other.data_[i];
     }
     
@@ -132,7 +132,7 @@ Tensor Tensor::operator-(const Tensor& other) const {
     Tensor result(shape_);
     
     #pragma omp simd
-    for (int64_t i = 0; i < numel_; ++i) {
+    for (int64_t i = 0; i < numel(); ++i) {
         result.data_[i] = data_[i] - other.data_[i];
     }
     
@@ -144,7 +144,7 @@ Tensor Tensor::operator*(const Tensor& other) const {
     Tensor result(shape_);
     
     #pragma omp simd
-    for (int64_t i = 0; i < numel_; ++i) {
+    for (int64_t i = 0; i < numel(); ++i) {
         result.data_[i] = data_[i] * other.data_[i];
     }
     
@@ -155,7 +155,7 @@ Tensor Tensor::operator*(float scalar) const {
     Tensor result(shape_);
     
     #pragma omp simd
-    for (int64_t i = 0; i < numel_; ++i) {
+    for (int64_t i = 0; i < numel(); ++i) {
         result.data_[i] = data_[i] * scalar;
     }
     
@@ -170,7 +170,7 @@ Tensor Tensor::sigmoid() const {
     Tensor result(shape_);
     
     #pragma omp simd
-    for (int64_t i = 0; i < numel_; ++i) {
+    for (int64_t i = 0; i < numel(); ++i) {
         result.data_[i] = 1.0f / (1.0f + std::exp(-data_[i]));
     }
     
@@ -181,7 +181,7 @@ Tensor Tensor::tanh_activation() const {
     Tensor result(shape_);
     
     #pragma omp simd
-    for (int64_t i = 0; i < numel_; ++i) {
+    for (int64_t i = 0; i < numel(); ++i) {
         result.data_[i] = std::tanh(data_[i]);
     }
     
@@ -192,7 +192,7 @@ Tensor Tensor::relu() const {
     Tensor result(shape_);
     
     #pragma omp simd
-    for (int64_t i = 0; i < numel_; ++i) {
+    for (int64_t i = 0; i < numel(); ++i) {
         result.data_[i] = std::max(0.0f, data_[i]);
     }
     
@@ -202,7 +202,7 @@ Tensor Tensor::relu() const {
 
 
 float Tensor::item() const {
-    if (numel_ != 1) {
+    if (numel() != 1) {
         throw std::runtime_error("item() only for scalar tensors");
     }
     return data_[0];
@@ -226,7 +226,7 @@ Tensor Tensor::sum() const {
     float result = 0.0f;
     
     #pragma omp simd reduction(+:result)
-    for (int64_t i = 0; i < numel_; ++i) {
+    for (int64_t i = 0; i < numel(); ++i) {
         result += data_[i];
     }
     
@@ -234,7 +234,7 @@ Tensor Tensor::sum() const {
 }
 
 Tensor Tensor::mean() const {
-    return sum() * (1.0f / static_cast<float>(numel_));
+    return sum() * (1.0f / static_cast<float>(numel()));
 }
 
 } // namespace mm_rec
