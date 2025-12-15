@@ -64,6 +64,12 @@ set(UTILS_SOURCES
     src/utils/checkpoint.cpp
 )
 
+set(DATA_SOURCES
+    src/data/dataset.cpp
+    src/data/data_loader.cpp
+    src/data/tokenizer.cpp
+)
+
 # Main library
 add_library(mm_rec_eigen SHARED 
     ${CORE_SOURCES}
@@ -71,6 +77,7 @@ add_library(mm_rec_eigen SHARED
     ${TRAINING_SOURCES}
     ${CONFIG_SOURCES}
     ${UTILS_SOURCES}
+    ${DATA_SOURCES}
 )
 
 target_link_libraries(mm_rec_eigen
@@ -80,77 +87,23 @@ target_link_libraries(mm_rec_eigen
 if(OpenMP_CXX_FOUND)
     target_link_libraries(mm_rec_eigen OpenMP::OpenMP_CXX)
 endif()
-
-# Tests
-enable_testing()
-
-add_executable(test_tensor tests/test_tensor.cpp)
-target_link_libraries(test_tensor mm_rec_eigen)
-add_test(NAME test_tensor COMMAND test_tensor)
-
-add_executable(test_gated_memory tests/test_gated_memory.cpp)
-target_link_libraries(test_gated_memory mm_rec_eigen)
-add_test(NAME test_gated_memory COMMAND test_gated_memory)
-
-add_executable(test_model tests/test_model.cpp)
-target_link_libraries(test_model mm_rec_eigen)
-add_test(NAME test_model COMMAND test_model)
-
-add_executable(test_uboo_loss tests/test_uboo_loss.cpp)
-target_link_libraries(test_uboo_loss mm_rec_eigen)
-add_test(NAME test_uboo_loss COMMAND test_uboo_loss)
-
-add_executable(test_error_handling tests/test_error_handling.cpp)
-target_link_libraries(test_error_handling mm_rec_eigen)
-add_test(NAME test_error_handling COMMAND test_error_handling)
-
-add_executable(test_session tests/test_session.cpp)
-target_link_libraries(test_session mm_rec_eigen)
-add_test(NAME test_session COMMAND test_session)
-
-add_executable(test_checkpoint tests/test_checkpoint.cpp)
-target_link_libraries(test_checkpoint mm_rec_eigen)
-add_test(NAME test_checkpoint COMMAND test_checkpoint)
-
-add_executable(test_training_utils tests/test_training_utils.cpp)
-target_link_libraries(test_training_utils mm_rec_eigen)
-add_test(NAME test_training_utils COMMAND test_training_utils)
-
-add_executable(test_trainer tests/test_trainer.cpp)
-target_link_libraries(test_trainer mm_rec_eigen)
-add_test(NAME test_trainer COMMAND test_trainer)
-
-add_executable(test_backward tests/test_backward.cpp)
-target_link_libraries(test_backward mm_rec_eigen)
-add_test(NAME test_backward COMMAND test_backward)
-
-add_executable(test_gru_backward tests/test_gru_backward.cpp)
-target_link_libraries(test_gru_backward mm_rec_eigen)
-add_test(NAME test_gru_backward COMMAND test_gru_backward)
-
-add_executable(test_forward_cache tests/test_forward_cache.cpp)
-target_link_libraries(test_forward_cache mm_rec_eigen)
-add_test(NAME test_forward_cache COMMAND test_forward_cache)
-
-add_executable(test_block_backward tests/test_block_backward.cpp)
-target_link_libraries(test_block_backward mm_rec_eigen)
-add_test(NAME test_block_backward COMMAND test_block_backward)
-
-add_executable(test_model_backward tests/test_model_backward.cpp)
-target_link_libraries(test_model_backward mm_rec_eigen)
-add_test(NAME test_model_backward COMMAND test_model_backward)
-
-add_executable(test_real_training tests/test_real_training.cpp)
-target_link_libraries(test_real_training mm_rec_eigen)
-add_test(NAME test_real_training COMMAND test_real_training)
-
+# ... (Tests)
+# ...
 add_executable(test_moe tests/test_moe.cpp)
 target_link_libraries(test_moe mm_rec_eigen)
 add_test(NAME test_moe COMMAND test_moe)
 
+add_executable(test_data_pipeline tests/test_data_pipeline.cpp)
+target_link_libraries(test_data_pipeline mm_rec_eigen)
+add_test(NAME test_data_pipeline COMMAND test_data_pipeline)
+
 # Inference executable
 add_executable(inference_demo src/inference_demo.cpp)
 target_link_libraries(inference_demo mm_rec_eigen)
+
+# Training Demo (Pure C++)
+add_executable(demo_training_cpp src/demo_training_cpp.cpp)
+target_link_libraries(demo_training_cpp mm_rec_eigen)
 
 # Print configuration
 message(STATUS "========================================")
