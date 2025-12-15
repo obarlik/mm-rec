@@ -11,6 +11,7 @@
 
 #include "mm_rec/model/mm_rec_block.h"
 #include "mm_rec/core/tensor.h"
+#include "mm_rec/training/gradients.h"
 #include <vector>
 #include <memory>
 
@@ -24,17 +25,28 @@ struct MMRecModelConfig {
     int64_t num_layers;
 };
 
+struct ForwardCache; // Forward declaration
+
 class MMRecModel {
 public:
     MMRecModel(const MMRecModelConfig& config);
     
     // Forward pass (training mode)
     // Returns: [num_layers, batch, seq, vocab_size]
-    Tensor forward(Tensor input_ids);  // Changed: pass by value
+    Tensor forward(Tensor input_ids, ForwardCache* cache = nullptr);  // Changed: pass by value
     
     // Inference helper (only returns final layer logits)
     Tensor generate(const Tensor& input_ids);
     
+    /**
+     * Backward pass
+     * 
+     * @param targets Target indices [batch, seq]
+     * @param cache Forward cache
+     * @return ModelGradients
+     */
+    ModelGradients backward(const Tensor& targets, const ForwardCache& cache);
+
     /**
      * Reset memory states (start new sequence)
      */

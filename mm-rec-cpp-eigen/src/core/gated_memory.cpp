@@ -55,6 +55,15 @@ std::pair<Tensor, Tensor> GatedMemoryUpdate::forward(
     const Tensor& h_t,
     const Tensor& m_prev
 ) {
+    Cache dummy;
+    return forward(h_t, m_prev, dummy);
+}
+
+std::pair<Tensor, Tensor> GatedMemoryUpdate::forward(
+    const Tensor& h_t,
+    const Tensor& m_prev,
+    Cache& cache
+) {
     // Concatenate inputs
     Tensor concat = concat_tensors(h_t, m_prev);
     
@@ -72,6 +81,14 @@ std::pair<Tensor, Tensor> GatedMemoryUpdate::forward(
     
     // Candidate state
     Tensor m_tilde = W_m->forward(concat_reset).tanh_activation();
+    
+    // Save to cache
+    // Note: In implementation `m_t = (1 - z) * m_prev + z * m_tilde`
+    // My cache naming: u = z_t
+    cache.u = z_t;
+    cache.r = r_t;
+    cache.h_tilde = m_tilde;
+    cache.r_h_prev = reset_memory; 
     
     // Final memory update
     // m_t = (1 - z_t) * m_prev + z_t * m_tilde

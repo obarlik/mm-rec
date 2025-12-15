@@ -23,6 +23,9 @@ struct MMRecBlockConfig {
     int64_t vocab_size;
 };
 
+struct BlockCache; // Forward decl
+struct BlockGradients; // Forward decl
+
 class MMRecBlock {
 public:
     MMRecBlock(const MMRecBlockConfig& config);
@@ -32,11 +35,31 @@ public:
      * 
      * @param x Input hidden state [batch, seq, hidden_dim]
      * @param memory Previous memory state [batch, mem_dim]
+     * @param cache Optional pointer to cache for training
      * @return Tuple of (new_hidden, new_memory, logits)
      */
     std::tuple<Tensor, Tensor, Tensor> forward(
         const Tensor& x,
-        const Tensor& memory
+        const Tensor& memory,
+        BlockCache* cache = nullptr
+    );
+
+    /**
+     * Backward pass
+     * 
+     * @param d_output       Gradient w.r.t output hidden states [batch, seq, hidden]
+     * @param d_memory_next  Gradient w.r.t final memory state [batch, mem_dim]
+     * @param d_logits       Gradient w.r.t output logits [batch, seq, vocab]
+     * @param cache          Forward cache
+     * @param grads          Output: gradients for parameters
+     * @return Pair of (dx, dmemory)
+     */
+    std::pair<Tensor, Tensor> backward(
+        const Tensor& d_output,
+        const Tensor& d_memory_next,
+        const Tensor& d_logits,
+        const BlockCache& cache,
+        BlockGradients& grads
     );
 
 private:

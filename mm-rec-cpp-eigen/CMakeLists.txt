@@ -50,6 +50,8 @@ set(TRAINING_SOURCES
     src/training/gradient_utils.cpp
     src/training/scheduler.cpp
     src/training/trainer.cpp
+    src/training/backward.cpp
+    src/training/gru_backward.cpp
 )
 
 set(CONFIG_SOURCES
@@ -116,6 +118,26 @@ add_test(NAME test_training_utils COMMAND test_training_utils)
 add_executable(test_trainer tests/test_trainer.cpp)
 target_link_libraries(test_trainer mm_rec_eigen)
 add_test(NAME test_trainer COMMAND test_trainer)
+
+add_executable(test_backward tests/test_backward.cpp)
+target_link_libraries(test_backward mm_rec_eigen)
+add_test(NAME test_backward COMMAND test_backward)
+
+add_executable(test_gru_backward tests/test_gru_backward.cpp)
+target_link_libraries(test_gru_backward mm_rec_eigen)
+add_test(NAME test_gru_backward COMMAND test_gru_backward)
+
+add_executable(test_forward_cache tests/test_forward_cache.cpp)
+target_link_libraries(test_forward_cache mm_rec_eigen)
+add_test(NAME test_forward_cache COMMAND test_forward_cache)
+
+add_executable(test_block_backward tests/test_block_backward.cpp)
+target_link_libraries(test_block_backward mm_rec_eigen)
+add_test(NAME test_block_backward COMMAND test_block_backward)
+
+add_executable(test_model_backward tests/test_model_backward.cpp)
+target_link_libraries(test_model_backward mm_rec_eigen)
+add_test(NAME test_model_backward COMMAND test_model_backward)
 
 # Inference executable
 add_executable(inference_demo src/inference_demo.cpp)

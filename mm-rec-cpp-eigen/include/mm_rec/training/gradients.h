@@ -1,0 +1,121 @@
+/**
+ * Gradient Structures
+ * 
+ * Stores gradients for all model parameters
+ */
+
+#pragma once
+
+#include "mm_rec/core/tensor.h"
+#include <vector>
+
+namespace mm_rec {
+
+/**
+ * Gradients for a single Linear layer
+ */
+struct LinearGradients {
+    Tensor dW;  // Weight gradient [out_dim, in_dim]
+    Tensor db;  // Bias gradient [out_dim]
+    
+    LinearGradients() = default;
+    LinearGradients(const std::vector<int64_t>& w_shape, const std::vector<int64_t>& b_shape)
+        : dW(Tensor::zeros(w_shape)), db(Tensor::zeros(b_shape)) {}
+        
+    void zero() {
+        dW.zero_();
+        db.zero_();
+    }
+};
+
+/**
+ * Gradients for GRU gates
+ */
+struct GRUGradients {
+    // Reset gate
+    Tensor dW_r, dU_r, db_r;
+    // Update gate
+    Tensor dW_u, dU_u, db_u;
+    // Candidate
+    Tensor dW_h, dU_h, db_h;
+    
+    GRUGradients() = default;
+    
+    // Initialize with zeros
+    void init(int64_t hidden_dim, int64_t in_dim) {
+        dW_r = Tensor::zeros({hidden_dim, in_dim});
+        dU_r = Tensor::zeros({hidden_dim, hidden_dim});
+        db_r = Tensor::zeros({hidden_dim});
+        
+        dW_u = Tensor::zeros({hidden_dim, in_dim});
+        dU_u = Tensor::zeros({hidden_dim, hidden_dim});
+        db_u = Tensor::zeros({hidden_dim});
+        
+        dW_h = Tensor::zeros({hidden_dim, in_dim});
+        dU_h = Tensor::zeros({hidden_dim, hidden_dim});
+        db_h = Tensor::zeros({hidden_dim});
+    }
+    
+    void zero() {
+        dW_r.zero_(); dU_r.zero_(); db_r.zero_();
+        dW_u.zero_(); dU_u.zero_(); db_u.zero_();
+        dW_h.zero_(); dU_h.zero_(); db_h.zero_();
+    }
+};
+
+/**
+ * Gradients for a full MMRecBlock
+ */
+struct BlockGradients {
+    GRUGradients gru_grads;
+    
+    // FFN
+    LinearGradients ffn_up_grads;
+    LinearGradients ffn_down_grads;
+    
+    // Output Projector (UBOO)
+    LinearGradients output_proj_grads;
+    
+    void init(int64_t hidden_dim, int64_t mem_dim, int64_t ffn_dim, int64_t vocab_size) {
+        gru_grads.init(mem_dim, hidden_dim); // input is hidden_dim, memory is mem_dim
+        
+        // FFN Up: hidden -> ffn
+        ffn_up_grads = LinearGradients({ffn_dim, hidden_dim}, {ffn_dim});
+        
+        // FFN Down: ffn -> hidden
+        ffn_down_grads = LinearGradients({hidden_dim, ffn_dim}, {hidden_dim});
+        
+        // Output: hidden -> vocab
+        output_proj_grads = LinearGradients({vocab_size, hidden_dim}, {vocab_size});
+    }
+    
+    void zero() {
+        gru_grads.zero();
+        ffn_up_grads.zero();
+        ffn_down_grads.zero();
+        output_proj_grads.zero();
+    }
+};
+
+/**
+ * Complete model gradients
+ */
+struct ModelGradients {
+    Tensor embedding_grads;                      // Embedding table gradients
+    std::vector<BlockGradients> block_grads;     // Per-block gradients
+    
+    void init(int64_t num_layers, int64_t vocab, int64_t hidden, int64_t mem, int64_t ffn) {
+        embedding_grads = Tensor::zeros({vocab, hidden});
+        block_grads.resize(num_layers);
+        for (auto& bg : block_grads) {
+            bg.init(hidden, mem, ffn, vocab);
+        }
+    }
+    
+    void zero() {
+        embedding_grads.zero_();
+        for (auto& bg : block_grads) bg.zero();
+    }
+};
+
+} // namespace mm_rec
