@@ -47,6 +47,8 @@ set(MODEL_SOURCES
 
 set(TRAINING_SOURCES
     src/training/uboo_loss.cpp
+    src/training/gradient_utils.cpp
+    src/training/scheduler.cpp
 )
 
 set(CONFIG_SOURCES
@@ -105,6 +107,10 @@ add_test(NAME test_session COMMAND test_session)
 add_executable(test_checkpoint tests/test_checkpoint.cpp)
 target_link_libraries(test_checkpoint mm_rec_eigen)
 add_test(NAME test_checkpoint COMMAND test_checkpoint)
+
+add_executable(test_training_utils tests/test_training_utils.cpp)
+target_link_libraries(test_training_utils mm_rec_eigen)
+add_test(NAME test_training_utils COMMAND test_training_utils)
 
 # Inference executable
 add_executable(inference_demo src/inference_demo.cpp)
