@@ -105,6 +105,10 @@ target_link_libraries(inference_demo mm_rec_eigen)
 add_executable(demo_training_cpp src/demo_training_cpp.cpp)
 target_link_libraries(demo_training_cpp mm_rec_eigen)
 
+# Kernel-Alpha Training (Real instruction data)
+add_executable(train_kernel src/train_kernel.cpp)
+target_link_libraries(train_kernel mm_rec_eigen)
+
 # Print configuration
 message(STATUS "========================================")
 message(STATUS "MM-Rec Eigen (Zero Runtime Deps!)")

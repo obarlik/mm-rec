@@ -1,0 +1,27 @@
+# MM-Rec Kernel-Nano Configuration (3M Params - CPU Optimized)
+
+# Architecture (Minimal but functional)
+vocab_size=32000
+hidden_dim=128
+mem_dim=128
+ffn_dim=512
+num_layers=3
+# Expert Specialization (reduced)
+num_experts=2
+top_k=1
+
+# Training (Faster iterations)
+optimizer_type=adamw
+learning_rate=0.001
+weight_decay=0.01
+beta1=0.9
+beta2=0.999
+batch_size=16
+max_seq_len=256
+
+# UBOO
+uboo_weight=0.5
+
+# Paths
+checkpoint_path=kernel_nano_v1.bin
+vocab_path=vocab.txt

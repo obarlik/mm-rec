@@ -55,8 +55,13 @@ public:
     void step(Tensor& param, const Tensor& grad) {
         // Initialize state if needed
         if (m_.numel() == 0) {
-            m_ = Tensor::zeros(param.shape());
-            v_ = Tensor::zeros(param.shape());
+            // Construct shape vector from param
+            std::vector<int64_t> param_shape;
+            for (int i = 0; i < param.ndim(); ++i) {
+                param_shape.push_back(param.size(i));
+            }
+            m_ = Tensor::zeros(param_shape);
+            v_ = Tensor::zeros(param_shape);
         }
         
         t_++;
@@ -106,8 +111,12 @@ public:
     void step(Tensor& param, const Tensor& grad) {
         // Initialize state if needed
         if (m_.numel() == 0) {
-            m_ = Tensor::zeros(param.shape());
-            v_ = Tensor::zeros(param.shape());
+            std::vector<int64_t> param_shape;
+            for (int i = 0; i < param.ndim(); ++i) {
+                param_shape.push_back(param.size(i));
+            }
+            m_ = Tensor::zeros(param_shape);
+            v_ = Tensor::zeros(param_shape);
         }
         
         t_++;
