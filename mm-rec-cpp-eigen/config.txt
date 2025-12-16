@@ -11,7 +11,11 @@ num_experts=4
 top_k=2
 
 # Training
-learning_rate=0.001
+optimizer_type=adamw
+learning_rate=0.0003
+weight_decay=0.01
+beta1=0.9
+beta2=0.999
 batch_size=32
 max_seq_len=512
 

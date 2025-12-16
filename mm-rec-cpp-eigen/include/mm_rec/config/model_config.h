@@ -23,6 +23,10 @@ struct ModelConfig {
     float learning_rate = 1e-4f;
     int64_t batch_size = 16;
     int64_t max_seq_len = 512;
+    std::string optimizer_type = "adamw";  // sgd, adam, adamw
+    float weight_decay = 0.01f;  // For AdamW
+    float beta1 = 0.9f;
+    float beta2 = 0.999f;
     
     // MoE
     int64_t num_experts = 4;
