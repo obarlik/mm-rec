@@ -118,16 +118,20 @@ int main(int argc, char** argv) {
     for (int64_t batch_idx = 0; batch_idx < num_batches; ++batch_idx) {
         auto step_start = std::chrono::high_resolution_clock::now();
         
-        // Prepare batch
+        // Prepare batch with STRIDED SAMPLING for independence
         Tensor input_ids = Tensor::zeros({batch_size, seq_len});
         Tensor targets = Tensor::zeros({batch_size, seq_len});
         Tensor loss_mask = Tensor::zeros({batch_size, seq_len});
         
+        // Stride ensures sequences are from different parts of dataset
+        int64_t stride = num_batches * seq_len;
+        
         for (int64_t b = 0; b < batch_size; ++b) {
-            int64_t offset = batch_idx * batch_size * seq_len + b * seq_len;
+            // Each sequence starts far apart in the dataset
+            int64_t base_offset = b * stride + batch_idx * seq_len;
             
             for (int64_t s = 0; s < seq_len; ++s) {
-                int64_t idx = offset + s;
+                int64_t idx = base_offset + s;
                 if (idx < total_tokens - 1) {
                     // Clip tokens to vocab size to avoid out-of-bounds
                     int32_t token = dataset.tokens[idx];
