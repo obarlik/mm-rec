@@ -133,11 +133,17 @@ int main(int argc, char** argv) {
             for (int64_t s = 0; s < seq_len; ++s) {
                 int64_t idx = base_offset + s;
                 if (idx < total_tokens - 1) {
-                    // Clip tokens to vocab size to avoid out-of-bounds
+                    // Use real token IDs (no clipping!)
                     int32_t token = dataset.tokens[idx];
                     int32_t target_token = dataset.tokens[idx + 1];
-                    input_ids.data()[b * seq_len + s] = (float)(token % config.vocab_size);
-                    targets.data()[b * seq_len + s] = (float)(target_token % config.vocab_size);
+                    
+                    // Bounds check
+                    if (token >= config.vocab_size || target_token >= config.vocab_size) {
+                        continue;  // Skip out-of-vocab tokens
+                    }
+                    
+                    input_ids.data()[b * seq_len + s] = (float)token;
+                    targets.data()[b * seq_len + s] = (float)target_token;
                     // Use mask from preprocessed data
                     loss_mask.data()[b * seq_len + s] = (float)dataset.masks[idx + 1];
                 }
@@ -174,9 +180,8 @@ int main(int argc, char** argv) {
                   << " | ETA: " << eta_minutes << "m"
                   << std::flush;
         
-        if (step % 10 == 0) {
-            std::cout << std::endl;
-        }
+        // Always print newline for logging
+        std::cout << std::endl;
         
         // Save checkpoint
         if (step % 500 == 0) {

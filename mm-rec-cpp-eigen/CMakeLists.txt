@@ -53,6 +53,7 @@ set(TRAINING_SOURCES
     src/training/gradient_utils.cpp
     src/training/scheduler.cpp
     src/training/trainer.cpp
+    src/training/sample_tracker.cpp
 )
 
 set(CONFIG_SOURCES
@@ -108,6 +109,10 @@ target_link_libraries(demo_training_cpp mm_rec_eigen)
 # Kernel-Alpha Training (Real instruction data)
 add_executable(train_kernel src/train_kernel.cpp)
 target_link_libraries(train_kernel mm_rec_eigen)
+
+# Adaptive curriculum training
+add_executable(train_adaptive src/train_adaptive.cpp)
+target_link_libraries(train_adaptive mm_rec_eigen)
 
 # Quick overfitting test
 add_executable(test_overfit src/test_overfit.cpp)

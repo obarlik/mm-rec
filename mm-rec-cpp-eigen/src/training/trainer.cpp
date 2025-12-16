@@ -99,6 +99,46 @@ float Trainer::train_step(const TrainingBatch& batch) {
     return avg_loss;
 }
 
+float Trainer::forward_only(const TrainingBatch& batch) {
+    // Forward pass only for difficulty assessment (no backward!)
+    int64_t batch_size = batch.input_ids.size(0);
+   int64_t seq_len = batch.input_ids.size(1);
+    
+    float total_loss = 0.0f;
+    int valid_samples = 0;
+    
+    // Process each sequence independently (same as train_step but no backward)
+    for (int64_t b = 0; b < batch_size; ++b) {
+        // Extract single sequence
+        Tensor single_input = Tensor::zeros({1, seq_len});
+        Tensor single_target = Tensor::zeros({1, seq_len});
+        Tensor single_mask = Tensor::zeros({1, seq_len});
+        
+        for (int64_t s = 0; s < seq_len; ++s) {
+            single_input.data()[s] = batch.input_ids.data()[b * seq_len + s];
+            single_target.data()[s] = batch.targets.data()[b * seq_len + s];
+            if (batch.loss_mask.numel() > 0) {
+                single_mask.data()[s] = batch.loss_mask.data()[b * seq_len + s];
+            }
+        }
+        
+        // Reset memory for isolation
+        model_.reset_memory(1);
+        
+        // Forward pass only
+        ForwardCache cache;
+        Tensor logits = model_.forward(single_input, &cache);
+        
+        // Compute loss
+        Tensor loss_tensor = compute_uboo_loss(logits, single_target, single_mask);
+        float loss = loss_tensor.item();
+        total_loss += loss;
+        valid_samples++;
+    }
+    
+    return total_loss / valid_samples;
+}
+
 float Trainer::validate_step(const TrainingBatch& batch) {
     // No gradient computation in validation
     Tensor logits = model_.forward(batch.input_ids);

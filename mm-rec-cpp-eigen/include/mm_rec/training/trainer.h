@@ -51,6 +51,12 @@ public:
     float train_step(const TrainingBatch& batch);
     
     /**
+     * Forward pass only (no backward, for difficulty assessment)
+     * Returns loss value for sample categorization
+     */
+    float forward_only(const TrainingBatch& batch);
+    
+    /**
      * Validate on one batch
      * Returns loss value
      */

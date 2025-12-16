@@ -1,0 +1,25 @@
+# Kernel-Optimized (Fixed: LR + Full Vocab)
+
+# FULL VOCAB (no clipping!)
+vocab_size=32000
+hidden_dim=128
+mem_dim=128
+ffn_dim=384
+num_layers=3
+num_experts=2
+top_k=1
+
+# Training (HIGHER LR + proper settings)
+optimizer_type=adamw
+learning_rate=0.01
+warmup_steps=10
+total_steps=100
+weight_decay=0.01
+beta1=0.9
+beta2=0.999
+batch_size=8
+max_seq_len=128
+
+uboo_weight=0.5
+checkpoint_path=kernel_optimized.bin
+vocab_path=vocab.txt

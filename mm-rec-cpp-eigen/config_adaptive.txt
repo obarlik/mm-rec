@@ -1,0 +1,32 @@
+# Adaptive Curriculum Learning Config
+
+# REDUCED VOCAB for fast training
+vocab_size=2000
+hidden_dim=128
+mem_dim=128
+ffn_dim=384
+num_layers=3
+num_experts=2
+top_k=1
+
+# Training
+optimizer_type=adamw
+learning_rate=0.01
+warmup_steps=10
+total_steps=100
+weight_decay=0.01
+beta1=0.9
+beta2=0.999
+batch_size=8
+max_seq_len=128
+
+# Adaptive Curriculum Parameters
+easy_threshold=50.0     # PPL below this = skip (already learned)
+hard_threshold=500.0    # PPL above this = defer (too hard now)
+discovery_epochs=1      # Epochs to categorize samples
+focused_epochs=2        # Epochs to train medium samples  
+hard_epochs=1           # Epochs to train hard samples
+
+uboo_weight=0.5
+checkpoint_path=kernel_adaptive.bin
+vocab_path=vocab.txt
