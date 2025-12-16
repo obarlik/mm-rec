@@ -19,7 +19,8 @@ namespace mm_rec {
  */
 struct TrainingBatch {
     Tensor input_ids;   // [batch, seq]
-    Tensor targets;     // [batch, seq]
+   Tensor targets;     // [batch, seq]
+    Tensor loss_mask;   // [batch, seq] - optional, 1=compute loss, 0=ignore
 };
 
 /**

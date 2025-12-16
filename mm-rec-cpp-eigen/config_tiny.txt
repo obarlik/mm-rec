@@ -1,0 +1,22 @@
+# Kernel-Tiny (Quick Test - 500K params)
+
+vocab_size=256
+hidden_dim=64
+mem_dim=64
+ffn_dim=128
+num_layers=2
+num_experts=2
+top_k=1
+
+# Training
+optimizer_type=adamw
+learning_rate=0.003
+weight_decay=0.01
+beta1=0.9
+beta2=0.999
+batch_size=4
+max_seq_len=64
+
+uboo_weight=0.5
+checkpoint_path=kernel_tiny.bin
+vocab_path=vocab.txt

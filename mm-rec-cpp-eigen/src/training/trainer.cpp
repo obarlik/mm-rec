@@ -4,8 +4,7 @@
 
 #include "mm_rec/training/trainer.h"
 #include "mm_rec/training/uboo_loss.h"
-#include "mm_rec/training/uboo_loss.h"
-#include "mm_rec/training/gradient_utils.h" // Might not be needed if using direct backward
+#include "mm_rec/training/gradient_utils.h"
 #include "mm_rec/training/forward_cache.h"
 #include "mm_rec/training/optimizer.h"
 #include <iostream>
@@ -42,16 +41,16 @@ float Trainer::train_step(const TrainingBatch& batch) {
     // Populates cache with activations
     Tensor logits = model_.forward(batch.input_ids, &cache);
     
-    // 2. Compute loss (UBOO deep supervision)
-    Tensor loss_tensor = compute_uboo_loss(logits, batch.targets);
+    // 2. Compute loss (UBOO deep supervision with optional masking)
+    Tensor loss_tensor = compute_uboo_loss(logits, batch.targets, batch.loss_mask);
     float loss = loss_tensor.item();
     
     // 3. Backward pass
     // Returns gradients for all parameters
     ModelGradients grads = model_.backward(batch.targets, cache);
     
-    // 4. Gradient clipping (TODO: Implement clipping)
-    // clip_gradients(grads, config_.grad_clip_norm);
+    // 4. Gradient clipping
+    float grad_norm = clip_gradients_by_norm(grads, config_.grad_clip_norm);
     
     // 5. Update parameters
     float current_lr = scheduler_->get_lr(step_);

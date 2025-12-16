@@ -20,7 +20,7 @@ namespace mm_rec {
  * @param targets [batch, seq] - target token IDs
  * @return Total weighted loss
  */
-Tensor compute_uboo_loss(const Tensor& all_layer_logits, const Tensor& targets);
+Tensor compute_uboo_loss(const Tensor& all_layer_logits, const Tensor& targets, const Tensor& mask = Tensor());
 
 /**
  * Cross-entropy loss for a single layer
@@ -29,6 +29,6 @@ Tensor compute_uboo_loss(const Tensor& all_layer_logits, const Tensor& targets);
  * @param targets [batch, seq]
  * @return Scalar loss
  */
-Tensor cross_entropy_loss(const Tensor& logits, const Tensor& targets);
+Tensor cross_entropy_loss(const Tensor& logits, const Tensor& targets, const Tensor& mask = Tensor());
 
 } // namespace mm_rec

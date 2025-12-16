@@ -109,6 +109,10 @@ target_link_libraries(demo_training_cpp mm_rec_eigen)
 add_executable(train_kernel src/train_kernel.cpp)
 target_link_libraries(train_kernel mm_rec_eigen)
 
+# Quick overfitting test
+add_executable(test_overfit src/test_overfit.cpp)
+target_link_libraries(test_overfit mm_rec_eigen)
+
 # Print configuration
 message(STATUS "========================================")
 message(STATUS "MM-Rec Eigen (Zero Runtime Deps!)")

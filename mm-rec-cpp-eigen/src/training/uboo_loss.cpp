@@ -8,9 +8,10 @@
 
 namespace mm_rec {
 
-Tensor cross_entropy_loss(const Tensor& logits, const Tensor& targets) {
+Tensor cross_entropy_loss(const Tensor& logits, const Tensor& targets, const Tensor& mask) {
     // logits: [batch, seq, vocab]
     // targets: [batch, seq]
+    // mask: [batch, seq] - optional, 1=compute, 0=skip
     
     int64_t batch = logits.size(0);
     int64_t seq = logits.size(1);
@@ -19,8 +20,15 @@ Tensor cross_entropy_loss(const Tensor& logits, const Tensor& targets) {
     float total_loss = 0.0f;
     int64_t total_tokens = 0;
     
+    bool use_mask = (mask.numel() > 0);
+    
     for (int64_t b = 0; b < batch; ++b) {
         for (int64_t s = 0; s < seq; ++s) {
+            // Skip if masked
+            if (use_mask && mask.data()[b * seq + s] < 0.5f) {
+                continue;
+            }
+            
             int64_t target_id = static_cast<int64_t>(
                 targets.data()[b * seq + s]
             );
@@ -34,7 +42,7 @@ Tensor cross_entropy_loss(const Tensor& logits, const Tensor& targets) {
                 logits_vec[v] = logit;
                 max_logit = std::max(max_logit, logit);
             }
-            
+           
             // exp(x - max) for stability
             float sum_exp = 0.0f;
             for (int64_t v = 0; v < vocab; ++v) {
@@ -51,8 +59,8 @@ Tensor cross_entropy_loss(const Tensor& logits, const Tensor& targets) {
         }
     }
     
-    // Average over tokens
-    float avg_loss = total_loss / total_tokens;
+    // Average over tokens (handle empty mask case)
+    float avg_loss = (total_tokens > 0) ? (total_loss / total_tokens) : 0.0f;
     
     // Return as scalar tensor
     Tensor loss_tensor = Tensor::zeros({1});
@@ -61,9 +69,10 @@ Tensor cross_entropy_loss(const Tensor& logits, const Tensor& targets) {
     return loss_tensor;
 }
 
-Tensor compute_uboo_loss(const Tensor& all_layer_logits, const Tensor& targets) {
+Tensor compute_uboo_loss(const Tensor& all_layer_logits, const Tensor& targets, const Tensor& mask) {
     // all_layer_logits: [num_layers, batch, seq, vocab]
     // targets: [batch, seq]
+    // mask: [batch, seq] - optional
     
     int64_t num_layers = all_layer_logits.size(0);
     int64_t batch = all_layer_logits.size(1);
@@ -92,8 +101,8 @@ Tensor compute_uboo_loss(const Tensor& all_layer_logits, const Tensor& targets) 
             }
         }
         
-        // Compute loss for this layer
-        auto layer_loss = cross_entropy_loss(layer_logits, targets);
+        // Compute loss for this layer (with mask)
+        auto layer_loss = cross_entropy_loss(layer_logits, targets, mask);
         layer_losses.push_back(layer_loss.data()[0]);
     }
     

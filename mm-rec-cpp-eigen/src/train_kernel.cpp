@@ -2,11 +2,11 @@
  * Train Kernel-Alpha
  * 
  * Full training on Code Alpaca instruction dataset
+ * Using Trainer class for clean forward/backward/update
  */
 
 #include "mm_rec/model/mm_rec_model.h"
 #include "mm_rec/training/trainer.h"
-#include "mm_rec/training/optimizer.h"
 #include "mm_rec/config/model_config.h"
 #include "mm_rec/utils/checkpoint.h"
 #include <iostream>
@@ -64,7 +64,7 @@ struct MaskedDataset {
 };
 
 int main(int argc, char** argv) {
-    std::cout << "=== Kernel-Alpha Training ===" << std::endl;
+    std::cout << "=== Kernel-Alpha Training ===\n" << std::endl;
     
     std::string config_path = "config.txt";
     std::string data_path = "../data/instructions_train.bin";
@@ -91,11 +91,15 @@ int main(int argc, char** argv) {
     };
     
     MMRecModel model(model_config);
-    std::cout << "✅ Model initialized" << std::endl;
+    std::cout << "✅ Model initialized\n" << std::endl;
     
-    // Create optimizer (AdamW)
-    AdamW optimizer(config.learning_rate, config.beta1, config.beta2, 1e-8f, config.weight_decay);
-    std::cout << "✅ Optimizer: AdamW (lr=" << config.learning_rate << ")" << std::endl;
+    // Create Trainer (handles forward + backward + update!)
+    TrainingConfig train_config;
+    train_config.learning_rate = config.learning_rate;
+    train_config.batch_size = config.batch_size;
+    
+    Trainer trainer(model, train_config);
+    std::cout << "✅ Trainer initialized (lr=" << config.learning_rate << ")\n" << std::endl;
     
     // Training loop
     int64_t batch_size = config.batch_size;
@@ -103,9 +107,9 @@ int main(int argc, char** argv) {
     int64_t total_tokens = dataset.tokens.size();
     int64_t num_batches = total_tokens / (batch_size * seq_len);
     
-    std::cout << "\n🏁 Starting training..." << std::endl;
+    std::cout << "🏁 Starting training..." << std::endl;
     std::cout << "Batches: " << num_batches << " | Batch size: " << batch_size 
-              << " | Seq len: " << seq_len << std::endl;
+              << " | Seq len: " << seq_len << "\n" << std::endl;
     
     auto training_start = std::chrono::high_resolution_clock::now();
     float running_loss = 0.0f;
@@ -114,7 +118,7 @@ int main(int argc, char** argv) {
     for (int64_t batch_idx = 0; batch_idx < num_batches; ++batch_idx) {
         auto step_start = std::chrono::high_resolution_clock::now();
         
-        // Get batch data
+        // Prepare batch
         Tensor input_ids = Tensor::zeros({batch_size, seq_len});
         Tensor targets = Tensor::zeros({batch_size, seq_len});
         Tensor loss_mask = Tensor::zeros({batch_size, seq_len});
@@ -125,57 +129,22 @@ int main(int argc, char** argv) {
             for (int64_t s = 0; s < seq_len; ++s) {
                 int64_t idx = offset + s;
                 if (idx < total_tokens - 1) {
-                    input_ids.data()[b * seq_len + s] = (float)dataset.tokens[idx];
-                    targets.data()[b * seq_len + s] = (float)dataset.tokens[idx + 1];
+                    // Clip tokens to vocab size to avoid out-of-bounds
+                    int32_t token = dataset.tokens[idx];
+                    int32_t target_token = dataset.tokens[idx + 1];
+                    input_ids.data()[b * seq_len + s] = (float)(token % config.vocab_size);
+                    targets.data()[b * seq_len + s] = (float)(target_token % config.vocab_size);
+                    // Use mask from preprocessed data
                     loss_mask.data()[b * seq_len + s] = (float)dataset.masks[idx + 1];
                 }
             }
         }
         
-        // Forward
-        model.reset_memory(batch_size);
-        Tensor logits = model.forward(input_ids);
+        TrainingBatch batch{input_ids, targets, loss_mask};
         
-        // Compute masked loss (only on non-zero mask positions)
-        // logits: [layers, batch, seq, vocab]
-        // We use final layer
-        int64_t final_layer = config.num_layers - 1;
-        float loss = 0.0f;
-        int64_t count = 0;
+        // Train step (forward + backward + update!)
+        float loss = trainer.train_step(batch);
         
-        for (int64_t b = 0; b < batch_size; ++b) {
-            for (int64_t s = 0; s < seq_len; ++s) {
-                if (loss_mask.data()[b * seq_len + s] < 0.5f) continue; // Skip masked
-                
-                int32_t target_id = (int32_t)targets.data()[b * seq_len + s];
-                
-                // Softmax + cross entropy
-                float max_logit = -1e9f;
-                for (int64_t v = 0; v < config.vocab_size; ++v) {
-                    int64_t idx = final_layer * batch_size * seq_len * config.vocab_size +
-                                  b * seq_len * config.vocab_size +
-                                  s * config.vocab_size + v;
-                    if (logits.data()[idx] > max_logit) max_logit = logits.data()[idx];
-                }
-                
-                float sum_exp = 0.0f;
-                for (int64_t v = 0; v < config.vocab_size; ++v) {
-                    int64_t idx = final_layer * batch_size * seq_len * config.vocab_size +
-                                  b * seq_len * config.vocab_size +
-                                  s * config.vocab_size + v;
-                    sum_exp += std::exp(logits.data()[idx] - max_logit);
-                }
-                
-                int64_t target_idx = final_layer * batch_size * seq_len * config.vocab_size +
-                                     b * seq_len * config.vocab_size +
-                                     s * config.vocab_size + target_id;
-                float log_prob = (logits.data()[target_idx] - max_logit) - std::log(sum_exp);
-                loss += -log_prob;
-                count++;
-            }
-        }
-        
-        if (count > 0) loss /= count;
         running_loss += loss;
         step++;
         
@@ -190,38 +159,51 @@ int main(int argc, char** argv) {
         float eta_seconds = avg_step_time * (num_batches - step);
         int eta_minutes = (int)(eta_seconds / 60.0f);
         
-        // Print detailed progress EVERY step
+        // Print progress
+        float current_lr = trainer.get_current_lr();
         std::cout << "\r[Step " << step << "/" << num_batches << "] "
                   << "Loss: " << std::fixed << std::setprecision(4) << loss 
                   << " | Avg: " << avg_loss
                   << " | PPL: " << std::setprecision(1) << perplexity
+                  << " | LR: " << std::setprecision(6) << current_lr
                   << " | " << step_time.count() << "ms/step"
-                  << " | Elapsed: " << elapsed.count() << "s"
                   << " | ETA: " << eta_minutes << "m"
                   << std::flush;
         
         if (step % 10 == 0) {
-            std::cout << std::endl; // Newline every 10 steps for readability
+            std::cout << std::endl;
         }
         
         // Save checkpoint
         if (step % 500 == 0) {
-            std::string ckpt = "kernel_alpha_step_" + std::to_string(step) + ".bin";
+            std::string ckpt = "kernel_small_step_" + std::to_string(step) + ".bin";
             CheckpointMetadata meta;
-            meta.epoch = step / 500;  // Approximate epoch
-            meta.loss = running_loss / 10.0f;
+            meta.epoch = step / 500;
+            meta.loss = avg_loss;
+            meta.learning_rate = config.learning_rate;
             CheckpointManager::save_checkpoint(ckpt, model, meta);
-            std::cout << "\n💾 Checkpoint saved: " << ckpt << std::endl;
+            std::cout << "\n💾 Checkpoint: " << ckpt << std::endl;
+            
+            // Keep only last 3 checkpoints (save disk space)
+            if (step > 1500) {
+                int old_step = step - 2000;  // Delete checkpoint from 4 saves ago
+                std::string old_ckpt = "kernel_small_step_" + std::to_string(old_step) + ".bin";
+                std::remove(old_ckpt.c_str());
+            }
         }
         
-        // Early stop for testing
-        if (step >= 1000) break;
+        // Early stop (disabled for full training)
+        // if (step >= 100) break;
     }
     
     std::cout << "\n\n✅ Training complete!" << std::endl;
     CheckpointMetadata final_meta;
     final_meta.epoch = step / 500;
-    CheckpointManager::save_checkpoint("kernel_alpha_final.bin", model, final_meta);
+    final_meta.loss = running_loss / step;
+    final_meta.learning_rate = config.learning_rate;
+    CheckpointManager::save_checkpoint("kernel_nano_final.bin", model, final_meta);
+    
+    std::cout << "Final checkpoint saved. Loss: " << (running_loss / step) << std::endl;
     
     return 0;
 }
