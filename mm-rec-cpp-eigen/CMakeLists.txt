@@ -138,6 +138,11 @@ add_executable(test_data_pipeline tests/test_data_pipeline.cpp)
 target_link_libraries(test_data_pipeline mm_rec_eigen)
 add_test(NAME test_data_pipeline COMMAND test_data_pipeline)
 
+# Memory Manager Benchmark
+add_executable(test_memory_benchmark tests/test_memory_benchmark.cpp)
+target_link_libraries(test_memory_benchmark mm_rec_eigen)
+
+
 # Helper Demos (Optional, keeping for reference)
 add_executable(inference_demo src/inference_demo.cpp)
 target_link_libraries(inference_demo mm_rec_eigen)

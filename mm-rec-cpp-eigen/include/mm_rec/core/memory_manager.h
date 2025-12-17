@@ -1,8 +1,10 @@
 /**
  * Custom Memory Manager for MM-Rec
  * 
- * Implements bump allocation for extreme speed and lazy deallocation 
- * in a separate thread to prevent blocking the training loop.
+ * Features:
+ * 1. Thread-Local Arenas (Lock-free allocation)
+ * 2. Background Cleaning (Zero-overhead memset)
+ * 3. Global Block Pooling (Efficient reuse)
  */
 
 #pragma once
@@ -24,8 +26,9 @@ struct MemoryBlock {
     size_t size;
     size_t used;
     uint8_t* data;
+    bool is_clean; // Debug flag
     
-    MemoryBlock(size_t s) : size(s), used(0) {
+    MemoryBlock(size_t s) : size(s), used(0), is_clean(false) {
         data = new uint8_t[size];
     }
     
@@ -48,136 +51,232 @@ struct MemoryBlock {
     
     void reset() {
         used = 0;
+        // Note: We do NOT memset here. The background thread does it.
+    }
+    
+    // Explicit clean method called by background thread
+    void clean() {
+        std::memset(data, 0, size);
+        used = 0;
+        is_clean = true;
     }
 };
+
+/**
+ * Global Pool that manages all blocks and runs the background cleaner.
+ * Thread-Safe Singleton.
+ */
+class GlobalBlockPool {
+public:
+    static GlobalBlockPool& instance() {
+        static GlobalBlockPool instance;
+        return instance;
+    }
+
+    MemoryBlock* acquire_clean_block(size_t size) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        
+        // Try to get a clean block
+        if (!clean_queue_.empty()) {
+            MemoryBlock* block = clean_queue_.front();
+            clean_queue_.pop();
+            
+            // Validate size (simplified: we assume fixed block size)
+            if (block->size >= size) {
+                return block;
+            } else {
+                delete block; // Wrong size
+            }
+        }
+        
+        // If no clean block, check dirty queue (emergency fallback logic could go here, but we prefer new)
+        // For now, allocate new from OS if empty (to avoid waiting)
+        return new MemoryBlock(size);
+    }
+
+    void release_dirty_block(MemoryBlock* block) {
+        if (!block) return;
+        
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            block->is_clean = false; // Mark as dirty
+            dirty_queue_.push(block);
+            atomic_dirty_count_.fetch_add(1, std::memory_order_release);
+        }
+        
+        // Wake up cleaner
+        cv_cleaner_.notify_one();
+    }
+    
+    // Stats for debugging
+    size_t get_clean_count() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return clean_queue_.size();
+    }
+    
+    size_t get_dirty_count() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return dirty_queue_.size();
+    }
+
+    ~GlobalBlockPool() {
+        stop_ = true;
+        cv_cleaner_.notify_all();
+        if (cleaner_thread_.joinable()) {
+            cleaner_thread_.join();
+        }
+        
+        // Cleanup leftover blocks
+        while(!clean_queue_.empty()) { delete clean_queue_.front(); clean_queue_.pop(); }
+        while(!dirty_queue_.empty()) { delete dirty_queue_.front(); dirty_queue_.pop(); }
+    }
+
+private:
+    GlobalBlockPool() : stop_(false), atomic_dirty_count_(0) {
+        // Start background cleaner
+        cleaner_thread_ = std::thread(&GlobalBlockPool::cleaner_loop, this);
+    }
+    
+    void cleaner_loop() {
+        while (true) {
+            MemoryBlock* block_to_clean = nullptr;
+            
+            // 1. Spin-Wait (Hybrid Polling)
+            // Objective: Avoid sleep latency for bursts of work.
+            // Check atomic variable (lock-free) for a short period.
+            int spin_count = 0;
+            const int MAX_SPIN = 10000; // ~10-50us depending on CPU
+            
+            while(atomic_dirty_count_.load(std::memory_order_acquire) == 0 && !stop_ && spin_count < MAX_SPIN) {
+                std::this_thread::yield(); // Notify OS we are waiting, but stay scheduled if possible
+                spin_count++;
+            }
+            
+            // 2. Lock & Consume (or Sleep if failed)
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                
+                // If queue is empty, we SLEEP (Wait for event)
+                cv_cleaner_.wait(lock, [this]{ return !dirty_queue_.empty() || stop_; });
+                
+                if (stop_ && dirty_queue_.empty()) return;
+                
+                if (!dirty_queue_.empty()) {
+                    block_to_clean = dirty_queue_.front();
+                    dirty_queue_.pop();
+                    atomic_dirty_count_.fetch_sub(1, std::memory_order_release);
+                }
+            }
+            
+            if (block_to_clean) {
+                // Heavy lifting done without holding global lock!
+                block_to_clean->clean();
+                
+                // Return to clean queue
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    clean_queue_.push(block_to_clean);
+                }
+            }
+        }
+    }
+
+    std::mutex mutex_;
+    std::condition_variable cv_cleaner_;
+    std::queue<MemoryBlock*> clean_queue_;
+    std::queue<MemoryBlock*> dirty_queue_;
+    std::thread cleaner_thread_;
+    std::atomic<bool> stop_;
+    std::atomic<size_t> atomic_dirty_count_; // For lock-free spin check
+};
+
 
 class MemoryManager {
 public:
     static const size_t BLOCK_SIZE = 64 * 1024 * 1024; // 64 MB
     
     static MemoryManager& instance() {
-        // Thread-Local Singleton: Each thread gets its own isolated MemoryManager.
-        // No locks, no contention, 100% thread safety.
         static thread_local MemoryManager instance;
         return instance;
     }
     
-    // Fast Arena Allocation (Bump Pointer)
     void* allocate(size_t bytes) {
-        if (!current_block_) {
-            // Initial block
-            if (!free_blocks_.empty()) {
-                current_block_ = free_blocks_.back();
-                free_blocks_.pop_back();
-                current_block_->reset();
-            } else {
-                current_block_ = new MemoryBlock(BLOCK_SIZE);
-            }
-            blocks_.push_back(current_block_);
+        // 1. Try current block
+        if (current_block_) {
+            void* ptr = current_block_->allocate(bytes);
+            if (ptr) return ptr;
         }
         
-        void* ptr = current_block_->allocate(bytes);
+        // 2. Current block full or null. Get new one from Global Pool.
+        // (No persistent local pool anymore - we use global pool)
+        MemoryBlock* new_block = GlobalBlockPool::instance().acquire_clean_block(BLOCK_SIZE);
+        blocks_.push_back(new_block);
+        current_block_ = new_block;
         
-        // Block full? Get another one.
-        if (!ptr) {
-            // std::cout << "⚠️  Memory Block Full! Getting new block..." << std::endl;
-            
-            MemoryBlock* next_block = nullptr;
-            if (!free_blocks_.empty()) {
-                // Reuse from pool
-                next_block = free_blocks_.back();
-                free_blocks_.pop_back();
-                next_block->reset();
-            } else {
-                // Allocate new from OS
-                next_block = new MemoryBlock(BLOCK_SIZE);
-            }
-            
-            current_block_ = next_block;
-            blocks_.push_back(current_block_);
-            ptr = current_block_->allocate(bytes);
-        }
-        
-        return ptr;
+        // 3. Alloc from new block (Should succeed since 64MB > requested usually)
+        return current_block_->allocate(bytes);
     }
     
-    // Free memory (Lazy)
     void deallocate(void* ptr) {
-        // No-op in Arena allocator
+        // No-op
     }
     
     void mark_persistent() {
         if (blocks_.empty()) {
             persistent_block_count_ = 0;
-            persistent_used_ = 0;
             return;
         }
         persistent_block_count_ = blocks_.size();
         persistent_used_ = blocks_.back()->used;
-        // std::cout << "DEBUG: Persistent Mark - Blocks: " << persistent_block_count_ << " Used: " << persistent_used_ << std::endl;
     }
 
-    // Reset all memory (End of batch/step)
-    // REUSE blocks conditions:
-    // 1. Keep all "persistent" blocks (weights)
-    // 2. Reset the LAST persistent block to the 'persistent_used_' offset
-    // 3. Move all subsequent blocks to free_blocks_
     void reset_arena() {
         if (blocks_.empty()) return;
 
-        // 1. Identify blocks to free (Transient blocks)
-        if (blocks_.size() > persistent_block_count_) {
-            // Note: If persistent_block_count_ is 1, and we have 5 blocks. 
-            // We keep blocks_[0]. We move blocks_[1]..blocks_[4] to free.
-            
-            // Start index relies on whether persistent count is 0 (reset all) or N
-            size_t start_idx = (persistent_block_count_ == 0) ? 1 : persistent_block_count_;
-            // Wait, if count=1 (block 0 persistent), we start freeing at index 1.
-            // If count=0 (nothing persistent), we keep block 0 (as current) and free 1..N.
-            
-            // Correction: Always keep at least ONE block active to avoid reallocation churn
-            size_t keep_count = (persistent_block_count_ > 0) ? persistent_block_count_ : 1;
-            
-            for (size_t i = keep_count; i < blocks_.size(); ++i) {
-                free_blocks_.push_back(blocks_[i]);
-            }
-            blocks_.resize(keep_count);
+        // Release transient blocks to GLOBAL DIRTY POOL
+        // Identify blocks to free
+        size_t keep_count = (persistent_block_count_ > 0) ? persistent_block_count_ : 0;
+        
+        // Special case: If we keep current block (persistent), we just reset 'used'
+        // But if we release it, we must null current_block_
+        
+        for (size_t i = keep_count; i < blocks_.size(); ++i) {
+            GlobalBlockPool::instance().release_dirty_block(blocks_[i]);
         }
         
-        // 2. Reset the current active block
-        if (!blocks_.empty()) {
+        blocks_.resize(keep_count);
+        
+        if (keep_count > 0) {
+            // We kept some blocks. The last one is the active one.
             current_block_ = blocks_.back();
-            if (persistent_block_count_ > 0 && blocks_.size() == persistent_block_count_) {
-                // We are at the boundary block. Reset to offset.
-                current_block_->used = persistent_used_;
-            } else {
-                // We are at a non-persistent block (or count=0). Reset to 0.
-                current_block_->reset();
-            }
+            current_block_->used = persistent_used_;
+        } else {
+            // We released everything.
+            current_block_ = nullptr;
         }
     }
     
-    // Reporting
     size_t get_total_memory() const {
         size_t total = 0;
         for (const auto* b : blocks_) total += b->size;
-        for (const auto* b : free_blocks_) total += b->size;
         return total;
     }
     
-    // Destructor
+    // Debug helpers
+    size_t get_live_block_count() const { return blocks_.size(); }
+    size_t get_free_block_count() const { return GlobalBlockPool::instance().get_clean_count(); } // Approximation
+
     ~MemoryManager() {
-        for (auto b : blocks_) delete b;
-        for (auto b : free_blocks_) delete b;
-        blocks_.clear();
-        free_blocks_.clear();
+        // Thread exiting. Release all blocks to pool.
+        for (auto b : blocks_) {
+            GlobalBlockPool::instance().release_dirty_block(b);
+        }
     }
 
 private:
     MemoryManager() : current_block_(nullptr), persistent_block_count_(0), persistent_used_(0) {}
     
-    std::vector<MemoryBlock*> blocks_;       // Currently active blocks
-    std::vector<MemoryBlock*> free_blocks_;  // Pool of free blocks for reuse
+    std::vector<MemoryBlock*> blocks_;
     MemoryBlock* current_block_;
     
     size_t persistent_block_count_;
