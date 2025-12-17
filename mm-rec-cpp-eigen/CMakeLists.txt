@@ -66,6 +66,7 @@ include_directories(/usr/include/mkl) # Try standard standard
 # Source files
 set(CORE_SOURCES
     src/core/tensor.cpp
+    src/core/global_allocator.cpp
     src/core/linear.cpp
     src/core/gated_memory.cpp
 )
