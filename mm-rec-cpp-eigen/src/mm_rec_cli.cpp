@@ -26,6 +26,8 @@ int main(int argc, char* argv[]) {
         return cmd_prepare(argc - 1, &argv[1]);
     } else if (command == "train") {
         return cmd_train(argc - 1, &argv[1]);
+    } else if (command == "infer") {
+        return cmd_infer(argc - 1, &argv[1]);
     } else {
         std::cerr << "Unknown command: " << command << std::endl;
         print_usage(argv[0]);

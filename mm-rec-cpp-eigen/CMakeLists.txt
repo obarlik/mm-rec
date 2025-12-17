@@ -127,6 +127,7 @@ add_executable(mm_rec
     src/mm_rec_cli.cpp 
     src/cli/cmd_prepare.cpp 
     src/cli/cmd_train.cpp
+    src/cli/cmd_infer.cpp
 )
 target_link_libraries(mm_rec mm_rec_eigen)
 
