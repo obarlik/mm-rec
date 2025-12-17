@@ -18,6 +18,7 @@
 #include <atomic>
 #include <iostream>
 #include <cstring>
+#include <cstdlib> // For aligned_alloc, free
 
 #ifdef _WIN32
 #include <windows.h>
@@ -25,6 +26,10 @@
 #ifdef __linux__
 #include <sys/mman.h>
 #endif
+#endif
+
+#ifdef __AVX2__
+#include <immintrin.h>
 #endif
 
 namespace mm_rec {
@@ -46,7 +51,13 @@ struct MemoryBlock {
         }
         if (!data) throw std::bad_alloc();
         #else
-        data = new uint8_t[size];
+        // Linux: Use aligned_alloc for AVX2 compatibility (requires 32-byte alignment)
+        // We align to 64 bytes (cache line size) just to be safe and performant.
+        // aligned_alloc(alignment, size): size must be integral multiple of alignment.
+        // Our blocks are 64MB so it is fine.
+        data = static_cast<uint8_t*>(std::aligned_alloc(64, size));
+        if (!data) throw std::bad_alloc();
+
         #ifdef __linux__
         // Request Transparent Huge Pages (THP) for this large block
         madvise(data, size, MADV_HUGEPAGE);
@@ -58,7 +69,7 @@ struct MemoryBlock {
         #ifdef _WIN32
         if (data) VirtualFree(data, 0, MEM_RELEASE);
         #else
-        delete[] data;
+        std::free(data);
         #endif
     }
     
@@ -82,7 +93,34 @@ struct MemoryBlock {
     
     // Explicit clean method called by background thread
     void clean() {
+        #ifdef __AVX2__
+        // AVX2 Non-Temporal (Streaming) Stores
+        // Bypasses Cache, writing directly to RAM
+        // Prevents L3 Cache Pollution
+        if (size % 32 == 0) {
+            __m256i zero_vec = _mm256_setzero_si256();
+            uint8_t* d = data;
+            
+            // Unrolled loop (4x32 = 128 bytes per iter) for max bandwidth
+            size_t i = 0;
+            for (; i + 128 <= size; i += 128) {
+                _mm256_stream_si256(reinterpret_cast<__m256i*>(d + i + 0), zero_vec);
+                _mm256_stream_si256(reinterpret_cast<__m256i*>(d + i + 32), zero_vec);
+                _mm256_stream_si256(reinterpret_cast<__m256i*>(d + i + 64), zero_vec);
+                _mm256_stream_si256(reinterpret_cast<__m256i*>(d + i + 96), zero_vec);
+            }
+            // Tail
+            for (; i < size; i += 32) {
+                _mm256_stream_si256(reinterpret_cast<__m256i*>(d + i), zero_vec);
+            }
+            _mm_sfence(); // Ensure data is visible
+        } else {
+            std::memset(data, 0, size);    
+        }
+        #else
         std::memset(data, 0, size);
+        #endif
+        
         used = 0;
         is_clean = true;
     }
