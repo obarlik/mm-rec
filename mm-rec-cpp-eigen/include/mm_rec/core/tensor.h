@@ -20,17 +20,20 @@ public:
     Tensor();
     Tensor(std::vector<int64_t> shape);
     
+    // Destructor
+    ~Tensor();
+    
     // Copy constructor
-    Tensor(const Tensor& other) = default;
+    Tensor(const Tensor& other);
     
     // Move constructor
-    Tensor(Tensor&& other) noexcept = default;
+    Tensor(Tensor&& other) noexcept;
     
     // Copy assignment
-    Tensor& operator=(const Tensor& other) = default;
+    Tensor& operator=(const Tensor& other);
     
     // Move assignment
-    Tensor& operator=(Tensor&& other) noexcept = default;
+    Tensor& operator=(Tensor&& other) noexcept;
     
     // Factory methods
     static Tensor zeros(std::vector<int64_t> shape);
@@ -40,41 +43,32 @@ public:
     
     // Shape & size
     std::vector<int64_t> sizes() const { return shape_; }
+    int64_t numel() const { return numel_; }
+    int64_t ndim() const { return shape_.size(); }
     
     // Element access (with bounds checking)
     float& operator[](int64_t idx) {
-        check_bounds(idx, data_.size(), "Tensor::operator[]");
-        return data_[idx];
+        check_bounds(idx, numel_, "Tensor::operator[]");
+        return data_ptr_[idx];
     }
     const float& operator[](int64_t idx) const {
-        check_bounds(idx, data_.size(), "Tensor::operator[]");
-        return data_[idx];
+        check_bounds(idx, numel_, "Tensor::operator[]");
+        return data_ptr_[idx];
     }
     
-    float* data() { return data_.data(); }
-    const float* data() const { return data_.data(); }
+    float* data() { return data_ptr_; }
+    const float* data() const { return data_ptr_; }
     
     // Shape
     int64_t size(int dim) const {
         check_bounds(dim, shape_.size(), "Tensor::size");
         return shape_[dim];
     }
-    int64_t ndim() const { return shape_.size(); }
-    int64_t numel() const {
-        int64_t n = 1;
-        for (auto s : shape_) n *= s;
-        return n;
-    }
 
     // Reshape
     Tensor reshape(std::vector<int64_t> new_shape) const;
     
-    // Validity check
-    void check_valid(const std::string& name = "Tensor") const {
-        check_tensor_validity(data_.data(), data_.size(), name);
-    }
-    
-    // Linear algebra (MKL-based)
+    // Matrix Multiplication
     Tensor matmul(const Tensor& other) const;
     Tensor transpose() const;
     
@@ -100,8 +94,9 @@ public:
     void zero_();
     
 private:
-    std::vector<float> data_;
     std::vector<int64_t> shape_;
+    float* data_ptr_ = nullptr;
+    int64_t numel_ = 0;
     
     void check_shape_compatible(const Tensor& other) const;
 };

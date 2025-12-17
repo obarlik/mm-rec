@@ -9,6 +9,8 @@
 #include "mm_rec/training/forward_cache.h"
 #include "mm_rec/training/optimizer.h"
 #include <iostream>
+#include <cstring>  // memcpy
+#include <cmath>
 
 namespace mm_rec {
 
@@ -42,19 +44,20 @@ float Trainer::train_step(const TrainingBatch& batch) {
     float total_loss = 0.0f;
     int valid_samples = 0;
     
+    // Pre-allocate buffers (reused for all sequences)
+    Tensor single_input = Tensor::zeros({1, seq_len});
+    Tensor single_target = Tensor::zeros({1, seq_len});
+    Tensor single_mask = Tensor::zeros({1, seq_len});
+    size_t copy_size = seq_len * sizeof(float);
+    
     // Process each sequence independently
     for (int64_t b = 0; b < batch_size; ++b) {
-        // Extract single sequence
-        Tensor single_input = Tensor::zeros({1, seq_len});
-        Tensor single_target = Tensor::zeros({1, seq_len});
-        Tensor single_mask = Tensor::zeros({1, seq_len});
+        // Fast copy using memcpy
+        std::memcpy(single_input.data(), batch.input_ids.data() + b * seq_len, copy_size);
+        std::memcpy(single_target.data(), batch.targets.data() + b * seq_len, copy_size);
         
-        for (int64_t s = 0; s < seq_len; ++s) {
-            single_input.data()[s] = batch.input_ids.data()[b * seq_len + s];
-            single_target.data()[s] = batch.targets.data()[b * seq_len + s];
-            if (batch.loss_mask.numel() > 0) {
-                single_mask.data()[s] = batch.loss_mask.data()[b * seq_len + s];
-            }
+        if (batch.loss_mask.numel() > 0) {
+            std::memcpy(single_mask.data(), batch.loss_mask.data() + b * seq_len, copy_size);
         }
         
         // RESET MEMORY for this sequence (complete isolation!)
@@ -102,24 +105,25 @@ float Trainer::train_step(const TrainingBatch& batch) {
 float Trainer::forward_only(const TrainingBatch& batch) {
     // Forward pass only for difficulty assessment (no backward!)
     int64_t batch_size = batch.input_ids.size(0);
-   int64_t seq_len = batch.input_ids.size(1);
+    int64_t seq_len = batch.input_ids.size(1);
     
     float total_loss = 0.0f;
     int valid_samples = 0;
     
+    // Pre-allocate buffers
+    Tensor single_input = Tensor::zeros({1, seq_len});
+    Tensor single_target = Tensor::zeros({1, seq_len});
+    Tensor single_mask = Tensor::zeros({1, seq_len});
+    size_t copy_size = seq_len * sizeof(float);
+    
     // Process each sequence independently (same as train_step but no backward)
     for (int64_t b = 0; b < batch_size; ++b) {
-        // Extract single sequence
-        Tensor single_input = Tensor::zeros({1, seq_len});
-        Tensor single_target = Tensor::zeros({1, seq_len});
-        Tensor single_mask = Tensor::zeros({1, seq_len});
+        // Fast copy
+        std::memcpy(single_input.data(), batch.input_ids.data() + b * seq_len, copy_size);
+        std::memcpy(single_target.data(), batch.targets.data() + b * seq_len, copy_size);
         
-        for (int64_t s = 0; s < seq_len; ++s) {
-            single_input.data()[s] = batch.input_ids.data()[b * seq_len + s];
-            single_target.data()[s] = batch.targets.data()[b * seq_len + s];
-            if (batch.loss_mask.numel() > 0) {
-                single_mask.data()[s] = batch.loss_mask.data()[b * seq_len + s];
-            }
+        if (batch.loss_mask.numel() > 0) {
+            std::memcpy(single_mask.data(), batch.loss_mask.data() + b * seq_len, copy_size);
         }
         
         // Reset memory for isolation
