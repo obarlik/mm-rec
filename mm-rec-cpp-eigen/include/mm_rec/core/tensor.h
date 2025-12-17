@@ -35,6 +35,9 @@ public:
     // Move assignment
     Tensor& operator=(Tensor&& other) noexcept;
     
+    // Deep Copy
+    Tensor clone() const;
+
     // Factory methods
     static Tensor zeros(std::vector<int64_t> shape);
     static Tensor ones(std::vector<int64_t> shape);

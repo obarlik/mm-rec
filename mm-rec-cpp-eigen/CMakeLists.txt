@@ -130,6 +130,7 @@ add_executable(mm_rec
 target_link_libraries(mm_rec mm_rec_eigen)
 
 # Tests
+enable_testing()
 add_executable(test_moe tests/test_moe.cpp)
 target_link_libraries(test_moe mm_rec_eigen)
 add_test(NAME test_moe COMMAND test_moe)
@@ -142,8 +143,10 @@ add_test(NAME test_data_pipeline COMMAND test_data_pipeline)
 add_executable(test_memory_benchmark tests/test_memory_benchmark.cpp)
 target_link_libraries(test_memory_benchmark mm_rec_eigen)
 
-
-# Helper Demos (Optional, keeping for reference)
+# Pool Allocator Benchmark
+add_executable(test_pool_benchmark tests/test_pool_benchmark.cpp)
+target_link_libraries(test_pool_benchmark mm_rec_eigen)
+add_test(NAME test_pool_benchmark COMMAND test_pool_benchmark)
 add_executable(inference_demo src/inference_demo.cpp)
 target_link_libraries(inference_demo mm_rec_eigen)
 

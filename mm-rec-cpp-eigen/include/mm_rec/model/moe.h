@@ -44,6 +44,22 @@ struct MoEGradients {
     std::vector<Tensor> d_expert_down_weights;
     std::vector<Tensor> d_expert_down_biases;
     
+    MoEGradients clone() const {
+        MoEGradients cp;
+        cp.d_gate = d_gate.clone();
+        cp.db_gate = db_gate.clone(); // Added db_gate clone
+        cp.d_expert_up_weights.reserve(d_expert_up_weights.size());
+        for (const auto& t : d_expert_up_weights) cp.d_expert_up_weights.push_back(t.clone());
+        cp.d_expert_up_biases.reserve(d_expert_up_biases.size()); // Added up_biases clone
+        for (const auto& t : d_expert_up_biases) cp.d_expert_up_biases.push_back(t.clone());
+        
+        cp.d_expert_down_weights.reserve(d_expert_down_weights.size());
+        for (const auto& t : d_expert_down_weights) cp.d_expert_down_weights.push_back(t.clone());
+        cp.d_expert_down_biases.reserve(d_expert_down_biases.size()); // Added down_biases clone
+        for (const auto& t : d_expert_down_biases) cp.d_expert_down_biases.push_back(t.clone());
+        return cp;
+    }
+
     void init(const MoEConfig& config);
     void zero();
 };

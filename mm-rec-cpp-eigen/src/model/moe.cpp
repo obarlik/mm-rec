@@ -22,6 +22,7 @@ void MoEGradients::init(const MoEConfig& config) {
     d_expert_down_weights.resize(config.num_experts);
     d_expert_down_biases.resize(config.num_experts);
     
+    // std::cout << "[MoE] Init Gradients for " << config.num_experts << " experts." << std::endl;
     for (int i = 0; i < config.num_experts; ++i) {
         d_expert_up_weights[i] = Tensor::zeros({config.hidden_dim, config.ffn_dim});
         d_expert_up_biases[i] = Tensor::zeros({1, config.ffn_dim});

@@ -181,16 +181,12 @@ std::tuple<Tensor, Tensor, Tensor> MMRecBlock::forward(
         // Reshape back to [Batch, Hidden]
         Tensor h_out = h_out_seq.reshape({batch, hidden_dim});
         
-        // UBOO: output projection (every layer predicts!)
-        Tensor logits = output_proj_->forward(h_out);
-        
+        // UBOO: output projection MOVED outside loop for efficiency
         hidden_states.push_back(h_out);
-        all_logits.push_back(logits);
     }
     
-    // Stack outputs: [batch, seq, hidden_dim] and [batch, seq, vocab]
+    // Stack outputs: [batch, seq, hidden_dim]
     Tensor output_hidden = Tensor::zeros({batch, seq, hidden_dim});
-    Tensor output_logits = Tensor::zeros({batch, seq, config_.vocab_size});
     
     for (int64_t t = 0; t < seq; ++t) {
         for (int64_t b = 0; b < batch; ++b) {
@@ -199,14 +195,17 @@ std::tuple<Tensor, Tensor, Tensor> MMRecBlock::forward(
                 output_hidden.data()[b * seq * hidden_dim + t * hidden_dim + h] =
                     hidden_states[t].data()[b * hidden_dim + h];
             }
-            
-            // Copy logits
-            for (int64_t v = 0; v < config_.vocab_size; ++v) {
-                output_logits.data()[b * seq * config_.vocab_size + t * config_.vocab_size + v] =
-                    all_logits[t].data()[b * config_.vocab_size + v];
-            }
         }
     }
+    
+    // Efficient Batched Projection:
+    // 1. Reshape [B, S, H] -> [B*S, H]
+    // 2. Project -> [B*S, V]
+    // 3. Reshape -> [B, S, V]
+    // This avoids transposing the weight matrix seq_len times (which caused OOM).
+    Tensor output_hidden_flat = output_hidden.reshape({batch * seq, hidden_dim});
+    Tensor logits_flat = output_proj_->forward(output_hidden_flat);
+    Tensor output_logits = logits_flat.reshape({batch, seq, config_.vocab_size});
     
     if (cache) {
         cache->output = output_hidden;

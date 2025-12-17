@@ -23,6 +23,13 @@ struct LinearGradients {
     LinearGradients(const std::vector<int64_t>& w_shape, const std::vector<int64_t>& b_shape)
         : dW(Tensor::zeros(w_shape)), db(Tensor::zeros(b_shape)) {}
         
+    LinearGradients clone() const {
+        LinearGradients cp;
+        cp.dW = dW.clone();
+        cp.db = db.clone();
+        return cp;
+    }
+
     void zero() {
         dW.zero_();
         db.zero_();
@@ -57,6 +64,14 @@ struct GRUGradients {
         db_h = Tensor::zeros({hidden_dim});
     }
     
+    GRUGradients clone() const {
+        GRUGradients cp;
+        cp.dW_r = dW_r.clone(); cp.dU_r = dU_r.clone(); cp.db_r = db_r.clone();
+        cp.dW_u = dW_u.clone(); cp.dU_u = dU_u.clone(); cp.db_u = db_u.clone();
+        cp.dW_h = dW_h.clone(); cp.dU_h = dU_h.clone(); cp.db_h = db_h.clone();
+        return cp;
+    }
+
     void zero() {
         dW_r.zero_(); dU_r.zero_(); db_r.zero_();
         dW_u.zero_(); dU_u.zero_(); db_u.zero_();
@@ -101,6 +116,14 @@ struct BlockGradients {
         output_proj_grads = LinearGradients({vocab_size, hidden_dim}, {vocab_size});
     }
     
+    BlockGradients clone() const {
+        BlockGradients cp;
+        cp.gru_grads = gru_grads.clone();
+        cp.moe_grads = moe_grads.clone();
+        cp.output_proj_grads = output_proj_grads.clone();
+        return cp;
+    }
+
     void zero() {
         gru_grads.zero();
         moe_grads.zero();
@@ -122,6 +145,17 @@ struct ModelGradients {
         for (auto& bg : block_grads) {
             bg.init(hidden, mem, ffn, vocab, num_experts);
         }
+    }
+
+    // Shallow copy default, but we need Deep Copy helper
+    ModelGradients clone() const {
+        ModelGradients cp;
+        cp.embedding_grads = embedding_grads.clone();
+        cp.block_grads.reserve(block_grads.size());
+        for (const auto& bg : block_grads) {
+            cp.block_grads.push_back(bg.clone());
+        }
+        return cp;
     }
 
     void zero() {

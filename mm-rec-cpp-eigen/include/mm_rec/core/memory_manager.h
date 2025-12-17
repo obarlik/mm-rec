@@ -137,25 +137,80 @@ public:
         return instance;
     }
 
+
+    
+    // ... (cleaner_loop remains same) ...
+
+public:
+    // ... (instance remains same) ...
+
     MemoryBlock* acquire_clean_block(size_t size) {
         std::unique_lock<std::mutex> lock(mutex_);
         
-        // Try to get a clean block
+        // 1. Try Clean Queue (Fastest)
         if (!clean_queue_.empty()) {
             MemoryBlock* block = clean_queue_.front();
             clean_queue_.pop();
+            if (block->size >= size) return block;
+            allocated_bytes_ -= block->size; delete block;
+        }
+        
+        // 2. Try Dirty Queue (Backpressure / Assist Cleaner)
+        // If we have dirty blocks, clean one NOW rather than allocating new RAM.
+        if (!dirty_queue_.empty()) {
+            MemoryBlock* block = dirty_queue_.front();
+            dirty_queue_.pop();
+            atomic_dirty_count_.fetch_sub(1, std::memory_order_release);
             
-            // Validate size (simplified: we assume fixed block size)
-            if (block->size >= size) {
-                return block;
-            } else {
-                delete block; // Wrong size
+            // Release lock during expensive memset
+            lock.unlock();
+            block->clean(); // Synchronous clean on worker thread
+            return block;
+        }
+        
+        // 3. Allocate New (Slowest, checks limit)
+        if (max_bytes_ > 0) {
+            size_t current = allocated_bytes_.load(std::memory_order_relaxed);
+            if (current + size > max_bytes_) {
+                // If we are here, both queues are empty, so we really are out of memory.
+                std::cerr << "CRITICAL: Memory Limit Exceeded! (" 
+                          << (current / 1024 / 1024) << "MB + " << (size/1024/1024) << "MB > " 
+                          << (max_bytes_/1024/1024) << "MB)" << std::endl;
+                throw std::bad_alloc();
             }
         }
         
-        // If no clean block, check dirty queue (emergency fallback logic could go here, but we prefer new)
-        // For now, allocate new from OS if empty (to avoid waiting)
-        return new MemoryBlock(size);
+        try {
+            MemoryBlock* block = new MemoryBlock(size);
+            size_t prev = allocated_bytes_.fetch_add(size, std::memory_order_relaxed);
+            // Log only initially or large increments
+             if ((prev / (256*1024*1024)) != ((prev + size) / (256*1024*1024))) {
+                 std::cout << "[MemoryManager] Total Allocated: " << ((prev + size) / 1024 / 1024) << " MB" << std::endl;
+            }
+            return block;
+        } catch (...) { throw; }
+    }
+
+    // ... (release_dirty_block remains same) ...
+    
+    // Cleanup must reduce counter
+    void internal_delete(MemoryBlock* b) {
+        if(b) {
+            allocated_bytes_ -= b->size;
+            delete b;
+        }
+    }
+
+    ~GlobalBlockPool() {
+        stop_ = true;
+        cv_cleaner_.notify_all();
+        if (cleaner_thread_.joinable()) {
+            cleaner_thread_.join();
+        }
+        
+        // Cleanup leftover blocks
+        while(!clean_queue_.empty()) { internal_delete(clean_queue_.front()); clean_queue_.pop(); }
+        while(!dirty_queue_.empty()) { internal_delete(dirty_queue_.front()); dirty_queue_.pop(); }
     }
 
     void release_dirty_block(MemoryBlock* block) {
@@ -183,20 +238,8 @@ public:
         return dirty_queue_.size();
     }
 
-    ~GlobalBlockPool() {
-        stop_ = true;
-        cv_cleaner_.notify_all();
-        if (cleaner_thread_.joinable()) {
-            cleaner_thread_.join();
-        }
-        
-        // Cleanup leftover blocks
-        while(!clean_queue_.empty()) { delete clean_queue_.front(); clean_queue_.pop(); }
-        while(!dirty_queue_.empty()) { delete dirty_queue_.front(); dirty_queue_.pop(); }
-    }
-
 private:
-    GlobalBlockPool() : stop_(false), atomic_dirty_count_(0) {
+    GlobalBlockPool() : stop_(false), atomic_dirty_count_(0), allocated_bytes_(0), max_bytes_(0) {
         // Start background cleaner
         cleaner_thread_ = std::thread(&GlobalBlockPool::cleaner_loop, this);
     }
@@ -252,6 +295,19 @@ private:
     std::thread cleaner_thread_;
     std::atomic<bool> stop_;
     std::atomic<size_t> atomic_dirty_count_; // For lock-free spin check
+    std::atomic<size_t> allocated_bytes_;
+    size_t max_bytes_; // Max allowed memory in bytes (0 = unlimited)
+
+public:
+    void set_memory_limit(size_t max_bytes) {
+        max_bytes_ = max_bytes;
+        size_t current = allocated_bytes_.load(std::memory_order_relaxed);
+        std::cout << "[MemoryManager] Limit set to " << (max_bytes / 1024 / 1024) << " MB. Current usage: " << (current / 1024 / 1024) << " MB" << std::endl;
+    }
+
+    size_t get_current_usage() const {
+        return allocated_bytes_.load(std::memory_order_relaxed);
+    }
 };
 
 
@@ -262,6 +318,11 @@ public:
     static MemoryManager& instance() {
         static thread_local MemoryManager instance;
         return instance;
+    }
+    
+    // Static wrapper for Global Pool limit
+    static void set_global_memory_limit(size_t max_bytes) {
+        GlobalBlockPool::instance().set_memory_limit(max_bytes);
     }
     
     void* allocate(size_t bytes) {
@@ -294,6 +355,11 @@ public:
         persistent_used_ = blocks_.back()->used;
     }
 
+    void clear_persistent() {
+        persistent_block_count_ = 0;
+        persistent_used_ = 0;
+    }
+
     void reset_arena() {
         if (blocks_.empty()) return;
 
@@ -308,6 +374,13 @@ public:
             GlobalBlockPool::instance().release_dirty_block(blocks_[i]);
         }
         
+        /*
+        // Debug Log if we are holding onto too many blocks
+        if (blocks_.size() > 10) {
+            std::cout << "[MM] Reset: Total " << blocks_.size() << " | Kept " << keep_count << " | Released " << (blocks_.size() - keep_count) << std::endl;
+        }
+        */
+
         blocks_.resize(keep_count);
         
         if (keep_count > 0) {

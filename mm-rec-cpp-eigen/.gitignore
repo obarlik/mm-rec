@@ -1,0 +1,34 @@
+# CMake Build Artifacts
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+*.cmake
+
+# Output Binaries
+# Output Binaries
+/mm_rec
+*.a
+*.o
+*.so
+
+# Data
+*.bin
+*.json
+*.jsonl
+!dummy_data.json
+
+# Logs
+*.log
+*.txt
+!config*.txt
+!CMakeLists.txt
+
+# IDE
+.vscode/
+.idea/
+
+# Debug
+symbols.txt

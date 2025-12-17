@@ -42,6 +42,16 @@ Tensor::~Tensor() {
     numel_ = 0;
 }
 
+// Deep copy
+Tensor Tensor::clone() const {
+    // Uses copy constructor logic but explicit
+    Tensor t(shape_);
+    if (numel_ > 0) {
+        std::memcpy(t.data_ptr_, data_ptr_, numel_ * sizeof(float));
+    }
+    return t;
+}
+
 // Copy constructor
 Tensor::Tensor(const Tensor& other) : shape_(other.shape_), numel_(other.numel_) {
     if (numel_ > 0) {
@@ -69,6 +79,7 @@ Tensor& Tensor::operator=(const Tensor& other) {
         numel_ = other.numel_;
         
         if (numel_ > 0) {
+            // Allocate memory
             data_ptr_ = static_cast<float*>(MemoryManager::instance().allocate(numel_ * sizeof(float)));
             std::memcpy(data_ptr_, other.data_ptr_, numel_ * sizeof(float));
         } else {

@@ -144,10 +144,16 @@ int cmd_train(int argc, char* argv[]) {
         else if (key == "max_iterations") max_iterations = std::stoi(val);
         
         if (key == "uboo_weight") config.uboo_weight = std::stof(val);
+        else if (key == "max_memory_mb") {
+             size_t mb = std::stoul(val);
+             MemoryManager::set_global_memory_limit(mb * 1024 * 1024);
+        }
     }
     
     std::cout << "Config Loaded: Hard Threshold = " << hard_threshold << std::endl;
     std::cout << "               Batch Size = " << batch_size << std::endl;
+    std::cout << "               Num Layers = " << config.num_layers << std::endl;
+    std::cout << "               Num Experts = " << config.num_experts << std::endl;
     
     // Load dataset
     InstructionDataset dataset;
