@@ -110,6 +110,10 @@ target_link_libraries(demo_training_cpp mm_rec_eigen)
 add_executable(train_kernel src/train_kernel.cpp)
 target_link_libraries(train_kernel mm_rec_eigen)
 
+# Data Preprocessing Tool
+add_executable(preprocess_data src/preprocess_data.cpp)
+target_link_libraries(preprocess_data mm_rec_eigen)
+
 # Adaptive curriculum training
 add_executable(train_adaptive src/train_adaptive.cpp)
 target_link_libraries(train_adaptive mm_rec_eigen)

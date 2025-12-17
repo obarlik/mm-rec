@@ -159,6 +159,9 @@ int main(int argc, char* argv[]) {
     train_config.batch_size = batch_size;
     Trainer trainer(model, train_config);
     
+    // CRITICAL: Mark model weights as persistent so they aren't wiped by reset_arena()
+    MemoryManager::instance().mark_persistent();
+    
     // Calc batches
     int64_t seq_len = max_seq_len;
     int64_t total_tokens = dataset.tokens.size();
@@ -271,6 +274,8 @@ int main(int argc, char* argv[]) {
                         targets.data()[b*seq_len + s] = (float)dataset.tokens[offset+s+1];
                         if (dataset.masks.size() > 0)
                             loss_mask.data()[b*seq_len + s] = (float)dataset.masks[offset+s+1];
+                        else
+                            loss_mask.data()[b*seq_len + s] = 1.0f; // Default to 1
                     }
                 }
             }

@@ -116,28 +116,54 @@ public:
         // No-op in Arena allocator
     }
     
+    void mark_persistent() {
+        if (blocks_.empty()) {
+            persistent_block_count_ = 0;
+            persistent_used_ = 0;
+            return;
+        }
+        persistent_block_count_ = blocks_.size();
+        persistent_used_ = blocks_.back()->used;
+        // std::cout << "DEBUG: Persistent Mark - Blocks: " << persistent_block_count_ << " Used: " << persistent_used_ << std::endl;
+    }
+
     // Reset all memory (End of batch/step)
-    // REUSE blocks instead of deleting them!
+    // REUSE blocks conditions:
+    // 1. Keep all "persistent" blocks (weights)
+    // 2. Reset the LAST persistent block to the 'persistent_used_' offset
+    // 3. Move all subsequent blocks to free_blocks_
     void reset_arena() {
         if (blocks_.empty()) return;
 
-        // Move all used blocks (except maybe the first one? No, let's keep one active)
-        // Actually, simple strategy: move ALL blocks to free_blocks_, then pick one for current.
-        
-        // Optimize: Keep the first block as current, move others to free pool
-        if (blocks_.size() > 1) {
-            for (size_t i = 1; i < blocks_.size(); ++i) {
+        // 1. Identify blocks to free (Transient blocks)
+        if (blocks_.size() > persistent_block_count_) {
+            // Note: If persistent_block_count_ is 1, and we have 5 blocks. 
+            // We keep blocks_[0]. We move blocks_[1]..blocks_[4] to free.
+            
+            // Start index relies on whether persistent count is 0 (reset all) or N
+            size_t start_idx = (persistent_block_count_ == 0) ? 1 : persistent_block_count_;
+            // Wait, if count=1 (block 0 persistent), we start freeing at index 1.
+            // If count=0 (nothing persistent), we keep block 0 (as current) and free 1..N.
+            
+            // Correction: Always keep at least ONE block active to avoid reallocation churn
+            size_t keep_count = (persistent_block_count_ > 0) ? persistent_block_count_ : 1;
+            
+            for (size_t i = keep_count; i < blocks_.size(); ++i) {
                 free_blocks_.push_back(blocks_[i]);
             }
-            // Resize to keep only the first one
-            MemoryBlock* first = blocks_[0];
-            blocks_.clear();
-            blocks_.push_back(first);
-            current_block_ = first;
+            blocks_.resize(keep_count);
         }
         
-        if (current_block_) {
-            current_block_->reset();
+        // 2. Reset the current active block
+        if (!blocks_.empty()) {
+            current_block_ = blocks_.back();
+            if (persistent_block_count_ > 0 && blocks_.size() == persistent_block_count_) {
+                // We are at the boundary block. Reset to offset.
+                current_block_->used = persistent_used_;
+            } else {
+                // We are at a non-persistent block (or count=0). Reset to 0.
+                current_block_->reset();
+            }
         }
     }
     
@@ -158,11 +184,14 @@ public:
     }
 
 private:
-    MemoryManager() : current_block_(nullptr) {}
+    MemoryManager() : current_block_(nullptr), persistent_block_count_(0), persistent_used_(0) {}
     
     std::vector<MemoryBlock*> blocks_;       // Currently active blocks
     std::vector<MemoryBlock*> free_blocks_;  // Pool of free blocks for reuse
     MemoryBlock* current_block_;
+    
+    size_t persistent_block_count_;
+    size_t persistent_used_;
 };
 
 } // namespace mm_rec
