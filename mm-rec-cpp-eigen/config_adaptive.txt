@@ -22,7 +22,7 @@ max_seq_len=128
 
 # Adaptive Curriculum Parameters
 easy_threshold=50.0     # PPL below this = skip (already learned)
-hard_threshold=500.0    # PPL above this = defer (too hard now)
+hard_threshold=3000.0   # PPL above this = defer (too hard now). Raised to allow initial training.
 discovery_epochs=1      # Epochs to categorize samples
 focused_epochs=2        # Epochs to train medium samples  
 hard_epochs=1           # Epochs to train hard samples

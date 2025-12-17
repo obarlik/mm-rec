@@ -73,7 +73,19 @@ struct InstructionDataset {
     }
 };
 
+#include <sys/resource.h>
+#include <unistd.h>
+
 int main(int argc, char* argv[]) {
+    // Automatically lower process priority to background (nice 19)
+    // This allows the user to continue using the PC without lag.
+    id_t pid = getpid();
+    if (setpriority(PRIO_PROCESS, pid, 19) == 0) {
+        std::cout << "ℹ️  Process priority set to lowest (nice 19) for background training." << std::endl;
+    } else {
+        std::cerr << "⚠️  Failed to set process priority." << std::endl;
+    }
+
     if (argc < 3) {
         std::cerr << "Usage: " << argv[0] << " <config_file> <data_file>" << std::endl;
         return 1;
@@ -88,8 +100,11 @@ int main(int argc, char* argv[]) {
     MMRecModelConfig config;
     float learning_rate = 0.01f;
     int batch_size = 8;
-    int max_seq_len = 128;
-    float uboo_weight = 0.5f;
+    int max_seq_len = 128; // Restored
+    // Adaptive params (defaults)
+    float easy_threshold = 50.0f;
+    float hard_threshold = 500.0f;
+    int max_iterations = 15;
     
     std::ifstream cfg_file(config_path);
     std::string line;
@@ -100,6 +115,16 @@ int main(int argc, char* argv[]) {
         std::string key = line.substr(0, eq);
         std::string val = line.substr(eq + 1);
         
+        // Remove inline comments
+        auto comment_pos = val.find('#');
+        if (comment_pos != std::string::npos) {
+            val = val.substr(0, comment_pos);
+        }
+        
+        // Trim whitespace (simple)
+        while (!val.empty() && std::isspace(val.back())) val.pop_back();
+        while (!val.empty() && std::isspace(val.front())) val.erase(0, 1);
+
         if (key == "vocab_size") config.vocab_size = std::stoi(val);
         else if (key == "hidden_dim") config.hidden_dim = std::stoi(val);
         else if (key == "mem_dim") config.mem_dim = std::stoi(val);
@@ -110,15 +135,16 @@ int main(int argc, char* argv[]) {
         else if (key == "learning_rate") learning_rate = std::stof(val);
         else if (key == "batch_size") batch_size = std::stoi(val);
         else if (key == "max_seq_len") max_seq_len = std::stoi(val);
-        else if (key == "uboo_weight") uboo_weight = std::stof(val);
+        // Adaptive params
+        else if (key == "easy_threshold") easy_threshold = std::stof(val);
+        else if (key == "hard_threshold") hard_threshold = std::stof(val);
+        else if (key == "max_iterations") max_iterations = std::stoi(val);
         
-        if (key == "uboo_weight") config.uboo_weight = std::stof(val); // Set in config too
+        if (key == "uboo_weight") config.uboo_weight = std::stof(val);
     }
     
-    // Adaptive params
-    float easy_threshold = 50.0f;
-    float hard_threshold = 500.0f;
-    int max_iterations = 15;
+    std::cout << "Config Loaded: Hard Threshold = " << hard_threshold << std::endl;
+    std::cout << "               Batch Size = " << batch_size << std::endl;
     
     // Load dataset
     InstructionDataset dataset;
@@ -158,12 +184,14 @@ int main(int argc, char* argv[]) {
         int64_t epoch_hard = 0;
         float epoch_loss = 0.0f;
         int epoch_steps = 0;
+        auto epoch_start_time = std::chrono::steady_clock::now();
         
         for (int64_t batch_idx = 0; batch_idx < num_batches; ++batch_idx) {
             // 1. PROBE (Fast Check)
             // Use FIRST sequence of the batch
             Tensor probe_input = Tensor::zeros({1, seq_len});
             Tensor probe_target = Tensor::zeros({1, seq_len});
+            Tensor probe_mask = Tensor::zeros({1, seq_len});
             
             // Offset for sequence 0 of this batch
             // In train_kernel: batch.input_ids[b, s] = tokens[b*stride + batch_idx*seq_len + s]
@@ -176,13 +204,42 @@ int main(int argc, char* argv[]) {
                 if (idx >= total_tokens - 1) { valid = false; break; }
                 probe_input.data()[s] = (float)dataset.tokens[idx];
                 probe_target.data()[s] = (float)dataset.tokens[idx+1];
+                if (dataset.masks.size() > 0)
+                    probe_mask.data()[s] = (float)dataset.masks[idx+1];
+                else
+                    probe_mask.data()[s] = 1.0f; // Default to 1 if no masks
             }
             if (!valid) continue;
             
             // Forward probe
-            TrainingBatch probe_batch{probe_input, probe_target, Tensor()};
+            TrainingBatch probe_batch{probe_input, probe_target, probe_mask};
             float probe_loss = trainer.forward_only(probe_batch);
             float ppl = std::exp(probe_loss);
+            
+            // Log progress every 10 batches to show scanning is active
+            if (batch_idx % 10 == 0) {
+                 auto now = std::chrono::steady_clock::now();
+                 double elapsed_sec = std::chrono::duration<double>(now - epoch_start_time).count();
+                 double batches_per_sec = (batch_idx + 1) / elapsed_sec;
+                 double remaining_batches = num_batches - batch_idx;
+                 double eta_sec = remaining_batches / batches_per_sec;
+                 
+                 // Format ETA
+                 int eta_m = (int)(eta_sec / 60);
+                 int eta_s = (int)(eta_sec) % 60;
+                 
+                 // Memory usage
+                 size_t mem_bytes = MemoryManager::instance().get_total_memory();
+                 double mem_mb = mem_bytes / (1024.0 * 1024.0);
+                 
+                 std::cout << "[Ep " << iteration << "] Batch " << batch_idx << "/" << num_batches
+                           << " | E:" << epoch_easy << " M:" << epoch_medium << " H:" << epoch_hard
+                           << " | PPL: " << std::fixed << std::setprecision(1) << ppl
+                           << " | " << std::setprecision(2) << batches_per_sec << " it/s"
+                           << " | ETA: " << eta_m << "m " << eta_s << "s"
+                           << " | Mem: " << (int)mem_mb << "MB"
+                           << std::endl << std::flush;
+            }
             
             // Decision
             if (ppl < easy_threshold) {
@@ -221,14 +278,22 @@ int main(int argc, char* argv[]) {
             TrainingBatch train_batch{input_ids, targets, loss_mask};
             float loss = trainer.train_step(train_batch);
             
+            // Check for NaN
+            if (std::isnan(loss) || std::isinf(loss)) {
+                std::cerr << "⚠️  NAN LOSS DETECTED at Batch " << batch_idx << "!" << std::endl << std::flush;
+                // Optional: Reduce LR or skip? For now just warn.
+                continue; 
+            }
+            
             epoch_loss += loss;
             epoch_steps++;
             total_steps++;
-            if (total_steps % 10 == 0) {
-                std::cout << "\r[Ep " << iteration << "] Step " << total_steps 
-                          << " | Loss: " << std::fixed << std::setprecision(4) << loss
-                          << " | Easy: " << epoch_easy << " Med: " << epoch_medium << " Hard: " << epoch_hard
-                          << std::flush;
+            
+            // Always print training loss for the first few steps, then periodically
+            if (epoch_steps < 20 || epoch_steps % 10 == 0) {
+                 std::cout << " -> TRAIN Step " << total_steps 
+                           << " | Loss: " << std::fixed << std::setprecision(4) << loss
+                           << std::endl << std::flush;
             }
             
             // CRITICAL: Reset Arena (Free memory) at end of batch

@@ -33,25 +33,27 @@ Tensor cross_entropy_loss(const Tensor& logits, const Tensor& targets, const Ten
                 targets.data()[b * seq + s]
             );
             
-            // Softmax (numerically stable)
-            std::vector<float> logits_vec(vocab);
-            float max_logit = -1e9f;
+            // Stable Log-Sum-Exp Implementation
+            // log_prob = logit[target] - max_logit - log(sum(exp(logit - max_logit)))
             
+            float max_logit = -1e9f;
             for (int64_t v = 0; v < vocab; ++v) {
                 float logit = logits.data()[b * seq * vocab + s * vocab + v];
-                logits_vec[v] = logit;
                 max_logit = std::max(max_logit, logit);
             }
            
-            // exp(x - max) for stability
             float sum_exp = 0.0f;
             for (int64_t v = 0; v < vocab; ++v) {
-                logits_vec[v] = std::exp(logits_vec[v] - max_logit);
-                sum_exp += logits_vec[v];
+                float logit = logits.data()[b * seq * vocab + s * vocab + v];
+                sum_exp += std::exp(logit - max_logit);
             }
+            float log_sum_exp = std::log(sum_exp);
             
-            // Log probability of target
-            float log_prob = std::log(logits_vec[target_id] / sum_exp);
+            // Get target logit
+            float target_logit = logits.data()[b * seq * vocab + s * vocab + target_id];
+            
+            // Log probability (stable)
+            float log_prob = target_logit - max_logit - log_sum_exp;
             
             // Negative log likelihood
             total_loss += -log_prob;

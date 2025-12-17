@@ -74,24 +74,36 @@ public:
     
     // Fast Arena Allocation (Bump Pointer)
     void* allocate(size_t bytes) {
-        // Fast path: try current block
-        // No mutex for speed in single-threaded training loop?
-        // Actually training is single threaded, so this is safe.
-        // If multi-threaded training, we need thread-local arenas.
-        // Assuming single thread training based on code.
-        
         if (!current_block_) {
-            // First alloc: Create 1GB block
-            current_block_ = new MemoryBlock(1024 * 1024 * 1024); // 1 GB
+            // Initial block
+            if (!free_blocks_.empty()) {
+                current_block_ = free_blocks_.back();
+                free_blocks_.pop_back();
+                current_block_->reset();
+            } else {
+                current_block_ = new MemoryBlock(BLOCK_SIZE);
+            }
             blocks_.push_back(current_block_);
         }
         
         void* ptr = current_block_->allocate(bytes);
         
-        // Slow path: Block full, allocate new block
+        // Block full? Get another one.
         if (!ptr) {
-            std::cout << "⚠️  Memory Block Full! Allocating new " << BLOCK_SIZE / (1024 * 1024) << "MB block..." << std::endl;
-            current_block_ = new MemoryBlock(BLOCK_SIZE);
+            // std::cout << "⚠️  Memory Block Full! Getting new block..." << std::endl;
+            
+            MemoryBlock* next_block = nullptr;
+            if (!free_blocks_.empty()) {
+                // Reuse from pool
+                next_block = free_blocks_.back();
+                free_blocks_.pop_back();
+                next_block->reset();
+            } else {
+                // Allocate new from OS
+                next_block = new MemoryBlock(BLOCK_SIZE);
+            }
+            
+            current_block_ = next_block;
             blocks_.push_back(current_block_);
             ptr = current_block_->allocate(bytes);
         }
@@ -101,39 +113,27 @@ public:
     
     // Free memory (Lazy)
     void deallocate(void* ptr) {
-        // [ARENA STRATEGY]
-        // Individual deallocation is intentionally a NO-OP for O(1) performance.
-        // We do not manage fragmentation or free-lists inside the arena.
-        // 
-        // Memory is reclaimed IN BULK at the end of the batch via reset_arena().
-        // This avoids costly syscalls and fragmentation management during the hot loop.
-        
-        if (!ptr) return;
-        
-        // (Optional: In debug mode we could track usage or poison memory, 
-        // but for production training we just ignore it to be as fast as possible).
+        // No-op in Arena allocator
     }
     
     // Reset all memory (End of batch/step)
-    // This is the true "Free"
+    // REUSE blocks instead of deleting them!
     void reset_arena() {
-        // Reuse first block, delete others
+        if (blocks_.empty()) return;
+
+        // Move all used blocks (except maybe the first one? No, let's keep one active)
+        // Actually, simple strategy: move ALL blocks to free_blocks_, then pick one for current.
+        
+        // Optimize: Keep the first block as current, move others to free pool
         if (blocks_.size() > 1) {
-             // Move extra blocks to cleanup queue for background thread!
-             // This is where lazy thread comes in!
-             {
-                 std::lock_guard<std::mutex> lock(queue_mutex_);
-                 for (size_t i = 1; i < blocks_.size(); ++i) {
-                     block_cleanup_queue_.push(blocks_[i]);
-                 }
-             }
-             queue_cv_.notify_one();
-             
-             // Keep only first block
-             MemoryBlock* first = blocks_[0];
-             blocks_.clear();
-             blocks_.push_back(first);
-             current_block_ = first;
+            for (size_t i = 1; i < blocks_.size(); ++i) {
+                free_blocks_.push_back(blocks_[i]);
+            }
+            // Resize to keep only the first one
+            MemoryBlock* first = blocks_[0];
+            blocks_.clear();
+            blocks_.push_back(first);
+            current_block_ = first;
         }
         
         if (current_block_) {
@@ -141,57 +141,28 @@ public:
         }
     }
     
-    // Lazy deallocator thread loop
-    void worker_loop() {
-        while (running_) {
-            MemoryBlock* block = nullptr;
-            {
-                std::unique_lock<std::mutex> lock(queue_mutex_);
-                queue_cv_.wait(lock, [this] { return !block_cleanup_queue_.empty() || !running_; });
-                
-                if (!running_ && block_cleanup_queue_.empty()) return;
-                
-                if (!block_cleanup_queue_.empty()) {
-                    block = block_cleanup_queue_.front();
-                    block_cleanup_queue_.pop();
-                }
-            }
-            
-            if (block) {
-                // Heavy deallocation happens here in background!
-                // Security/Safety: Zero fill before release as requested
-                std::memset(block->data, 0, block->size);
-                delete block;
-            }
-        }
+    // Reporting
+    size_t get_total_memory() const {
+        size_t total = 0;
+        for (const auto* b : blocks_) total += b->size;
+        for (const auto* b : free_blocks_) total += b->size;
+        return total;
     }
     
     // Destructor
     ~MemoryManager() {
-        running_ = false;
-        queue_cv_.notify_all();
-        if (worker_thread_.joinable()) {
-            worker_thread_.join();
-        }
-        
         for (auto b : blocks_) delete b;
+        for (auto b : free_blocks_) delete b;
         blocks_.clear();
+        free_blocks_.clear();
     }
 
 private:
-    MemoryManager() : running_(true), current_block_(nullptr) {
-        worker_thread_ = std::thread(&MemoryManager::worker_loop, this);
-    }
+    MemoryManager() : current_block_(nullptr) {}
     
-    std::vector<MemoryBlock*> blocks_;
+    std::vector<MemoryBlock*> blocks_;       // Currently active blocks
+    std::vector<MemoryBlock*> free_blocks_;  // Pool of free blocks for reuse
     MemoryBlock* current_block_;
-    
-    std::mutex queue_mutex_;
-    std::condition_variable queue_cv_;
-    std::queue<MemoryBlock*> block_cleanup_queue_; // Cleanup whole blocks
-    
-    std::atomic<bool> running_;
-    std::thread worker_thread_;
 };
 
 } // namespace mm_rec
