@@ -30,4 +30,4 @@ hard_epochs=1           # Epochs to train hard samples
 uboo_weight=0.5
 checkpoint_path=kernel_adaptive.bin
 vocab_path=vocab.txt
-max_memory_mb=8192 # 8GB Limit (Prevents system freeze)
+max_memory_mb=16384 # 16GB Limit (Prevents system freeze)

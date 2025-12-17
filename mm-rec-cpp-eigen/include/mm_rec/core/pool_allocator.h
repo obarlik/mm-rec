@@ -11,6 +11,18 @@
 
 namespace mm_rec {
 
+// Slab Constants
+constexpr size_t SLAB_SIZE = 64 * 1024;      // 64KB
+constexpr uintptr_t SLAB_MASK = ~(uintptr_t(SLAB_SIZE - 1)); // Mask to find slab start
+
+struct SlabHeader {
+    uint32_t block_size;  // Size of objects in this slab (0 = large object)
+    uint32_t magic;      // Safety check (0xAABBCCDD)
+    // Padding to 32 bytes to ensure alignment of first object
+    char padding[24]; 
+};
+static_assert(sizeof(SlabHeader) == 32, "SlabHeader must be 32 bytes");
+
 /**
  * @brief Global Registry to hold ownership of ALL slabs from ALL threads.
  * Prevents "Use-After-Free" if a thread dies but another holds a pointer to its data.
@@ -24,33 +36,28 @@ public:
     }
 
     // Takes ownership of a slab, returns raw pointer for thread usage
-    void* register_slab(std::unique_ptr<char[]> slab) {
+    void* register_slab(void* slab_ptr) {
         std::lock_guard<std::mutex> lock(mutex_);
         
-        // Manual Linked List Node allocation via malloc (avoids global new recursion)
         SlabNode* node = static_cast<SlabNode*>(std::malloc(sizeof(SlabNode)));
         if (!node) {
-            // Panic or fallback? If we can't malloc a node, we are doomed.
-            // Just return the slab ptr and leak the node tracking? No.
-            // But slab is unique_ptr.
-            // If malloc fails, we probably crash anyway.
             std::cerr << "OOM in GlobalRegistry" << std::endl;
             std::abort();
         }
         
-        node->slab_ptr = slab.release(); // Take ownership
+        node->slab_ptr = slab_ptr;
         node->next = head_;
         head_ = node; // Push front
         
-        return node->slab_ptr;
+        return slab_ptr;
     }
     
     ~GlobalSlabRegistry() {
         SlabNode* current = head_;
         while (current) {
             SlabNode* next = current->next;
-            // Free the slab char array
-            delete[] current->slab_ptr;
+            // Free the slab char array (it was alloc'd via posix_memalign, so use free)
+            std::free(current->slab_ptr);
             // Free the node
             std::free(current);
             current = next;
@@ -59,7 +66,7 @@ public:
 
 private:
     struct SlabNode {
-        char* slab_ptr;
+        void* slab_ptr;
         SlabNode* next;
     };
 
@@ -74,9 +81,8 @@ private:
  */
 class FixedSizePool {
 public:
-    explicit FixedSizePool(size_t block_size, size_t slab_size_bytes = 64 * 1024)
-        : block_size_(std::max(block_size, sizeof(void*))), 
-          slab_size_(slab_size_bytes) {
+    explicit FixedSizePool(size_t block_size)
+        : block_size_(block_size) {
         // Alignment: Critical for SIMD (Eigen/MKL)
         // Align to 32 bytes (AVX)
         while (block_size_ % 32 != 0) block_size_++;
@@ -92,7 +98,6 @@ public:
     FixedSizePool& operator=(const FixedSizePool&) = delete;
 
     void* allocate() {
-        // Removed Mutex: Because this class is now owned by a thread_local PoolAllocator!
         
         // 1. Try Free List
         if (free_list_head_) {
@@ -102,18 +107,21 @@ public:
         }
 
         // 2. Try Current Slab
-        if (!current_slab_ptr_ || current_slab_offset_ + block_size_ > slab_size_) {
+        // Effective offset starts after header (32 bytes)
+        size_t effective_offset = std::max(current_slab_offset_, sizeof(SlabHeader));
+        
+        if (!current_slab_ptr_ || effective_offset + block_size_ > SLAB_SIZE) {
             allocate_new_slab();
+            effective_offset = sizeof(SlabHeader);
         }
 
-        void* ptr = current_slab_ptr_ + current_slab_offset_;
-        current_slab_offset_ += block_size_;
+        void* ptr = current_slab_ptr_ + effective_offset;
+        current_slab_offset_ = effective_offset + block_size_;
         return ptr;
     }
 
     void deallocate(void* ptr) {
         if (!ptr) return;
-        // Removed Mutex
         
         // Push to Free List head (LIFO)
         *reinterpret_cast<void**>(ptr) = free_list_head_;
@@ -124,44 +132,37 @@ public:
 
 private:
     void allocate_new_slab() {
-        // Create Slab
-        auto new_slab = std::make_unique<char[]>(slab_size_);
+        void* raw_mem = nullptr;
+        // Allocate 64KB Aligned
+        if (posix_memalign(&raw_mem, SLAB_SIZE, SLAB_SIZE) != 0) {
+            std::cerr << "OOM: posix_memalign failed" << std::endl;
+            std::abort();
+        }
         
-        // Transfer ownership to Global Registry (Thread-Safe)
-        // We get back a raw pointer that is guaranteed to be valid until app exit.
-        current_slab_ptr_ = static_cast<char*>(GlobalSlabRegistry::instance().register_slab(std::move(new_slab)));
-        
-        current_slab_offset_ = 0;
+        // Write Header
+        SlabHeader* header = static_cast<SlabHeader*>(raw_mem);
+        header->block_size = block_size_;
+        header->magic = 0xAABBCCDD;
+
+        // Register
+        GlobalSlabRegistry::instance().register_slab(raw_mem);
+
+        current_slab_ptr_ = static_cast<char*>(raw_mem);
+        current_slab_offset_ = sizeof(SlabHeader);
     }
 
     size_t block_size_;
-    size_t slab_size_;
-    
     void* free_list_head_ = nullptr;
-
     char* current_slab_ptr_ = nullptr;
     size_t current_slab_offset_ = 0;
-
-    // No local ownership of slabs anymore
 };
 
 /**
  * @brief PoolAllocator manages multiple FixedSizePools to handle requests of varying sizes.
  * It routes specific size requests to the appropriate "Bin" (Pool).
  */
-/**
- * @brief PoolAllocator manages multiple FixedSizePools.
- * Uses "Header-based" tracking to support unsized delete() and ensure Alignment.
- */
 class PoolAllocator {
 public:
-    // 16-Byte Header to maintain 16-byte alignment for user data
-    struct AllocHeader {
-        size_t capacity; // The bin size (if pool) or full size (if malloc)
-        size_t padding;  // Padding to ensure sizeof(Header) == 16
-    };
-    static constexpr size_t HEADER_SIZE = sizeof(AllocHeader);
-
     static PoolAllocator& instance() {
         static thread_local PoolAllocator instance;
         return instance;
@@ -171,81 +172,84 @@ public:
         // Register common bins
         // MANUAL ALLOCATION (malloc) to avoid calling global new recursively!
         
-        pools_[0] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(32 + HEADER_SIZE);
-        pools_[1] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(64 + HEADER_SIZE);
-        pools_[2] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(128 + HEADER_SIZE);
-        pools_[3] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(256 + HEADER_SIZE);
-        pools_[4] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(512 + HEADER_SIZE);
-        pools_[5] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(1024 + HEADER_SIZE);
+        pools_[0] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(32);
+        pools_[1] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(64);
+        pools_[2] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(128);
+        pools_[3] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(256);
+        pools_[4] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(512);
+        pools_[5] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(1024);
     }
     
     ~PoolAllocator() {
         // IMMORTAL: Do not free pools.
-        // Thread-local destruction order is unpredictable.
-        // If we free these, a late running "delete" will crash.
-        // Leaking 6 tiny structs per thread is safer.
-        /*
-        for(int i=0; i<6; ++i) {
-            pools_[i]->~FixedSizePool();
-            std::free(pools_[i]);
-        }
-        */
     }
 
     void* allocate(size_t bytes) {
-        // 1. Try Pools
-        // Unroll loop for speed and no iterators
-        for (int i=0; i<6; ++i) {
-            FixedSizePool* pool = pools_[i];
-            size_t user_capacity = pool->block_size() - HEADER_SIZE;
-            
-            if (bytes <= user_capacity) {
-                void* raw_ptr = pool->allocate();
-                
-                // Write Header
-                AllocHeader* header = static_cast<AllocHeader*>(raw_ptr);
-                header->capacity = user_capacity; 
-                
-                return static_cast<char*>(raw_ptr) + HEADER_SIZE;
-            }
-        }
+        // 1. Try Pools (Small Objects)
+        if (bytes <= 32) return pools_[0]->allocate();
+        if (bytes <= 64) return pools_[1]->allocate();
+        if (bytes <= 128) return pools_[2]->allocate();
+        if (bytes <= 256) return pools_[3]->allocate();
+        if (bytes <= 512) return pools_[4]->allocate();
+        if (bytes <= 1024) return pools_[5]->allocate();
         
-        // 2. Fallback to Malloc
-        void* raw_ptr = std::malloc(bytes + HEADER_SIZE);
-        if (!raw_ptr) return nullptr;
+        // 2. Large Objects (> 1024) -> Multi-Page Slab
+        size_t total_needed = sizeof(SlabHeader) + bytes;
         
-        AllocHeader* header = static_cast<AllocHeader*>(raw_ptr);
-        header->capacity = bytes; 
+        size_t alloc_size = (total_needed + SLAB_SIZE - 1) & SLAB_MASK;
+        if (alloc_size < total_needed) alloc_size += SLAB_SIZE;
         
-        return static_cast<char*>(raw_ptr) + HEADER_SIZE;
+        void* raw_mem = nullptr;
+        if (posix_memalign(&raw_mem, SLAB_SIZE, alloc_size) != 0) return nullptr;
+        
+        SlabHeader* header = static_cast<SlabHeader*>(raw_mem);
+        header->block_size = 0; // 0 = Large Object
+        header->magic = 0xAABBCCDD;
+        
+        return static_cast<char*>(raw_mem) + sizeof(SlabHeader);
     }
 
-    // New: Deallocate without knowing size (uses Header)
     void deallocate(void* ptr) {
         if (!ptr) return;
         
-        char* raw_ptr = static_cast<char*>(ptr) - HEADER_SIZE;
-        AllocHeader* header = reinterpret_cast<AllocHeader*>(raw_ptr);
-        size_t capacity = header->capacity;
-
-        for (int i=0; i<6; ++i) {
-            FixedSizePool* pool = pools_[i];
-            size_t user_capacity = pool->block_size() - HEADER_SIZE;
-            if (capacity == user_capacity) {
-                pool->deallocate(raw_ptr);
-                return;
-            }
+        // 1. Bitwise Masking to find Header
+        uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+        uintptr_t header_addr = addr & SLAB_MASK;
+        SlabHeader* header = reinterpret_cast<SlabHeader*>(header_addr);
+        
+        // 2. Check Magic (Safety)
+        if (header->magic != 0xAABBCCDD) {
+             std::free(ptr); // Not ours
+             return; 
         }
         
-        std::free(raw_ptr);
+        // 3. Dispatch
+        if (header->block_size == 0) {
+            // Large Object
+            std::free(reinterpret_cast<void*>(header));
+        } else {
+            // Small Object -> Pool
+            uint32_t sz = header->block_size;
+            int idx = -1;
+            if (sz <= 32) idx=0;
+            else if (sz <= 64) idx=1;
+            else if (sz <= 128) idx=2;
+            else if (sz <= 256) idx=3;
+            else if (sz <= 512) idx=4;
+            else idx=5; // 1024
+            
+            if (idx >= 0) pools_[idx]->deallocate(ptr);
+        }
     }
     
-    void deallocate(void* ptr, size_t /*unused_size*/) {
-        deallocate(ptr);
-    }
+    void deallocate(void* ptr, size_t) { deallocate(ptr); }
 
 private:
-   FixedSizePool* pools_[6];
+    void init_pool(int index, size_t size) {
+         pools_[index] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(size);
+    }
+
+    FixedSizePool* pools_[6];
 };
 
 } // namespace mm_rec

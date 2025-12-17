@@ -205,6 +205,9 @@ float Trainer::forward_only(const TrainingBatch& batch) {
         float loss = loss_tensor.item();
         total_loss += loss;
         valid_samples++;
+
+        // Fix: Reset Arena to prevent accumulation
+        MemoryManager::instance().reset_arena();
     }
     
     return total_loss / valid_samples;
