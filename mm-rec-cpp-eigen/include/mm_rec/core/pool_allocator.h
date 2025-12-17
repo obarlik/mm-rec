@@ -12,6 +12,7 @@
 namespace mm_rec {
 
 // Slab Constants
+// #define DISABLE_POOL_ALLOCATOR // DEBUGGING
 constexpr size_t SLAB_SIZE = 64 * 1024;      // 64KB
 constexpr uintptr_t SLAB_MASK = ~(uintptr_t(SLAB_SIZE - 1)); // Mask to find slab start
 
@@ -185,6 +186,9 @@ public:
     }
 
     void* allocate(size_t bytes) {
+#ifdef DISABLE_POOL_ALLOCATOR
+        return std::malloc(bytes);
+#else
         // 1. Try Pools (Small Objects)
         if (bytes <= 32) return pools_[0]->allocate();
         if (bytes <= 64) return pools_[1]->allocate();
@@ -207,10 +211,15 @@ public:
         header->magic = 0xAABBCCDD;
         
         return static_cast<char*>(raw_mem) + sizeof(SlabHeader);
+#endif
     }
 
     void deallocate(void* ptr) {
         if (!ptr) return;
+#ifdef DISABLE_POOL_ALLOCATOR
+        std::free(ptr);
+        return;
+#endif
         
         // 1. Bitwise Masking to find Header
         uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);

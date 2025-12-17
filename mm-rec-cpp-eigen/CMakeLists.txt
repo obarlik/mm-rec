@@ -12,8 +12,8 @@ endif()
 
 # Compiler flags for maximum performance
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -mtune=native -funroll-loops -ffast-math -DNDEBUG")
-set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -mtune=native -funroll-loops -ffast-math -DNDEBUG -fsanitize=address -g")
+set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -fsanitize=address") # Added -fsanitize=address to debug flags
 
 # Find OpenMP (optional for parallelization)
 find_package(OpenMP)

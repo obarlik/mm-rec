@@ -57,10 +57,14 @@ struct ForwardCache {
     
     // All layer outputs for UBOO
     Tensor all_logits;  // [num_layers, batch, seq, vocab]
+
+    // Transient memory states for this forward pass (Thread-Local Isolation)
+    std::vector<Tensor> memory_states; 
     
     // Initialize for given dimensions
     void init(int64_t num_layers) {
         block_caches.resize(num_layers);
+        memory_states.resize(num_layers);
     }
 };
 

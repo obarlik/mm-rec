@@ -82,10 +82,27 @@ Tensor MMRecModel::forward(Tensor input_ids, ForwardCache* cache) {
         cache->init(config_.num_layers);
     }
     
+    // Determine which memory state to use (Thread-Safety Fix)
+    // If cache is provided, use its thread-local memory_states.
+    // Otherwise (Inference), use the shared member memory_states_.
+    std::vector<Tensor>* active_memory = &memory_states_;
+    if (cache) {
+        active_memory = &cache->memory_states;
+    }
+
     // Initialize memory if needed
-    if (memory_states_[0].ndim() == 0 ||
-        memory_states_[0].size(0) != batch) {
-        reset_memory(batch);
+    // Check first layer memory
+    if (active_memory->empty() || (*active_memory)[0].ndim() == 0 ||
+        (*active_memory)[0].size(0) != batch) {
+        
+        // Resize vector if needed
+        if (active_memory->size() != config_.num_layers) {
+             active_memory->resize(config_.num_layers);
+        }
+        // Initialize tensors
+        for (int64_t i = 0; i < config_.num_layers; ++i) {
+            (*active_memory)[i] = Tensor::zeros({batch, config_.mem_dim});
+        }
     }
     
     // Embed tokens
@@ -101,12 +118,12 @@ Tensor MMRecModel::forward(Tensor input_ids, ForwardCache* cache) {
         
         auto [hidden, new_memory, logits] = blocks_[layer]->forward(
             x,
-            memory_states_[layer],
+            (*active_memory)[layer],
             block_cache
         );
         
         // Update layer state (Bug #2: per-layer isolation)
-        memory_states_[layer] = new_memory;
+        (*active_memory)[layer] = new_memory;
         
         // Next layer input
         x = hidden;
