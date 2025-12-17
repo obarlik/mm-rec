@@ -47,7 +47,12 @@ float Trainer::train_step(const TrainingBatch& batch) {
     // Pre-allocate buffers (reused for all sequences)
     Tensor single_input = Tensor::zeros({1, seq_len});
     Tensor single_target = Tensor::zeros({1, seq_len});
-    Tensor single_mask = Tensor::zeros({1, seq_len});
+    Tensor single_mask; // Empty by default
+    
+    if (batch.loss_mask.numel() > 0) {
+        single_mask = Tensor::zeros({1, seq_len});
+    }
+
     size_t copy_size = seq_len * sizeof(float);
     
     // Process each sequence independently

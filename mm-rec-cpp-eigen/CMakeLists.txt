@@ -118,6 +118,11 @@ target_link_libraries(train_adaptive mm_rec_eigen)
 add_executable(test_overfit src/test_overfit.cpp)
 target_link_libraries(test_overfit mm_rec_eigen)
 
+# Real training integration test
+add_executable(test_real_training tests/test_real_training.cpp)
+target_link_libraries(test_real_training mm_rec_eigen)
+add_test(NAME test_real_training COMMAND test_real_training)
+
 # Print configuration
 message(STATUS "========================================")
 message(STATUS "MM-Rec Eigen (Zero Runtime Deps!)")
