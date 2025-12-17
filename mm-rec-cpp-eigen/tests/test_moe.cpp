@@ -45,6 +45,10 @@ void test_moe_forward() {
         assert(indices[i] >= 0 && indices[i] < 4);
     }
     
+    // Check Aux Loss
+    std::cout << "Aux Loss: " << cache.aux_loss << std::endl;
+    assert(cache.aux_loss > 0.0f); // Should be positive
+    
     std::cout << "✅ Forward shapes and cache correct" << std::endl;
 }
 

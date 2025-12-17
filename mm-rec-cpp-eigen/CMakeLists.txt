@@ -142,6 +142,10 @@ add_executable(test_data_pipeline tests/test_data_pipeline.cpp)
 target_link_libraries(test_data_pipeline mm_rec_eigen)
 add_test(NAME test_data_pipeline COMMAND test_data_pipeline)
 
+add_executable(test_rmsnorm tests/test_rmsnorm.cpp)
+target_link_libraries(test_rmsnorm mm_rec_eigen)
+add_test(NAME test_rmsnorm COMMAND test_rmsnorm)
+
 # Memory Manager Benchmark
 add_executable(test_memory_benchmark tests/test_memory_benchmark.cpp)
 target_link_libraries(test_memory_benchmark mm_rec_eigen)
