@@ -5,7 +5,7 @@
  */
 
 #include "mm_rec/core/tensor.h"
-#include "mm_rec/core/memory_manager.h"
+#include "mm_rec/core/pool_allocator.h"
 #include <Eigen/Dense>
 #include <random>
 #include <iostream>
@@ -25,7 +25,7 @@ Tensor::Tensor(std::vector<int64_t> shape) : shape_(std::move(shape)) {
     for (auto s : shape_) numel_ *= s;
     
     if (numel_ > 0) {
-        data_ptr_ = static_cast<float*>(MemoryManager::instance().allocate(numel_ * sizeof(float)));
+        data_ptr_ = static_cast<float*>(PoolAllocator::instance().allocate(numel_ * sizeof(float)));
         // Initialize to zero for safety? No, typically undefined for performance, but let's zero for safety
         // Actually, most ML frameworks leave uninitialized. Let's leave uninitialized (or zero if requested).
         // Let's zero it for now to avoid NaNs if user forgets initialization.
@@ -36,7 +36,7 @@ Tensor::Tensor(std::vector<int64_t> shape) : shape_(std::move(shape)) {
 
 Tensor::~Tensor() {
     if (data_ptr_) {
-        MemoryManager::instance().deallocate(data_ptr_);
+        PoolAllocator::instance().deallocate(data_ptr_, numel_ * sizeof(float));
         data_ptr_ = nullptr;
     }
     numel_ = 0;
@@ -55,7 +55,7 @@ Tensor Tensor::clone() const {
 // Copy constructor
 Tensor::Tensor(const Tensor& other) : shape_(other.shape_), numel_(other.numel_) {
     if (numel_ > 0) {
-        data_ptr_ = static_cast<float*>(MemoryManager::instance().allocate(numel_ * sizeof(float)));
+        data_ptr_ = static_cast<float*>(PoolAllocator::instance().allocate(numel_ * sizeof(float)));
         std::memcpy(data_ptr_, other.data_ptr_, numel_ * sizeof(float));
     }
 }
@@ -72,7 +72,7 @@ Tensor& Tensor::operator=(const Tensor& other) {
     if (this != &other) {
         // Free existing
         if (data_ptr_) {
-            MemoryManager::instance().deallocate(data_ptr_);
+            PoolAllocator::instance().deallocate(data_ptr_, numel_ * sizeof(float));
         }
         
         shape_ = other.shape_;
@@ -80,7 +80,7 @@ Tensor& Tensor::operator=(const Tensor& other) {
         
         if (numel_ > 0) {
             // Allocate memory
-            data_ptr_ = static_cast<float*>(MemoryManager::instance().allocate(numel_ * sizeof(float)));
+            data_ptr_ = static_cast<float*>(PoolAllocator::instance().allocate(numel_ * sizeof(float)));
             std::memcpy(data_ptr_, other.data_ptr_, numel_ * sizeof(float));
         } else {
             data_ptr_ = nullptr;
@@ -94,7 +94,7 @@ Tensor& Tensor::operator=(Tensor&& other) noexcept {
     if (this != &other) {
         // Free existing
         if (data_ptr_) {
-            MemoryManager::instance().deallocate(data_ptr_);
+            PoolAllocator::instance().deallocate(data_ptr_, numel_ * sizeof(float));
         }
         
         shape_ = std::move(other.shape_);
