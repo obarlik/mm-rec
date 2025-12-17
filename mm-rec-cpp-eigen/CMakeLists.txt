@@ -146,6 +146,10 @@ add_executable(test_rmsnorm tests/test_rmsnorm.cpp)
 target_link_libraries(test_rmsnorm mm_rec_eigen)
 add_test(NAME test_rmsnorm COMMAND test_rmsnorm)
 
+add_executable(test_adversarial tests/test_adversarial.cpp)
+target_link_libraries(test_adversarial mm_rec_eigen)
+add_test(NAME test_adversarial COMMAND test_adversarial)
+
 # Memory Manager Benchmark
 add_executable(test_memory_benchmark tests/test_memory_benchmark.cpp)
 target_link_libraries(test_memory_benchmark mm_rec_eigen)
