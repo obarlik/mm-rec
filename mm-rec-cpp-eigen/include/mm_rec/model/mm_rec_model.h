@@ -37,7 +37,7 @@ public:
     
     // Forward pass (training mode)
     // Returns: [num_layers, batch, seq, vocab_size]
-    Tensor forward(Tensor input_ids, ForwardCache* cache = nullptr);  // Changed: pass by value
+    Tensor forward(Tensor input_ids, ForwardCache* cache = nullptr, bool is_inference = false);  // Changed: pass by value
     
     // Inference helper (only returns final layer logits)
     Tensor generate(const Tensor& input_ids);

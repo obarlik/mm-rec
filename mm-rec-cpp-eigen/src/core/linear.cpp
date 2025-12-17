@@ -31,7 +31,7 @@ Tensor Linear::forward(const Tensor& input) {
     float* out_data = output.data();
     const float* bias_data = bias_.data();
     
-    #pragma omp parallel for
+    #pragma omp parallel for if(batch > 1)
     for (int64_t b = 0; b < batch; ++b) {
         for (int64_t f = 0; f < out_features_; ++f) {
             out_data[b * out_features_ + f] += bias_data[f];

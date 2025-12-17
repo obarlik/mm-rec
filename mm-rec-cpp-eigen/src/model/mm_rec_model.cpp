@@ -8,6 +8,7 @@
 #include "mm_rec/training/optimizer.h"
 #include <random>
 #include <iostream>
+#include <cstring>
 
 namespace mm_rec {
 
@@ -48,17 +49,24 @@ Tensor MMRecModel::embed(const Tensor& input_ids) {
     Tensor embeddings = Tensor::zeros({batch, seq, config_.hidden_dim});
     
     // Lookup embeddings
+    // Lookup embeddings - Optimized with memcpy
+    const int64_t hidden_size_bytes = config_.hidden_dim * sizeof(float);
+    float* out_data = embeddings.data();
+    const float* w_data = embedding_weights_.data();
+    const float* in_data = input_ids.data();
+
+    // Parallelize batch
+    #pragma omp parallel for collapse(2)
     for (int64_t b = 0; b < batch; ++b) {
         for (int64_t s = 0; s < seq; ++s) {
-            int64_t token_id = static_cast<int64_t>(
-                input_ids.data()[b * seq + s]
-            );
+            int64_t token_id = static_cast<int64_t>(in_data[b * seq + s]);
             
-            // Copy embedding vector
-            for (int64_t h = 0; h < config_.hidden_dim; ++h) {
-                embeddings.data()[b * seq * config_.hidden_dim + s * config_.hidden_dim + h] =
-                    embedding_weights_.data()[token_id * config_.hidden_dim + h];
-            }
+            // Fast copy
+            std::memcpy(
+                out_data + (b * seq * config_.hidden_dim + s * config_.hidden_dim),
+                w_data + (token_id * config_.hidden_dim),
+                hidden_size_bytes
+            );
         }
     }
     
@@ -71,7 +79,7 @@ void MMRecModel::reset_memory(int64_t batch_size) {
     }
 }
 
-Tensor MMRecModel::forward(Tensor input_ids, ForwardCache* cache) {
+Tensor MMRecModel::forward(Tensor input_ids, ForwardCache* cache, bool is_inference) {
     // input_ids: [batch, seq]
     
     int64_t batch = input_ids.size(0);
@@ -110,8 +118,15 @@ Tensor MMRecModel::forward(Tensor input_ids, ForwardCache* cache) {
     if (cache) cache->embedded = x;
     
     // Collect logits from all layers (UBOO!)
+    // For inference, we ONLY need the final layer logits. 
+    // Creating this vector and stacking it is huge overhead.
     std::vector<Tensor> all_layer_logits;
+    if (!is_inference) {
+        all_layer_logits.reserve(config_.num_layers);
+    }
     
+    Tensor final_logits; // Store just the last one for inference
+
     // Forward through each layer
     for (int64_t layer = 0; layer < config_.num_layers; ++layer) {
         BlockCache* block_cache = cache ? &cache->block_caches[layer] : nullptr;
@@ -128,8 +143,19 @@ Tensor MMRecModel::forward(Tensor input_ids, ForwardCache* cache) {
         // Next layer input
         x = hidden;
         
-        // Collect logits for UBOO loss
-        all_layer_logits.push_back(logits);
+        if (is_inference) {
+            if (layer == config_.num_layers - 1) {
+                final_logits = logits;
+            }
+        } else {
+            // Collect logits for UBOO loss
+            all_layer_logits.push_back(logits);
+        }
+    }
+    
+    // Inference Mode: Return final logits immediately
+    if (is_inference) {
+        return final_logits;
     }
     
     // Stack all layer logits: [num_layers, batch, seq, vocab]
@@ -285,32 +311,10 @@ void MMRecModel::update_parameters(SGD& optimizer, const ModelGradients& grads) 
 }
 
 Tensor MMRecModel::generate(const Tensor& input_ids) {
-    // Inference mode: only return final layer logits
-    Tensor all_logits = forward(input_ids);
+    // Inference mode: only return final layer logits (Optimized!)
+    return forward(input_ids, nullptr, true); // is_inference = true
     
-    // Extract final layer: [batch, seq, vocab]
-    int64_t batch = input_ids.size(0);
-    int64_t seq = input_ids.size(1);
-    
-    Tensor final_logits = Tensor::zeros({batch, seq, config_.vocab_size});
-    
-    int64_t final_layer = config_.num_layers - 1;
-    for (int64_t b = 0; b < batch; ++b) {
-        for (int64_t s = 0; s < seq; ++s) {
-            for (int64_t v = 0; v < config_.vocab_size; ++v) {
-                int64_t src_idx = final_layer * batch * seq * config_.vocab_size +
-                                  b * seq * config_.vocab_size +
-                                  s * config_.vocab_size +
-                                  v;
-                int64_t dst_idx = b * seq * config_.vocab_size +
-                                  s * config_.vocab_size +
-                                  v;
-                final_logits.data()[dst_idx] = all_logits.data()[src_idx];
-            }
-        }
-    }
-    
-    return final_logits;
+    // Legacy logic removed since optimization is built-in to forward() now
 }
 
 } // namespace mm_rec
