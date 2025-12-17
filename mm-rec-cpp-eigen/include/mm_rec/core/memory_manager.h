@@ -17,18 +17,6 @@
 #include <iostream>
 #include <cstring>
 
-#pragma once
-
-#include <vector>
-#include <memory>
-#include <mutex>
-#include <thread>
-#include <queue>
-#include <condition_variable>
-#include <atomic>
-#include <iostream>
-#include <cstring>
-
 namespace mm_rec {
 
 // A large chunk of memory (Arena Block)
@@ -68,7 +56,9 @@ public:
     static const size_t BLOCK_SIZE = 64 * 1024 * 1024; // 64 MB
     
     static MemoryManager& instance() {
-        static MemoryManager instance;
+        // Thread-Local Singleton: Each thread gets its own isolated MemoryManager.
+        // No locks, no contention, 100% thread safety.
+        static thread_local MemoryManager instance;
         return instance;
     }
     
