@@ -27,11 +27,41 @@ endif()
 # Find Eigen3 (header-only!)
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 message(STATUS "✅ Eigen3 found: ${EIGEN3_VERSION}")
-message(STATUS "   Eigen is HEADER-ONLY - zero runtime dependency!")
+
+# --- MKL STATIC LINKING ---
+# We manually define the paths since we found them in /usr/lib/x86_64-linux-gnu/
+set(MKL_DIR "/usr/lib/x86_64-linux-gnu")
+set(MKL_LIBS 
+    ${MKL_DIR}/libmkl_intel_lp64.a
+    ${MKL_DIR}/libmkl_gnu_thread.a
+    ${MKL_DIR}/libmkl_core.a
+)
+
+# Check if they exist (sanity check)
+if(EXISTS "${MKL_DIR}/libmkl_core.a")
+    message(STATUS "🚀 MKL Static Libraries FOUND at ${MKL_DIR}")
+    
+    # Enable MKL in Eigen
+    add_definitions(-DEIGEN_USE_MKL_ALL)
+    
+    # Link Flags (Important for static linking: --start-group ... --end-group)
+    # We must also link dl, pthread, m (math), and gomp (OpenMP)
+    set(MKL_LINK_FLAGS "-Wl,--start-group ${MKL_DIR}/libmkl_intel_lp64.a ${MKL_DIR}/libmkl_gnu_thread.a ${MKL_DIR}/libmkl_core.a -Wl,--end-group -lpthread -lm -ldl -lgomp")
+    
+    message(STATUS "✅ Performance Mode: ON (Using MKL Static)")
+else()
+    message(WARNING "⚠️  MKL NOT FOUND. Falling back to generic optimizations.")
+endif()
+# --------------------------
 
 # Include directories
 include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(${PROJECT_SOURCE_DIR}/src) # Allow including from src/cli
 include_directories(${EIGEN3_INCLUDE_DIR})
+# Add MKL Include Directory
+include_directories(${MKL_DIR}/../../include/mkl) # Try relative to lib
+include_directories(/usr/include/mkl) # Try standard standard
+
 
 # Source files
 set(CORE_SOURCES
@@ -72,7 +102,7 @@ set(DATA_SOURCES
 )
 
 # Main library
-add_library(mm_rec_eigen SHARED 
+add_library(mm_rec_eigen STATIC 
     ${CORE_SOURCES}
     ${MODEL_SOURCES}
     ${TRAINING_SOURCES}
@@ -85,11 +115,21 @@ target_link_libraries(mm_rec_eigen
     Eigen3::Eigen
 )
 
-if(OpenMP_CXX_FOUND)
+if(MKL_LINK_FLAGS)
+    target_link_libraries(mm_rec_eigen ${MKL_LINK_FLAGS})
+elseif(OpenMP_CXX_FOUND)
     target_link_libraries(mm_rec_eigen OpenMP::OpenMP_CXX)
 endif()
-# ... (Tests)
-# ...
+
+# Unified CLI Tool
+add_executable(mm_rec 
+    src/mm_rec_cli.cpp 
+    src/cli/cmd_prepare.cpp 
+    src/cli/cmd_train.cpp
+)
+target_link_libraries(mm_rec mm_rec_eigen)
+
+# Tests
 add_executable(test_moe tests/test_moe.cpp)
 target_link_libraries(test_moe mm_rec_eigen)
 add_test(NAME test_moe COMMAND test_moe)
@@ -98,37 +138,19 @@ add_executable(test_data_pipeline tests/test_data_pipeline.cpp)
 target_link_libraries(test_data_pipeline mm_rec_eigen)
 add_test(NAME test_data_pipeline COMMAND test_data_pipeline)
 
-# Inference executable
+# Helper Demos (Optional, keeping for reference)
 add_executable(inference_demo src/inference_demo.cpp)
 target_link_libraries(inference_demo mm_rec_eigen)
 
-# Training Demo (Pure C++)
 add_executable(demo_training_cpp src/demo_training_cpp.cpp)
 target_link_libraries(demo_training_cpp mm_rec_eigen)
 
-# Kernel-Alpha Training (Real instruction data)
 add_executable(train_kernel src/train_kernel.cpp)
 target_link_libraries(train_kernel mm_rec_eigen)
 
-# Data Preprocessing Tool
-add_executable(preprocess_data src/preprocess_data.cpp)
-target_link_libraries(preprocess_data mm_rec_eigen)
-
-# Adaptive curriculum training
-add_executable(train_adaptive src/train_adaptive.cpp)
-target_link_libraries(train_adaptive mm_rec_eigen)
-
-# Quick overfitting test
-add_executable(test_overfit src/test_overfit.cpp)
-target_link_libraries(test_overfit mm_rec_eigen)
-
-# Real training integration test
-add_executable(test_real_training tests/test_real_training.cpp)
-target_link_libraries(test_real_training mm_rec_eigen)
-add_test(NAME test_real_training COMMAND test_real_training)
-
-# Print configuration
+# Config/Info
 message(STATUS "========================================")
+message(STATUS "MM-Rec Eigen (Combined CLI)")
 message(STATUS "MM-Rec Eigen (Zero Runtime Deps!)")
 message(STATUS "========================================")
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")

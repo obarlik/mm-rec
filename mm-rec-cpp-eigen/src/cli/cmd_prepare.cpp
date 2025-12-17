@@ -102,11 +102,18 @@ public:
     }
 };
 
-int main(int argc, char* argv[]) {
+#include "commands.h"
+
+// ... (includes remain)
+
+// ... (DataParser classes remain)
+
+int cmd_prepare(int argc, char* argv[]) {
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " <jsonl_input> <bin_output> [format: alpaca|chat]" << std::endl;
+        std::cerr << "Usage: mm_rec prepare <jsonl_input> <bin_output> [format: alpaca|chat]" << std::endl;
         return 1;
     }
+
     
     std::string in_path = argv[1];
     std::string out_path = argv[2];

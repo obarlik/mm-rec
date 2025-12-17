@@ -76,7 +76,9 @@ struct InstructionDataset {
 #include <sys/resource.h>
 #include <unistd.h>
 
-int main(int argc, char* argv[]) {
+#include "commands.h"
+
+int cmd_train(int argc, char* argv[]) {
     // Automatically lower process priority to background (nice 19)
     // This allows the user to continue using the PC without lag.
     id_t pid = getpid();
@@ -87,9 +89,10 @@ int main(int argc, char* argv[]) {
     }
 
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " <config_file> <data_file>" << std::endl;
+        std::cerr << "Usage: mm_rec train <config_file> <data_file>" << std::endl;
         return 1;
     }
+
 
     std::string config_path = argv[1];
     std::string data_path = argv[2];
