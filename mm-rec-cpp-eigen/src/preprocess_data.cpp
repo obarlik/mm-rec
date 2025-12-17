@@ -3,64 +3,123 @@
 #include <fstream>
 #include <vector>
 #include <string>
+#include <memory>
+#include <algorithm>
 
-// Simple JSON message parser
+// Simple message structure
 struct Message {
     std::string role;
     std::string content;
 };
 
-// Naive JSONL parser tailored for "messages": [...] structure
-std::vector<Message> parse_jsonl_line(const std::string& line) {
-    std::vector<Message> msgs;
-    size_t pos = 0;
-    while (true) {
-        // Find role
-        size_t role_key = line.find("\"role\"", pos);
-        if (role_key == std::string::npos) break;
-        
-        size_t role_val_start = line.find("\"", role_key + 6); // skip "role"
-        if (role_val_start == std::string::npos) break;
-        role_val_start++; // skip "
-        
-        size_t role_val_end = line.find("\"", role_val_start);
-        std::string role = line.substr(role_val_start, role_val_end - role_val_start);
-        
-        // Find content
-        size_t content_key = line.find("\"content\"", role_val_end);
-        if (content_key == std::string::npos) break;
-        
-        size_t content_val_start = line.find("\"", content_key + 9);
-        if (content_val_start == std::string::npos) break;
-        content_val_start++;
-        
-        // Naive content end finder (handles basic escaped quotes)
-        size_t content_val_end = content_val_start;
-        while (content_val_end < line.size()) {
-            if (line[content_val_end] == '"' && line[content_val_end-1] != '\\') {
+// Abstract Strategy
+class DataParser {
+public:
+    virtual ~DataParser() = default;
+    virtual std::vector<Message> parse(const std::string& line) = 0;
+    
+protected:
+    // Helper to find value by key in a simple JSON string
+    std::string extract_json_value(const std::string& line, const std::string& key) {
+        std::string search_key = "\"" + key + "\"";
+        size_t key_pos = line.find(search_key);
+        if (key_pos == std::string::npos) return "";
+
+        size_t val_start = line.find("\"", key_pos + search_key.length());
+        if (val_start == std::string::npos) return "";
+        val_start++; // skip opening quote
+
+        // Simple parsing handling escaped quotes
+        size_t val_end = val_start;
+        while (val_end < line.size()) {
+            if (line[val_end] == '"' && line[val_end - 1] != '\\') {
                 break;
             }
-            content_val_end++;
+            val_end++;
         }
-        
-        std::string content = line.substr(content_val_start, content_val_end - content_val_start);
-        msgs.push_back({role, content});
-        
-        pos = content_val_end;
+
+        if (val_end >= line.size()) return ""; // Malformed or end of string
+        return line.substr(val_start, val_end - val_start);
     }
-    return msgs;
-}
+};
+
+// Strategy for Chat format ("messages": [{"role": "...", "content": "..."}])
+class ChatParser : public DataParser {
+public:
+    std::vector<Message> parse(const std::string& line) override {
+        std::vector<Message> msgs;
+        size_t pos = 0;
+        while (true) {
+            // Find role
+            size_t role_key = line.find("\"role\"", pos);
+            if (role_key == std::string::npos) break;
+            
+            std::string role = extract_json_value(line.substr(role_key), "role");
+            size_t role_val_end = line.find("\"", role_key + 6 + 1); // rough advance
+            if (role_val_end != std::string::npos) {
+                 // Try to find content after role
+                 size_t content_key = line.find("\"content\"", role_val_end);
+                 if (content_key == std::string::npos) break;
+                 
+                 std::string content = extract_json_value(line.substr(content_key), "content");
+                 msgs.push_back({role, content});
+                 
+                 // Advance pos
+                 size_t content_val_start = line.find("\"", content_key + 9) + 1;
+                 size_t content_val_end = content_val_start + content.length(); 
+                 pos = content_val_end;
+            } else {
+                break;
+            }
+        }
+        return msgs;
+    }
+};
+
+// Strategy for Alpaca format ("instruction": "...", "input": "...", "output": "...")
+class AlpacaParser : public DataParser {
+public:
+    std::vector<Message> parse(const std::string& line) override {
+        std::vector<Message> msgs;
+        
+        std::string instruction = extract_json_value(line, "instruction");
+        std::string input = extract_json_value(line, "input");
+        std::string output = extract_json_value(line, "output");
+
+        if (instruction.empty() && output.empty()) return msgs; // Skip invalid lines
+
+        // Construct User message
+        std::string user_content = instruction;
+        if (!input.empty()) {
+            user_content += "\nInput:\n" + input;
+        }
+        msgs.push_back({"user", user_content});
+
+        // Construct Assistant message
+        msgs.push_back({"assistant", output});
+
+        return msgs;
+    }
+};
 
 int main(int argc, char* argv[]) {
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " <jsonl_input> <bin_output>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <jsonl_input> <bin_output> [format: alpaca|chat]" << std::endl;
         return 1;
     }
     
     std::string in_path = argv[1];
     std::string out_path = argv[2];
+    std::string format = (argc > 3) ? argv[3] : "alpaca"; // Default to alpaca for now
     
-    std::cout << "Processing " << in_path << " -> " << out_path << std::endl;
+    std::unique_ptr<DataParser> parser;
+    if (format == "chat") {
+        parser = std::make_unique<ChatParser>();
+    } else {
+        parser = std::make_unique<AlpacaParser>();
+    }
+
+    std::cout << "Processing " << in_path << " -> " << out_path << " (Format: " << format << ")" << std::endl;
     
     mm_rec::Tokenizer tokenizer;
     
@@ -70,6 +129,7 @@ int main(int argc, char* argv[]) {
         std::ifstream infile(in_path);
         std::string line;
         while (std::getline(infile, line)) {
+            // Build vocab from raw line to capture all chars
             tokenizer.build_vocab(line);
         }
     }
@@ -84,7 +144,9 @@ int main(int argc, char* argv[]) {
     std::string line;
     int line_count = 0;
     while (std::getline(infile, line)) {
-        auto msgs = parse_jsonl_line(line);
+        auto msgs = parser->parse(line);
+        if (msgs.empty()) continue;
+
         for (const auto& msg : msgs) {
             auto tokens = tokenizer.encode(msg.content);
             
