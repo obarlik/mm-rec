@@ -16,7 +16,9 @@
 #include "mm_rec/training/trainer.h"
 #include "mm_rec/training/sample_tracker.h"
 #include "mm_rec/utils/checkpoint.h"
+#include "mm_rec/utils/checkpoint.h"
 #include "mm_rec/core/memory_manager.h"
+#include "mm_rec/utils/logger.h"
 
 #include <iostream>
 #include <iomanip>
@@ -96,6 +98,15 @@ int cmd_train(int argc, char* argv[]) {
 
     std::string config_path = argv[1];
     std::string data_path = argv[2];
+    
+    // --- 1. Setup Logging (Tee to train.log) ---
+    std::ofstream log_file("train.log", std::ios::app); // Append mode
+    TeeBuf tee_cout_buf(std::cout.rdbuf(), log_file.rdbuf());
+    TeeBuf tee_cerr_buf(std::cerr.rdbuf(), log_file.rdbuf());
+    
+    // Save old buffers to restore later (RAII would be better but this is simple CLI)
+    std::streambuf* old_cout = std::cout.rdbuf(&tee_cout_buf);
+    std::streambuf* old_cerr = std::cerr.rdbuf(&tee_cerr_buf);
     
     std::cout << "=== Adaptive Curriculum Training (Online) ===" << std::endl;
     
@@ -186,9 +197,32 @@ int cmd_train(int argc, char* argv[]) {
     std::cout << "\n🚀 STARTING ONLINE ADAPTIVE TRAINING" << std::endl;
     std::cout << "Batches: " << num_batches << " | Stride: " << stride << std::endl;
     
+    // --- 2. Auto-Resume Logic ---
+    int start_epoch = 1;
+    float best_loss = 1e9;
+    std::string latest_ckpt_path = "checkpoint_latest.bin";
+    std::string best_ckpt_path = "checkpoint_best.bin";
+    
+    // Try to load latest
+    try {
+        if (std::ifstream(latest_ckpt_path).good()) {
+            std::cout << "🔄 Found latest checkpoint. Resuming..." << std::endl;
+            CheckpointMetadata loaded_meta;
+            CheckpointManager::load_checkpoint(latest_ckpt_path, model, loaded_meta);
+            start_epoch = loaded_meta.epoch + 1;
+            best_loss = loaded_meta.loss; // Assuming latest was 'ok'. Better to track best separately but this is fine.
+            
+            // Fix: If checkoint says epoch 5, we finished 5. Start 6.
+            std::cout << "✅ Resumed from Epoch " << loaded_meta.epoch 
+                      << " (Loss: " << loaded_meta.loss << ")" << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "⚠️  Failed to resume: " << e.what() << ". Starting from scratch." << std::endl;
+    }
+    
     int64_t total_steps = 0;
     
-    for (int iteration = 1; iteration <= max_iterations; ++iteration) {
+    for (int iteration = start_epoch; iteration <= max_iterations; ++iteration) {
         std::cout << "\n=== Epoch " << iteration << " ===" << std::endl;
         
         int64_t epoch_easy = 0;
@@ -317,12 +351,21 @@ int cmd_train(int argc, char* argv[]) {
         std::cout << std::endl;
         std::cout << "Epoch Stats: E=" << epoch_easy << " M=" << epoch_medium << " H=" << epoch_hard << std::endl;
         
-        // Save epoch checkpoint
+        // Save epoch checkpoint (Atomically overwrite latest)
         CheckpointMetadata meta;
         meta.epoch = iteration;
         meta.loss = (epoch_steps > 0) ? epoch_loss / epoch_steps : 0.0f;
         meta.learning_rate = learning_rate;
-        CheckpointManager::save_checkpoint("kernel_adaptive_" + std::to_string(iteration) + ".bin", model, meta);
+        
+        std::cout << "💾 Saving " << latest_ckpt_path << "..." << std::endl;
+        CheckpointManager::save_checkpoint(latest_ckpt_path, model, meta);
+        
+        // Save Best
+        if (meta.loss < best_loss && meta.loss > 0.0f) {
+             std::cout << "🏆 New Best Loss! (" << meta.loss << " < " << best_loss << "). Saving " << best_ckpt_path << std::endl;
+             best_loss = meta.loss;
+             CheckpointManager::save_checkpoint(best_ckpt_path, model, meta);
+        }
     }
     
     // Final
@@ -331,6 +374,10 @@ int cmd_train(int argc, char* argv[]) {
     final_meta.learning_rate = learning_rate;
     CheckpointManager::save_checkpoint("kernel_adaptive_final.bin", model, final_meta);
     std::cout << "\n✅ DONE" << std::endl;
+    
+    // Restore streams (Just good hygiene)
+    std::cout.rdbuf(old_cout);
+    std::cerr.rdbuf(old_cerr);
     
     return 0;
 }

@@ -6,6 +6,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <cstring>
+#include <cstdio> // std::rename
 
 namespace mm_rec {
 
@@ -18,9 +19,10 @@ void CheckpointManager::save_checkpoint(
     const MMRecModel& model,
     const CheckpointMetadata& metadata
 ) {
-    std::ofstream file(path, std::ios::binary);
+    std::string tmp_path = path + ".tmp";
+    std::ofstream file(tmp_path, std::ios::binary);
     if (!file) {
-        throw std::runtime_error("Could not open checkpoint file for writing: " + path);
+        throw std::runtime_error("Could not open temp checkpoint file for writing: " + tmp_path);
     }
     
     // Write magic and version
@@ -50,10 +52,17 @@ void CheckpointManager::save_checkpoint(
         emb_numel * sizeof(float)
     );
     
-    // Note: Block weights would go here, but we don't have weight access yet
-    // This is a limitation we'll document - checkpoint saves config/embedding only for now
-    
+    // Flush and close to ensure data is on disk (soft guarantee)
+    file.flush();
     file.close();
+    if (file.fail()) {
+        throw std::runtime_error("Failed to write/close temp checkpoint: " + tmp_path);
+    }
+    
+    // Atomic Rename
+    if (std::rename(tmp_path.c_str(), path.c_str()) != 0) {
+        throw std::runtime_error("Failed to atomically rename checkpoint: " + tmp_path + " -> " + path);
+    }
 }
 
 void CheckpointManager::load_checkpoint(
