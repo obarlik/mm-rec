@@ -65,6 +65,8 @@ struct MemoryBlock {
 
 class MemoryManager {
 public:
+    static const size_t BLOCK_SIZE = 64 * 1024 * 1024; // 64 MB
+    
     static MemoryManager& instance() {
         static MemoryManager instance;
         return instance;
@@ -88,8 +90,8 @@ public:
         
         // Slow path: Block full, allocate new block
         if (!ptr) {
-            std::cout << "⚠️  Memory Block Full! Allocating new 1GB block..." << std::endl;
-            current_block_ = new MemoryBlock(1024 * 1024 * 1024);
+            std::cout << "⚠️  Memory Block Full! Allocating new " << BLOCK_SIZE / (1024 * 1024) << "MB block..." << std::endl;
+            current_block_ = new MemoryBlock(BLOCK_SIZE);
             blocks_.push_back(current_block_);
             ptr = current_block_->allocate(bytes);
         }
