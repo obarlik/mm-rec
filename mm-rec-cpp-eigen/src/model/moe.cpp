@@ -179,6 +179,96 @@ Tensor MoELayer::forward(const Tensor& x, MoECache* cache) {
         cache->router_logits = saved_logits;
         cache->routing_weights = saved_weights;
         cache->selected_indices = saved_indices;
+        
+        // 3. Calculate Aux Loss (Load Balancing)
+        // L_aux = N * sum_i (f_i * P_i)
+        // f_i = fraction of tokens assigned to expert i
+        // P_i = average probability of expert i across batch (based on router probability)
+        // Note: P_i should track the accumulated probability even for unselected experts?
+        // Usually, Switch Transformer Aux Loss uses the *router probability* (Softmax) output.
+        // But we only computed Softmax sparsely or locally.
+        // To do this correctly, we need full Softmax over all experts for each token.
+        // We currently do "simple_softmax" locally in the loop to get 'soft_vals'.
+        // We can accumulate P_i during that loop.
+        
+        // Accumulators
+        std::vector<float> density_1(num_experts, 0.0f); // Count of selections (f_i proxy)
+        std::vector<float> prob_1(num_experts, 0.0f);    // Sum of probabilities (P_i proxy)
+        
+        // We need to re-loop or integrate into the main loop.
+        // For efficiency, let's re-use the loop (But we need to rewrite the loop).
+        // Or cleaner: Calculate it here by re-scanning logits? (Slow).
+        // Let's modify the loop above in a separate commit? 
+        // No, I can insert logic here if I saved 'soft_vals' but I didn't.
+        
+        // Let's re-approximate P_i from saved_weights? No, saved_weights only has Top-K.
+        // Aux Loss encourages utilizing *all* experts, so we need prob for unselected ones too.
+        
+        // Re-run softmax for stats (Performance penalty, but necessary for correct loss)
+        // Or rely on `logits` tensor.
+        // Let's implement a quick pass over `logits` to compute Softmax sums.
+        
+        const float* logits_ptr = logits.data();
+        int64_t total_tokens = batch * seq;
+        
+        // Manual Thread-Local Reduction for OpenMP
+        #pragma omp parallel
+        {
+             std::vector<float> local_density(num_experts, 0.0f);
+             std::vector<float> local_prob(num_experts, 0.0f);
+
+             #pragma omp for
+             for(int64_t i=0; i<total_tokens; ++i) {
+                 const float* row = logits_ptr + i * num_experts;
+                 
+                 // 1. Softmax
+                 float max_val = -1e9;
+                 for(int e=0; e<num_experts; ++e) if(row[e] > max_val) max_val = row[e];
+                 
+                 float sum_exp = 0.0f;
+                 // Small stack array for prob
+                 // Max experts usually < 64. Using std::vector implies heap alloc per token? 
+                 // No, usually fast enough. Or use single accumulation.
+                 std::vector<float> p(num_experts);
+                 
+                 for(int e=0; e<num_experts; ++e) {
+                     p[e] = std::exp(row[e] - max_val);
+                     sum_exp += p[e];
+                 }
+                 float inv_sum = 1.0f / sum_exp;
+                 for(int e=0; e<num_experts; ++e) {
+                     p[e] *= inv_sum;
+                     local_prob[e] += p[e];
+                 }
+                 
+                 // 2. Selection (Density)
+                 const float* idx_ptr = saved_indices.data() + i * top_k;
+                 for(int k=0; k<top_k; ++k) {
+                     int idx = (int)idx_ptr[k];
+                     if(idx >= 0 && idx < num_experts) local_density[idx] += 1.0f;
+                 }
+             }
+             
+             // Critical merge
+             #pragma omp critical
+             {
+                 for(int e=0; e<num_experts; ++e) {
+                     prob_1[e] += local_prob[e];
+                     density_1[e] += local_density[e];
+                 }
+             }
+        }
+        
+        float total_loss = 0.0f;
+        for(int e=0; e<num_experts; ++e) {
+            float f_i = density_1[e] / total_tokens;
+            float P_i = prob_1[e] / total_tokens;
+            total_loss += f_i * P_i;
+        }
+        
+        cache->aux_loss = total_loss * num_experts;
+        
+        // std::cout << "DEBUG: Aux Loss: " << cache->aux_loss << std::endl;
     }
     
     return output.reshape({batch, seq, hidden});
@@ -331,6 +421,89 @@ Tensor MoELayer::backward(
     // d_gate_weights += x.T @ dlogits
     // dx += dlogits @ W_gate.T
     
+    // 3. Propagate Router Gradients
+    // dlogits has partial gradients from the main task (through weighting)
+    
+    // --- 4. Add Aux Loss Gradient (SOTA) ---
+    // L_aux = N * sum(f_i * P_i)
+    // We treating f_i (density) as constant (Stop Gradient).
+    // So we only diff w.r.t P_i.
+    // dL_aux / dP_i = N * f_i.
+    // P_i = sum_batch(softmax(logits)_i) / total_tokens
+    // So dL_aux / dLogits = (dL_aux / dP) * (dP / dLogits)
+    
+    // We need 'f_i' (density) from forward pass. 
+    // We can re-calculate it or store it.
+    // Let's re-calculate it quickly (or reuse saved_indices).
+    // And we need Softmax Probabilities.
+    
+    // Param: Aux Loss Weight
+    float aux_loss_weight = 0.01f; 
+    
+    std::vector<float> density_1(config_.num_experts, 0.0f);
+    // Re-calc density
+    for(int64_t i=0; i<batch*seq; ++i) {
+        const float* idx_ptr = cache.selected_indices.data() + i * top_k;
+        for(int k=0; k<top_k; ++k) {
+            int idx = (int)idx_ptr[k];
+            if(idx >= 0 && idx < config_.num_experts) density_1[idx] += 1.0f;
+        }
+    }
+    // Normalize density
+    for(auto& d : density_1) d /= (batch * seq);
+    
+    // Now accumulate gradient into dlogits
+    // dL_aux / dLogit_ij  (token i, expert j)
+    // = sum_k ( dL/dP_k * dP_k/dLogit_ij )
+    // dL/dP_k = N * f_k * weight
+    // P_k = sum_i(p_ik) / T
+    // dP_k / dp_ik = 1/T
+    // dp_ik / dz_ij = p_ik * (delta_jk - p_ij)  (Softmax derivative)
+    
+    // Combine:
+    // dL_aux / dz_ij = weight * N * (1/T) * sum_k ( f_k * p_ik * (delta_jk - p_ij) )
+    //                = C * [ f_j * p_ij - p_ij * sum_k(f_k * p_ik) ]
+    //                = C * p_ij * ( f_j - sum_k(f_k * p_ik) )
+    
+    float C = aux_loss_weight * config_.num_experts; // Removed 1/T because gradients are summed approx? No, exact.
+    // Actually typically we average gradients over batch.
+    // Let's implement the formula:
+    // grad_z_ij = C * p_ij * (f_j - sum_f_p_i)
+    // where sum_f_p_i = sum_k (f_k * p_ik) which is expected density per token roughly.
+    
+    #pragma omp parallel for
+    for(int64_t i=0; i<batch*seq; ++i) {
+        // Re-compute Softmax P for this token
+        // Use simplified recompute as in forward
+        const float* x_ptr = x_flat.data() + i * hidden;
+        // Need to recompute logits? Or use Router forward?
+        // We verified logits are needed. We didn't cache full logits, only sparse ones?
+        // Wait, cache->router_logits IS full logits [Batch, Seq, Experts].
+        const float* l_ptr = cache.router_logits.data() + i * config_.num_experts;
+        
+        float max_val = -1e9;
+        for(int e=0; e<config_.num_experts; ++e) if(l_ptr[e] > max_val) max_val = l_ptr[e];
+        
+        std::vector<float> p(config_.num_experts);
+        float sum_exp = 0.0f;
+        for(int e=0; e<config_.num_experts; ++e) {
+            p[e] = std::exp(l_ptr[e] - max_val);
+            sum_exp += p[e];
+        }
+        for(int e=0; e<config_.num_experts; ++e) p[e] /= sum_exp;
+        
+        // Calculate term: sum_prob_density = sum_k (f_k * p_ik)
+        float sum_prob_density = 0.0f;
+        for(int e=0; e<config_.num_experts; ++e) sum_prob_density += density_1[e] * p[e];
+        
+        // Add gradient to dlogits
+        float* dl_ptr = dlogits.data() + i * config_.num_experts;
+        for(int j=0; j<config_.num_experts; ++j) {
+            float grad_aux = C * p[j] * (density_1[j] - sum_prob_density);
+            dl_ptr[j] += grad_aux;
+        }
+    }
+
     // Manual Matrix Mul for Grad Gate (Batch accumulation)
     // d_gate = x_flat.T @ dlogits
     for(int i=0; i<batch*seq; ++i) {

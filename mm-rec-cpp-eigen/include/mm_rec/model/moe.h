@@ -30,6 +30,7 @@ struct MoECache {
     Tensor router_logits;     // [batch, seq, num_experts]
     Tensor routing_weights;   // [batch, seq, top_k] (Softmax output for selected)
     Tensor selected_indices;  // [batch, seq, top_k] (Indices of selected experts)
+    float aux_loss = 0.0f;    // Load Balancing Loss for this batch
 };
 
 struct MoEGradients {

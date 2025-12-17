@@ -69,6 +69,7 @@ set(CORE_SOURCES
     src/core/global_allocator.cpp
     src/core/linear.cpp
     src/core/gated_memory.cpp
+    src/core/normalization.cpp
 )
 
 set(MODEL_SOURCES

@@ -13,6 +13,7 @@
 #include "mm_rec/core/linear.h"
 #include "mm_rec/core/gated_memory.h"
 #include "mm_rec/model/moe.h"
+#include "mm_rec/core/normalization.h"
 #include <memory>
 
 namespace mm_rec {
@@ -75,7 +76,7 @@ private:
     MMRecBlockConfig config_;
     
     // Components
-    // Components
+    std::unique_ptr<RMSNorm> block_norm_; // Pre-norm
     std::unique_ptr<GatedMemoryUpdate> gated_memory_;
     // Replaced standard FFN with MoE Layer
     std::unique_ptr<MoELayer> moe_layer_;

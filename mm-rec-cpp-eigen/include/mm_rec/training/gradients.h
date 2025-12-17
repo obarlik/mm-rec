@@ -8,6 +8,7 @@
 
 #include "mm_rec/core/tensor.h"
 #include "mm_rec/model/moe.h"
+#include "mm_rec/core/normalization.h"
 #include <vector>
 
 namespace mm_rec {
@@ -88,20 +89,20 @@ struct BlockGradients {
     // MoE (replaces standard FFN)
     MoEGradients moe_grads;
     
+#include "mm_rec/model/moe.h"
+#include "mm_rec/core/normalization.h"
+#include <vector>
+
+// ... (in BlockGradients)
+
     // Output Projector (UBOO)
     LinearGradients output_proj_grads;
     
-    void init(int64_t hidden_dim, int64_t mem_dim, int64_t ffn_dim, int64_t vocab_size) {
-        gru_grads.init(mem_dim, hidden_dim);
-        
-        // MoE Initialization
-        // We need expert count from somewhere.
-        // Option: Pass full config or extra params.
-        // For now, let's assume default 4 experts/2 topk if not provided?
-        // Better: Update init signature.
-    }
+    // Norm Grads
+    RMSNormGradients norm_grads;
     
-    // Overload for proper initialization
+    // ...
+    
     void init(int64_t hidden_dim, int64_t mem_dim, int64_t ffn_dim, int64_t vocab_size, int64_t num_experts) {
         gru_grads.init(mem_dim, hidden_dim);
         
@@ -109,11 +110,13 @@ struct BlockGradients {
         moe_config.hidden_dim = hidden_dim;
         moe_config.ffn_dim = ffn_dim;
         moe_config.num_experts = num_experts;
-        moe_config.top_k = 1; // Not needed for gradients size init
+        moe_config.top_k = 1; // Not needed
         
         moe_grads.init(moe_config);
         
         output_proj_grads = LinearGradients({vocab_size, hidden_dim}, {vocab_size});
+        
+        norm_grads.d_weight = Tensor::zeros({hidden_dim});
     }
     
     BlockGradients clone() const {
@@ -121,6 +124,7 @@ struct BlockGradients {
         cp.gru_grads = gru_grads.clone();
         cp.moe_grads = moe_grads.clone();
         cp.output_proj_grads = output_proj_grads.clone();
+        cp.norm_grads.d_weight = norm_grads.d_weight.clone();
         return cp;
     }
 
@@ -128,6 +132,7 @@ struct BlockGradients {
         gru_grads.zero();
         moe_grads.zero();
         output_proj_grads.zero();
+        norm_grads.d_weight.zero_();
     }
 };
 

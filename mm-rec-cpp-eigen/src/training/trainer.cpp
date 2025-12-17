@@ -91,9 +91,12 @@ float Trainer::train_step(const TrainingBatch& batch) {
             Tensor loss_tensor = compute_uboo_loss(logits, single_target, single_mask);
             float loss = loss_tensor.item();
             
+            // Add Aux Loss for Reporting (Gradient already handled in MoE backward)
+            float total_step_loss = loss + cache.total_aux_loss * 0.01f; // 0.01 matches weight in MoE
+            
             // Atomic add for loss (relaxed ordering fine for stats)
             float current_total = total_loss.load(std::memory_order_relaxed);
-            while (!total_loss.compare_exchange_weak(current_total, current_total + loss));
+            while (!total_loss.compare_exchange_weak(current_total, current_total + total_step_loss));
             
             ModelGradients grads = model_.backward(single_target, cache);
             clip_gradients_by_norm(grads, config_.grad_clip_norm);

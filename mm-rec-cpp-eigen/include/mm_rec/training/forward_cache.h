@@ -17,10 +17,11 @@ namespace mm_rec {
  */
 struct BlockCache {
     // Input to this block
-    Tensor x;  // [batch, seq, hidden]
+    Tensor x;        // Input to block
+    Tensor x_norm;   // Normalized input (New for PreNorm)
     
     // Memory states
-    Tensor h_prev;  // Previous memory [batch, mem_dim]
+    Tensor h_prev;   // Previous memory [batch, mem_dim]
     Tensor h_new;   // New memory [batch, mem_dim]
     
     // GRU gates (needed for backward)
@@ -60,6 +61,9 @@ struct ForwardCache {
 
     // Transient memory states for this forward pass (Thread-Local Isolation)
     std::vector<Tensor> memory_states; 
+    
+    // Aux Loss Aggregation
+    float total_aux_loss = 0.0f;
     
     // Initialize for given dimensions
     void init(int64_t num_layers) {

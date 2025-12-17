@@ -8,11 +8,18 @@ compile_commands.json
 *.cmake
 
 # Output Binaries
-# Output Binaries
 /mm_rec
+/test_moe
+/test_data_pipeline
+/test_memory_benchmark
+/test_pool_benchmark
+/demo_training_cpp
+/inference_demo
+/train_kernel
 *.a
 *.o
 *.so
+*.tmp
 
 # Data
 *.bin
