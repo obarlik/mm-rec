@@ -19,6 +19,14 @@
 #include <iostream>
 #include <cstring>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#ifdef __linux__
+#include <sys/mman.h>
+#endif
+#endif
+
 namespace mm_rec {
 
 // A large chunk of memory (Arena Block)
@@ -29,11 +37,29 @@ struct MemoryBlock {
     bool is_clean; // Debug flag
     
     MemoryBlock(size_t s) : size(s), used(0), is_clean(false) {
+        #ifdef _WIN32
+        // Try Large Pages first (Requires SeLockMemoryPrivilege)
+        data = (uint8_t*)VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE | MEM_LARGE_PAGES, PAGE_READWRITE);
+        if (!data) {
+            // Fallback to standard pages if privilege missing or fragmentation high
+            data = (uint8_t*)VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        }
+        if (!data) throw std::bad_alloc();
+        #else
         data = new uint8_t[size];
+        #ifdef __linux__
+        // Request Transparent Huge Pages (THP) for this large block
+        madvise(data, size, MADV_HUGEPAGE);
+        #endif
+        #endif
     }
     
     ~MemoryBlock() {
+        #ifdef _WIN32
+        if (data) VirtualFree(data, 0, MEM_RELEASE);
+        #else
         delete[] data;
+        #endif
     }
     
     // Fast O(1) allocation
