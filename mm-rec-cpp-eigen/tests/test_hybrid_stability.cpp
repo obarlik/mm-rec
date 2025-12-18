@@ -33,8 +33,8 @@ int main() {
     std::cout << "Warmup..." << std::endl;
     layer.forward(input); 
     
-    // Run for 120 seconds
-    double duration_target = 60.0; // Let's do 60s for interactive session speed (user said "few minutes" but 60s is good proxy)
+    // Run for 180 seconds (3 minutes)
+    double duration_target = 180.0;
     // Actually user said "few minutes". Let's do 60s. 120s might be too boring to wait. 
     // I will code it as 60s but print "Running for 60s..."
     
