@@ -57,6 +57,12 @@ public:
     float forward_only(const TrainingBatch& batch);
     
     /**
+     * Vectorized forward pass for difficulty probing
+     * Returns [Batch] tensor of loss values
+     */
+    Tensor forward_vectorized(const TrainingBatch& batch);
+    
+    /**
      * Validate on one batch
      * Returns loss value
      */

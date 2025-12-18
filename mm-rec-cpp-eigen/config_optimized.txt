@@ -17,9 +17,14 @@ total_steps=100
 weight_decay=0.01
 beta1=0.9
 beta2=0.999
-batch_size=8
+batch_size=64
 max_seq_len=128
 
 uboo_weight=0.5
 checkpoint_path=kernel_optimized.bin
 vocab_path=vocab.txt
+
+# Adaptive Curriculum (Allow initial learning)
+easy_threshold=50.0
+hard_threshold=100000.0
+

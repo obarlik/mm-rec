@@ -19,6 +19,7 @@
 #include "mm_rec/utils/checkpoint.h"
 #include "mm_rec/core/memory_manager.h"
 #include "mm_rec/utils/logger.h"
+#include "mm_rec/core/vulkan_backend.h" // [NEW] GPS Support
 
 #include <iostream>
 #include <iomanip>
@@ -109,8 +110,13 @@ int cmd_train(int argc, char* argv[]) {
     std::streambuf* old_cerr = std::cerr.rdbuf(&tee_cerr_buf);
     
     std::cout << "=== Adaptive Curriculum Training (Online) ===" << std::endl;
-    
-    // Load config manually to get training params
+
+    // 0. Initialize GPU (Hybrid)
+    if (VulkanBackend::get().init()) {
+         std::cout << "🚀 GPU Backend Enabled. (Full Power Mode)" << std::endl;
+    } else {
+         std::cout << "⚠️ GPU Backend Failed. Using CPU." << std::endl;
+    }
     MMRecModelConfig config;
     float learning_rate = 0.01f;
     int batch_size = 8;
@@ -233,103 +239,114 @@ int cmd_train(int argc, char* argv[]) {
         auto epoch_start_time = std::chrono::steady_clock::now();
         
         for (int64_t batch_idx = 0; batch_idx < num_batches; ++batch_idx) {
-            // 1. PROBE (Fast Check)
-            // Use FIRST sequence of the batch
-            Tensor probe_input = Tensor::zeros({1, seq_len});
-            Tensor probe_target = Tensor::zeros({1, seq_len});
-            Tensor probe_mask = Tensor::zeros({1, seq_len});
+            // 1. PROBE (Vectorized Full Batch Check)
+            // Construct FULL batch first
+            Tensor input_ids = Tensor::zeros({batch_size, seq_len});
+            Tensor targets = Tensor::zeros({batch_size, seq_len});
+            Tensor loss_mask = Tensor::zeros({batch_size, seq_len});
             
-            // Offset for sequence 0 of this batch
-            // In train_kernel: batch.input_ids[b, s] = tokens[b*stride + batch_idx*seq_len + s]
-            // So for b=0: tokens[batch_idx*seq_len + s]
-            int64_t base_offset = batch_idx * seq_len;
+            // Fill batch candidates
+            int actual_batch = 0;
+            std::vector<int64_t> original_indices;
             
-            bool valid = true;
-            for (int64_t s = 0; s < seq_len; ++s) {
-                int64_t idx = base_offset + s;
-                if (idx >= total_tokens - 1) { valid = false; break; }
-                probe_input.data()[s] = (float)dataset.tokens[idx];
-                probe_target.data()[s] = (float)dataset.tokens[idx+1];
-                if (dataset.masks.size() > 0)
-                    probe_mask.data()[s] = (float)dataset.masks[idx+1];
-                else
-                    probe_mask.data()[s] = 1.0f; // Default to 1 if no masks
+            for (int64_t b = 0; b < batch_size; ++b) {
+                int64_t offset = b * stride + batch_idx * seq_len;
+                bool valid_seq = true;
+                
+                for (int64_t s = 0; s < seq_len; ++s) {
+                    if (offset + s >= total_tokens - 1) { 
+                        valid_seq = false; break; 
+                    }
+                    input_ids.data()[b*seq_len + s] = (float)dataset.tokens[offset+s];
+                    targets.data()[b*seq_len + s] = (float)dataset.tokens[offset+s+1];
+                    if (dataset.masks.size() > 0)
+                        loss_mask.data()[b*seq_len + s] = (float)dataset.masks[offset+s+1];
+                    else
+                        loss_mask.data()[b*seq_len + s] = 1.0f;
+                }
+                
+                if (valid_seq) {
+                    actual_batch++;
+                    original_indices.push_back(b);
+                }
             }
-            if (!valid) continue;
             
-            // Forward probe
-            TrainingBatch probe_batch{probe_input, probe_target, probe_mask};
-            float probe_loss = trainer.forward_only(probe_batch);
-            float ppl = std::exp(probe_loss);
+            if (actual_batch == 0) continue;
             
-            // Log progress every 10 batches to show scanning is active
+            TrainingBatch candidate_batch{input_ids, targets, loss_mask};
+            
+            // Forward pass only (Vectorized Probe) -> Returns [Batch]
+            Tensor probe_losses = trainer.forward_vectorized(candidate_batch);
+            
+            // Filter "Medium" samples
+            std::vector<int64_t> medium_indices;
+            for (int64_t b = 0; b < batch_size; ++b) {
+                // If this slot was valid
+                bool was_valid = false;
+                for(auto idx : original_indices) if(idx == b) was_valid = true;
+                if (!was_valid) continue;
+                
+                float loss = probe_losses.data()[b];
+                float ppl = std::exp(loss);
+                
+                if (ppl < easy_threshold) {
+                    epoch_easy++;
+                } else if (ppl > hard_threshold) {
+                    epoch_hard++;
+                } else {
+                    epoch_medium++;
+                    medium_indices.push_back(b);
+                }
+            }
+            
+            // Log progress every 10 batches
             if (batch_idx % 10 == 0) {
                  auto now = std::chrono::steady_clock::now();
                  double elapsed_sec = std::chrono::duration<double>(now - epoch_start_time).count();
                  double batches_per_sec = (batch_idx + 1) / elapsed_sec;
-                 double remaining_batches = num_batches - batch_idx;
-                 double eta_sec = remaining_batches / batches_per_sec;
                  
-                 // Format ETA
-                 int eta_m = (int)(eta_sec / 60);
-                 int eta_s = (int)(eta_sec) % 60;
+                 // Show PPL of the FIRST sample as representative (just for log)
+                 float first_ppl = std::exp(probe_losses.data()[0]);
                  
-                 // Memory usage
                  size_t mem_bytes = MemoryManager::instance().get_total_memory();
                  double mem_mb = mem_bytes / (1024.0 * 1024.0);
                  
                  std::cout << "[Ep " << iteration << "] Batch " << batch_idx << "/" << num_batches
                            << " | E:" << epoch_easy << " M:" << epoch_medium << " H:" << epoch_hard
-                           << " | PPL: " << std::fixed << std::setprecision(1) << ppl
+                           << " | Probe PPL: " << std::fixed << std::setprecision(1) << first_ppl
                            << " | " << std::setprecision(2) << batches_per_sec << " it/s"
-                           << " | ETA: " << eta_m << "m " << eta_s << "s"
                            << " | Mem: " << (int)mem_mb << "MB"
                            << std::endl << std::flush;
             }
             
-            // Decision
-            if (ppl < easy_threshold) {
-                epoch_easy++; // SKIP
-                // CRITICAL: Reset memory arena
-                MemoryManager::instance().reset_arena();
-                continue;
-            }
-            if (ppl > hard_threshold) {
-                epoch_hard++; // DEFER (Skip for now)
-                // CRITICAL: Reset memory arena
+            // If no medium samples, skip training this batch
+            if (medium_indices.empty()) {
                 MemoryManager::instance().reset_arena();
                 continue;
             }
             
-            // MEDIUM -> TRAIN
-            epoch_medium++;
+            // Construct FILTERED batch
+            int64_t filtered_size = medium_indices.size();
+            Tensor f_input = Tensor::zeros({filtered_size, seq_len});
+            Tensor f_target = Tensor::zeros({filtered_size, seq_len});
+            Tensor f_mask = Tensor::zeros({filtered_size, seq_len});
             
-            // Construct FULL batch
-            Tensor input_ids = Tensor::zeros({batch_size, seq_len});
-            Tensor targets = Tensor::zeros({batch_size, seq_len});
-            Tensor loss_mask = Tensor::zeros({batch_size, seq_len});
+            size_t copy_size = seq_len * sizeof(float);
             
-            for (int64_t b = 0; b < batch_size; ++b) {
-                int64_t offset = b * stride + batch_idx * seq_len;
-                for (int64_t s = 0; s < seq_len; ++s) {
-                    if (offset + s < total_tokens - 1) {
-                        input_ids.data()[b*seq_len + s] = (float)dataset.tokens[offset+s];
-                        targets.data()[b*seq_len + s] = (float)dataset.tokens[offset+s+1];
-                        if (dataset.masks.size() > 0)
-                            loss_mask.data()[b*seq_len + s] = (float)dataset.masks[offset+s+1];
-                        else
-                            loss_mask.data()[b*seq_len + s] = 1.0f; // Default to 1
-                    }
-                }
+            for (size_t i = 0; i < filtered_size; ++i) {
+                int64_t src_b = medium_indices[i];
+                // Copy from candidate batch
+                std::memcpy(f_input.data() + i*seq_len,   candidate_batch.input_ids.data() + src_b*seq_len, copy_size);
+                std::memcpy(f_target.data() + i*seq_len,  candidate_batch.targets.data() + src_b*seq_len, copy_size);
+                std::memcpy(f_mask.data() + i*seq_len,    candidate_batch.loss_mask.data() + src_b*seq_len, copy_size);
             }
             
-            TrainingBatch train_batch{input_ids, targets, loss_mask};
-            float loss = trainer.train_step(train_batch);
+            TrainingBatch final_batch{f_input, f_target, f_mask};
+            float loss = trainer.train_step(final_batch);
             
             // Check for NaN
             if (std::isnan(loss) || std::isinf(loss)) {
                 std::cerr << "⚠️  NAN LOSS DETECTED at Batch " << batch_idx << "!" << std::endl << std::flush;
-                // Optional: Reduce LR or skip? For now just warn.
                 continue; 
             }
             
@@ -337,9 +354,9 @@ int cmd_train(int argc, char* argv[]) {
             epoch_steps++;
             total_steps++;
             
-            // Always print training loss for the first few steps, then periodically
             if (epoch_steps < 20 || epoch_steps % 10 == 0) {
                  std::cout << " -> TRAIN Step " << total_steps 
+                           << " | BatchSize: " << filtered_size // Show dynamic batch size
                            << " | Loss: " << std::fixed << std::setprecision(4) << loss
                            << std::endl << std::flush;
             }
@@ -366,9 +383,17 @@ int cmd_train(int argc, char* argv[]) {
              best_loss = meta.loss;
              CheckpointManager::save_checkpoint(best_ckpt_path, model, meta);
         }
+        
+        if (epoch_medium == 0) {
+            std::cout << "\n🛑 Early Stopping: No trainable samples found in this epoch." << std::endl;
+            std::cout << "   (All samples were either too Easy or too Hard)" << std::endl;
+            break; 
+        }
     }
     
     // Final
+
+
     CheckpointMetadata final_meta;
     final_meta.epoch = max_iterations;
     final_meta.learning_rate = learning_rate;

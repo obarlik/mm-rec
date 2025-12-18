@@ -35,141 +35,67 @@ Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
 }
 
     // 44-50 original
+// Vectorized training step (Full Batch GPU Offload)
 float Trainer::train_step(const TrainingBatch& batch) {
     int64_t batch_size = batch.input_ids.size(0);
     int64_t seq_len = batch.input_ids.size(1);
     
-    // Main thread accumulator (Updated by merge step)
-    ModelGradients accumulated_grads; 
+    // 1. Mark persistent memory start
+    // We want gradients to survive until update_parameters
+    MemoryManager::instance().mark_persistent();
     
-    std::atomic<float> total_loss{0.0f};
-    std::atomic<int> valid_samples{0};
+    // 2. Forward Pass (Full Batch)
+    // The Linear layer will see [batch, in_features] and dispatch to GPU if batch is large enough.
+    // With batch=8, it goes to GPU (since Threshold=0).
+    ForwardCache cache;
+    Tensor logits = model_.forward(batch.input_ids, &cache);
     
-    // Storage for per-thread results
-    int max_threads = omp_get_max_threads();
-    std::vector<ModelGradients> thread_results(max_threads);
-    std::vector<bool> thread_has_data(max_threads, false);
+    // 3. Loss Calculation (Full Batch)
+    // UBOO loss supports batching naturally
+    Tensor loss_tensor = compute_uboo_loss(logits, batch.targets, batch.loss_mask);
+    float loss = loss_tensor.item();
+    
+    // Add Aux Loss from MoE
+    float total_step_loss = loss + cache.total_aux_loss * 0.01f;
+    
+    // 4. Backward Pass (Full Batch)
+    // Gradients are computed for the whole batch at once
+    ModelGradients grads = model_.backward(batch.targets, cache);
+    
+    // 5. Gradient Clipping
+    clip_gradients_by_norm(grads, config_.grad_clip_norm);
+    
+    // 6. Update Parameters
+    // Scale gradients by 1.0 (already averaged in backward/loss)?
+    // Usually loss is average, so gradients are average.
+    // Check compute_uboo_loss: returns average.
+    // Check linear_backward: db sums over batch. dW sums over batch.
+    // If loss is avg, then dL/dy is 1/N.
+    // So gradients are 1/N * sum(grads). Correct.
+    
+    float current_lr = scheduler_->get_lr(step_);
+    optimizer_->set_lr(current_lr);
+    model_.update_parameters(*optimizer_, grads);
+    
+    step_++;
+    
+    // 7. Cleanup
+    // Free everything allocated during this step (logits, cache, grads)
+    // EXCEPT parameters which are in a deeper scope or marked differently?
+    // No, parameters are members of Model, not in Arena.
+    // Intermediates are in Arena.
+    // We marked persistent at start? No, mark_persistent saves STATE.
+    // reset_arena rewinds to that state.
+    // Wait, mark_persistent establishes a "save point".
+    // If we call reset_arena(), it wipes everything AFTER mark_persistent.
+    // But we just updated parameters (which are safe).
+    // So we can wipe everything.
+    
+    // Unmark to clear the save point?
+    MemoryManager::instance().clear_persistent();
+    MemoryManager::instance().reset_arena();
 
-    // Pre-calculate copy size
-    size_t copy_size = seq_len * sizeof(float);
-    
-    #pragma omp parallel
-    {
-        int tid = omp_get_thread_num();
-        
-        // THREAD-LOCAL CONTEXT
-        // Each thread processes a subset of the batch
-        
-        // 1. Initialize Thread-Local Accumulator
-        ModelGradients local_grads;
-        bool local_init = false;
-        
-        // 2. Init flag
-        // MemoryManager::instance().mark_persistent(); // REMOVED: Too early!
-        
-        // 3. Parallel Loop
-        #pragma omp for
-        for (int64_t b = 0; b < batch_size; ++b) {
-            // ... (setup code omitted for brevity in prompt, but kept in file) ...
-            // Allocate temp tensors (TRANSIENT)
-            Tensor single_input = Tensor::zeros({1, seq_len});
-            Tensor single_target = Tensor::zeros({1, seq_len});
-            Tensor single_mask;
-            
-            // Fast copy
-            std::memcpy(single_input.data(), batch.input_ids.data() + b * seq_len, copy_size);
-            std::memcpy(single_target.data(), batch.targets.data() + b * seq_len, copy_size);
-            
-            if (batch.loss_mask.numel() > 0) {
-                single_mask = Tensor::zeros({1, seq_len});
-                std::memcpy(single_mask.data(), batch.loss_mask.data() + b * seq_len, copy_size);
-            }
-            
-            ForwardCache cache;
-            Tensor logits = model_.forward(single_input, &cache);
-            
-            Tensor loss_tensor = compute_uboo_loss(logits, single_target, single_mask);
-            float loss = loss_tensor.item();
-            
-            // Add Aux Loss for Reporting (Gradient already handled in MoE backward)
-            float total_step_loss = loss + cache.total_aux_loss * 0.01f; // 0.01 matches weight in MoE
-            
-            // Atomic add for loss (relaxed ordering fine for stats)
-            float current_total = total_loss.load(std::memory_order_relaxed);
-            while (!total_loss.compare_exchange_weak(current_total, current_total + total_step_loss));
-            
-            ModelGradients grads = model_.backward(single_target, cache);
-            clip_gradients_by_norm(grads, config_.grad_clip_norm);
-            
-            // Accumulate Locally
-            if (!local_init) {
-                // Determine tensor shapes from first sample
-                // We use clone() to ensure deep copy into persistent memory
-                local_grads = grads.clone(); 
-                local_init = true;
-                
-                // CRITICAL FIX: Mark Persistence AFTER allocating local_grads
-                // This ensures reset_arena() rewinds to HERE, preserving local_grads
-                MemoryManager::instance().mark_persistent();
-            } else {
-                accumulate_gradients(local_grads, grads);
-            }
-            
-            // Increment
-            valid_samples++; // Atomic
-            
-            // Reset Transient Memory (Free logits, cache, grads, inputs)
-            // Rewinds to the point set by mark_persistent() above
-            MemoryManager::instance().reset_arena();
-        } // End of For
-        
-        // 4. Save result for Main Thread merging
-        if (local_init) {
-             // Shallow copy of structure is enough, data pointers point to this thread's arena
-             thread_results[tid] = local_grads;
-             thread_has_data[tid] = true;
-        }
-        
-    } // End Parallel Region 1 (Implicit Barrier)
-    
-    // 5. Main Thread Merge (Sequential but fast)
-    // accumulated_grads will be allocated on Main Thread's arena
-    bool main_init = false;
-    for (int i = 0; i < max_threads; ++i) {
-        if (!thread_has_data[i]) continue;
-        
-        if (!main_init) {
-            accumulated_grads = thread_results[i].clone(); // Deep copy to Main Arena
-            main_init = true;
-        } else {
-            // Accumulate from Thread i's Arena to Main Arena
-            accumulate_gradients(accumulated_grads, thread_results[i]);
-        }
-    }
-    
-    // 6. Global Cleanup
-    // Now that Main Thread has a copy, we can release all worker arenas
-    #pragma omp parallel
-    {
-        // Wipe everything including the local_grads we just merged
-        MemoryManager::instance().clear_persistent();
-        MemoryManager::instance().reset_arena();
-    }
-    
-    // Average
-    if (valid_samples > 0) {
-        float avg_loss = total_loss / valid_samples;
-        scale_gradients(accumulated_grads, 1.0f / valid_samples);
-        
-        float current_lr = scheduler_->get_lr(step_);
-        optimizer_->set_lr(current_lr);
-        model_.update_parameters(*optimizer_, accumulated_grads);
-        
-        step_++;
-        return avg_loss;
-    }
-    
-    return 0.0f;
+    return total_step_loss;
 }
 
 float Trainer::forward_only(const TrainingBatch& batch) {
@@ -214,6 +140,27 @@ float Trainer::forward_only(const TrainingBatch& batch) {
     }
     
     return total_loss / valid_samples;
+}
+
+Tensor Trainer::forward_vectorized(const TrainingBatch& batch) {
+    // Forward pass only for difficulty assessment (no backward!)
+    // Returns [Batch] loss tensor
+    
+    // Reset Memory just in case
+    MemoryManager::instance().reset_arena();
+    
+    ForwardCache cache;
+    Tensor logits = model_.forward(batch.input_ids, &cache);
+    
+    // Compute loss per sample
+    Tensor loss_tensor = compute_uboo_loss(logits, batch.targets, batch.loss_mask);
+    
+    // We must return a copy because reset_arena might wipe it if not careful?
+    // The caller is responsible for MemoryManager if they want to keep it?
+    // Actually, cmd_train calls reset_arena after decision.
+    // So returning this Tensor (allocated in Arena) is fine as long as caller uses it before reset.
+    
+    return loss_tensor;
 }
 
 float Trainer::validate_step(const TrainingBatch& batch) {
