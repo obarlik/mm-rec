@@ -1,0 +1,121 @@
+#version 450
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) readonly buffer InputA { float dataA[]; };
+layout(binding = 1) readonly buffer InputB { float dataB[]; };
+layout(binding = 2) writeonly buffer OutputC { float dataC[]; };
+
+layout(push_constant) uniform PushConsts {
+    int M, N, K;
+} params;
+
+// Super Tile Size
+const int TS = 32;
+
+// Shared Memory: 32x32 floats = 4KB each. Total 8KB.
+shared float As[TS][TS];
+shared float Bs[TS][TS];
+
+void main() {
+    // Thread IDs within Workgroup
+    int tx = int(gl_LocalInvocationID.x); // 0..15
+    int ty = int(gl_LocalInvocationID.y); // 0..15
+    int tid = ty * 16 + tx; // Linear Thread ID (0..255)
+
+    // Compute Output Coordinates for this thread's 2x2 block
+    // Workgroup Output Base:
+    int wg_row = int(gl_WorkGroupID.y) * TS;
+    int wg_col = int(gl_WorkGroupID.x) * TS;
+
+    // Inside the 32x32 tile, threads are mapped to 2x2 blocks.
+    // Simplest mapping:
+    // Thread (tx, ty) handle output pixels:
+    // (ty*2, tx*2), (ty*2, tx*2+1), (ty*2+1, tx*2), (ty*2+1, tx*2+1)
+    
+    int row = wg_row + ty * 2;
+    int col = wg_col + tx * 2;
+
+    // Accumulators
+    float c[2][2];
+    c[0][0] = 0.0; c[0][1] = 0.0;
+    c[1][0] = 0.0; c[1][1] = 0.0;
+
+    int numTiles = (params.K + TS - 1) / TS;
+
+    for (int t = 0; t < numTiles; ++t) {
+        
+        // --- LOAD PHASE ---
+        // We need to load 32x32 = 1024 elements of A and B.
+        // We have 256 threads. Each loads 4 elements.
+        // Elements are loaded from Global A/B to Shared As/Bs.
+        
+        // A Tile Base: (wg_row, t*TS)
+        // B Tile Base: (t*TS, wg_col)
+        
+        for (int i = 0; i < 4; ++i) {
+            // Calculate which element of the 32x32 tile this thread loads
+            int linear_idx = tid + i * 256; // 0..1023 coverage
+            // Map linear_idx to (r, c) inside the 32x32 tile
+            int r_local = linear_idx / TS;
+            int c_local = linear_idx % TS;
+            
+            // Global Coordinates for A load
+            int rA_global = wg_row + r_local;
+            int cA_global = t * TS + c_local;
+            
+            if (rA_global < params.M && cA_global < params.K)
+                As[r_local][c_local] = dataA[rA_global * params.K + cA_global];
+            else
+                As[r_local][c_local] = 0.0;
+
+            // Global Coordinates for B load
+            int rB_global = t * TS + r_local;
+            int cB_global = wg_col + c_local;
+            
+            if (rB_global < params.K && cB_global < params.N)
+                Bs[r_local][c_local] = dataB[rB_global * params.N + cB_global];
+            else
+                Bs[r_local][c_local] = 0.0;
+        }
+
+        barrier();
+
+        // --- COMPUTE PHASE ---
+        // Iterate over K dimension of the tile (0..31)
+        for (int k = 0; k < TS; ++k) {
+            
+            // Prefetch inputs from Shared into Registers
+            // We need A rows: ty*2 and ty*2+1
+            // We need B cols: tx*2 and tx*2+1
+            float a0 = As[ty * 2][k];
+            float a1 = As[ty * 2 + 1][k];
+            
+            float b0 = Bs[k][tx * 2];
+            float b1 = Bs[k][tx * 2 + 1];
+            
+            // 4x FMA
+            c[0][0] += a0 * b0;
+            c[0][1] += a0 * b1;
+            c[1][0] += a1 * b0;
+            c[1][1] += a1 * b1;
+        }
+        
+        barrier();
+    }
+
+    // Write Calculation
+    // We write 4 pixels: (row, col), (row, col+1), (row+1, col), (row+1, col+1)
+    
+    // Safety checks for each pixel
+    if (row < params.M && col < params.N) 
+        dataC[row * params.N + col] = c[0][0];
+        
+    if (row < params.M && col + 1 < params.N) 
+        dataC[row * params.N + (col + 1)] = c[0][1];
+
+    if (row + 1 < params.M && col < params.N) 
+        dataC[(row + 1) * params.N + col] = c[1][0];
+
+    if (row + 1 < params.M && col + 1 < params.N) 
+        dataC[(row + 1) * params.N + (col + 1)] = c[1][1];
+}

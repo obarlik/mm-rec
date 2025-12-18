@@ -1,0 +1,52 @@
+#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) readonly buffer InputA { float dataA[]; };
+layout(binding = 1) readonly buffer InputB { float dataB[]; };
+layout(binding = 2) writeonly buffer OutputC { float dataC[]; };
+
+layout(push_constant) uniform PushConsts {
+    int M, N, K;
+} params;
+
+const int TS = 8;
+shared float As[TS][TS];
+shared float Bs[TS][TS];
+
+void main() {
+    int tx = int(gl_LocalInvocationID.x);
+    int ty = int(gl_LocalInvocationID.y);
+    int row = int(gl_GlobalInvocationID.y);
+    int col = int(gl_GlobalInvocationID.x);
+    
+    float acc = 0.0;
+    
+    int numTiles = (params.K + TS - 1) / TS;
+    
+    for (int t = 0; t < numTiles; ++t) {
+        int cA = t * TS + tx;
+        int rB = t * TS + ty;
+        
+        if (row < params.M && cA < params.K)
+            As[ty][tx] = dataA[row * params.K + cA];
+        else
+            As[ty][tx] = 0.0;
+            
+        if (rB < params.K && col < params.N)
+            Bs[ty][tx] = dataB[rB * params.N + col];
+        else
+            Bs[ty][tx] = 0.0;
+            
+        barrier();
+        
+        for (int k = 0; k < TS; ++k) {
+            acc += As[ty][k] * Bs[k][tx];
+        }
+        
+        barrier();
+    }
+    
+    if (row < params.M && col < params.N) {
+        dataC[row * params.N + col] = acc;
+    }
+}

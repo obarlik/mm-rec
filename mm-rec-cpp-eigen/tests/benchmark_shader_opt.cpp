@@ -140,6 +140,64 @@ int main() {
     double gflops_pre = (ops / dt_pre.count()) / 1e9;
     std::cout << "Time: " << dt_pre.count() << "s | GFLOPS: " << gflops_pre << std::endl;
     std::cout << ">>> Prefetch GFLOPS: " << gflops_pre << " (Speedup: " << std::fixed << std::setprecision(2) << gflops_pre/gflops_scalar << "x)" << std::endl;
+
+    // 8. Super-Tiled (32x32) Benchmark
+    std::cout << "\n--- [Super-Tiled (32x32) 2x2 Block] ---" << std::endl;
+    // Uses standard matmul call
+    VulkanCompute::matmul(A.data(), B.data(), C.data(), M, N, K, "src/shaders/matmul_32x32.spv");
+    
+    t0 = std::chrono::high_resolution_clock::now();
+    for(int i=0; i<ITER; ++i)
+        VulkanCompute::matmul(A.data(), B.data(), C.data(), M, N, K, "src/shaders/matmul_32x32.spv");
+    t1 = std::chrono::high_resolution_clock::now();
+    
+    std::chrono::duration<double> dt_super = (t1 - t0) / ITER;
+    double gflops_super = (ops / dt_super.count()) / 1e9;
+    std::cout << "Time: " << dt_super.count() << "s | GFLOPS: " << gflops_super << std::endl;
+    std::cout << ">>> Super-Tiled GFLOPS: " << gflops_super << " (Speedup: " << std::fixed << std::setprecision(2) << gflops_super/gflops_scalar << "x)" << std::endl;
+
+    // 9. Small-Tile (8x8) Benchmark
+    std::cout << "\n--- [Small-Tiled (8x8)] ---" << std::endl;
+    // Uses standard matmul call
+    VulkanCompute::matmul(A.data(), B.data(), C.data(), M, N, K, "src/shaders/matmul_8x8.spv");
+    
+    t0 = std::chrono::high_resolution_clock::now();
+    for(int i=0; i<ITER; ++i)
+        VulkanCompute::matmul(A.data(), B.data(), C.data(), M, N, K, "src/shaders/matmul_8x8.spv");
+    t1 = std::chrono::high_resolution_clock::now();
+    
+    std::chrono::duration<double> dt_small = (t1 - t0) / ITER;
+    double gflops_small = (ops / dt_small.count()) / 1e9;
+    std::cout << "Time: " << dt_small.count() << "s | GFLOPS: " << gflops_small << std::endl;
+    std::cout << ">>> Small-Tiled GFLOPS: " << gflops_small << " (Speedup: " << std::fixed << std::setprecision(2) << gflops_small/gflops_scalar << "x)" << std::endl;
+
+    // 10. Micro-Tile (4x4) Benchmark
+    std::cout << "\n--- [Micro-Tiled (4x4)] ---" << std::endl;
+    VulkanCompute::matmul(A.data(), B.data(), C.data(), M, N, K, "src/shaders/matmul_4x4.spv");
+    
+    t0 = std::chrono::high_resolution_clock::now();
+    for(int i=0; i<ITER; ++i)
+        VulkanCompute::matmul(A.data(), B.data(), C.data(), M, N, K, "src/shaders/matmul_4x4.spv");
+    t1 = std::chrono::high_resolution_clock::now();
+    
+    std::chrono::duration<double> dt_micro = (t1 - t0) / ITER;
+    double gflops_micro = (ops / dt_micro.count()) / 1e9;
+    std::cout << "Time: " << dt_micro.count() << "s | GFLOPS: " << gflops_micro << std::endl;
+    std::cout << ">>> Micro-Tiled GFLOPS: " << gflops_micro << " (Speedup: " << std::fixed << std::setprecision(2) << gflops_micro/gflops_scalar << "x)" << std::endl;
+
+    // 11. Nano-Tile (2x2) Benchmark
+    std::cout << "\n--- [Nano-Tiled (2x2)] ---" << std::endl;
+    VulkanCompute::matmul(A.data(), B.data(), C.data(), M, N, K, "src/shaders/matmul_2x2.spv");
+    
+    t0 = std::chrono::high_resolution_clock::now();
+    for(int i=0; i<ITER; ++i)
+        VulkanCompute::matmul(A.data(), B.data(), C.data(), M, N, K, "src/shaders/matmul_2x2.spv");
+    t1 = std::chrono::high_resolution_clock::now();
+    
+    std::chrono::duration<double> dt_nano = (t1 - t0) / ITER;
+    double gflops_nano = (ops / dt_nano.count()) / 1e9;
+    std::cout << "Time: " << dt_nano.count() << "s | GFLOPS: " << gflops_nano << std::endl;
+    std::cout << ">>> Nano-Tiled GFLOPS: " << gflops_nano << " (Speedup: " << std::fixed << std::setprecision(2) << gflops_nano/gflops_scalar << "x)" << std::endl;
     
     return 0;
 }
