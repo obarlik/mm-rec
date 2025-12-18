@@ -7,7 +7,10 @@
 #pragma once
 
 #include "mm_rec/core/tensor.h"
+#include "mm_rec/core/tensor.h"
 #include <vector>
+#include <unordered_map>
+#include <cmath>
 
 namespace mm_rec {
 
@@ -26,6 +29,9 @@ public:
     }
     virtual void set_lr(float lr) = 0;
     virtual float get_lr() const = 0;
+    
+    // Flux Extension: Dynamic Scaling Factor
+    virtual void set_flux_scale(float scale) {} 
 };
 
 /**
@@ -67,50 +73,54 @@ private:
 class Adam : public Optimizer {
 public:
     Adam(float learning_rate, float beta1 = 0.9f, float beta2 = 0.999f, float epsilon = 1e-8f)
-        : lr_(learning_rate), beta1_(beta1), beta2_(beta2), epsilon_(epsilon), t_(0) {}
+        : lr_(learning_rate), beta1_(beta1), beta2_(beta2), epsilon_(epsilon) {}
     
     void step(Tensor& param, const Tensor& grad) {
-        // Initialize state if needed
-        if (m_.numel() == 0) {
-            // Construct shape vector from param
-            std::vector<int64_t> param_shape;
-            for (int i = 0; i < param.ndim(); ++i) {
-                param_shape.push_back(param.size(i));
-            }
-            m_ = Tensor::zeros(param_shape);
-            v_ = Tensor::zeros(param_shape);
+        float* ptr = param.data();
+        
+        // Initialize state for this param if needed
+        if (states_.find(ptr) == states_.end()) {
+            std::vector<int64_t> shape;
+            for (int i = 0; i < param.ndim(); ++i) shape.push_back(param.size(i));
+            
+            State s;
+            s.m = Tensor::zeros(shape);
+            s.v = Tensor::zeros(shape);
+            s.t = 0;
+            states_[ptr] = s;
         }
         
-        t_++;
+        State& s = states_[ptr];
+        s.t++;
         
-        // Update biased first moment estimate: m = beta1 * m + (1 - beta1) * grad
+        // Update moments
         for (int64_t i = 0; i < param.numel(); ++i) {
-            m_.data()[i] = beta1_ * m_.data()[i] + (1.0f - beta1_) * grad.data()[i];
-            // Update biased second raw moment estimate: v = beta2 * v + (1 - beta2) * grad^2
-            v_.data()[i] = beta2_ * v_.data()[i] + (1.0f - beta2_) * grad.data()[i] * grad.data()[i];
+            s.m.data()[i] = beta1_ * s.m.data()[i] + (1.0f - beta1_) * grad.data()[i];
+            s.v.data()[i] = beta2_ * s.v.data()[i] + (1.0f - beta2_) * grad.data()[i] * grad.data()[i];
             
-            // Compute bias-corrected first moment estimate
-            float m_hat = m_.data()[i] / (1.0f - std::pow(beta1_, t_));
-            // Compute bias-corrected second raw moment estimate
-            float v_hat = v_.data()[i] / (1.0f - std::pow(beta2_, t_));
+            float m_hat = s.m.data()[i] / (1.0f - std::pow(beta1_, s.t));
+            float v_hat = s.v.data()[i] / (1.0f - std::pow(beta2_, s.t));
             
-            // Update parameters
             param.data()[i] -= lr_ * m_hat / (std::sqrt(v_hat) + epsilon_);
         }
     }
     
     void set_lr(float lr) override { lr_ = lr; }
     float get_lr() const override { return lr_; }
-    void reset() { t_ = 0; m_ = Tensor(); v_ = Tensor(); }
+    void reset() { states_.clear(); }
     
 private:
     float lr_;
     float beta1_;
     float beta2_;
     float epsilon_;
-    int t_;  // timestep
-    Tensor m_;  // first moment vector
-    Tensor v_;  // second moment vector
+    
+    struct State {
+        Tensor m;
+        Tensor v;
+        int t;
+    };
+    std::unordered_map<void*, State> states_;
 };
 
 /**
@@ -123,54 +133,114 @@ public:
     AdamW(float learning_rate, float beta1 = 0.9f, float beta2 = 0.999f, 
           float epsilon = 1e-8f, float weight_decay = 0.01f)
         : lr_(learning_rate), beta1_(beta1), beta2_(beta2), 
-          epsilon_(epsilon), weight_decay_(weight_decay), t_(0) {}
+          epsilon_(epsilon), weight_decay_(weight_decay) {}
     
-    void step(Tensor& param, const Tensor& grad) {
-        // Initialize state if needed
-        if (m_.numel() == 0) {
-            std::vector<int64_t> param_shape;
-            for (int i = 0; i < param.ndim(); ++i) {
-                param_shape.push_back(param.size(i));
-            }
-            m_ = Tensor::zeros(param_shape);
-            v_ = Tensor::zeros(param_shape);
+    
+    void step(Tensor& param, const Tensor& grad) override {
+        float* ptr = param.data();
+        
+        if (states_.find(ptr) == states_.end()) {
+            std::vector<int64_t> shape;
+            for (int i = 0; i < param.ndim(); ++i) shape.push_back(param.size(i));
+            
+            State s;
+            s.m = Tensor::zeros(shape);
+            s.v = Tensor::zeros(shape);
+            s.t = 0;
+            states_[ptr] = s;
         }
         
-        t_++;
+        State& s = states_[ptr];
+        s.t++;
         
-        // AdamW: Apply weight decay BEFORE gradient update (decoupled)
-        // This is the key difference from L2 regularization
         for (int64_t i = 0; i < param.numel(); ++i) {
             // Weight decay
             param.data()[i] *= (1.0f - lr_ * weight_decay_);
             
-            // Update biased first moment estimate
-            m_.data()[i] = beta1_ * m_.data()[i] + (1.0f - beta1_) * grad.data()[i];
-            // Update biased second raw moment estimate
-            v_.data()[i] = beta2_ * v_.data()[i] + (1.0f - beta2_) * grad.data()[i] * grad.data()[i];
+            s.m.data()[i] = beta1_ * s.m.data()[i] + (1.0f - beta1_) * grad.data()[i];
+            s.v.data()[i] = beta2_ * s.v.data()[i] + (1.0f - beta2_) * grad.data()[i] * grad.data()[i];
             
-            // Compute bias-corrected estimates
-            float m_hat = m_.data()[i] / (1.0f - std::pow(beta1_, t_));
-            float v_hat = v_.data()[i] / (1.0f - std::pow(beta2_, t_));
+            float m_hat = s.m.data()[i] / (1.0f - std::pow(beta1_, s.t));
+            float v_hat = s.v.data()[i] / (1.0f - std::pow(beta2_, s.t));
             
-            // Update parameters
             param.data()[i] -= lr_ * m_hat / (std::sqrt(v_hat) + epsilon_);
         }
     }
     
     void set_lr(float lr) override { lr_ = lr; }
     float get_lr() const override { return lr_; }
-    void reset() { t_ = 0; m_ = Tensor(); v_ = Tensor(); }
-    
-private:
+    void reset() { states_.clear(); }
+
+protected:
     float lr_;
     float beta1_;
     float beta2_;
     float epsilon_;
     float weight_decay_;
-    int t_;
-    Tensor m_;
-    Tensor v_;
+    float flux_scale_ = 1.0f; // Default scale
+
+    struct State {
+        Tensor m;
+        Tensor v;
+        int t;
+    };
+    std::unordered_map<void*, State> states_;
+};
+
+/**
+ * Flux Optimizer (The "Invention")
+ * 
+ * Curriculum-Aware Optimization:
+ * Scales the effective step size based on the specific difficulty 
+ * of the current batch relative to the model's capacity.
+ */
+class Flux : public AdamW {
+public:
+    using AdamW::AdamW; // Inherit constructor
+    
+    void set_flux_scale(float scale) override {
+        flux_scale_ = scale;
+    }
+    
+    // Override step to apply flux scaling
+    void step(Tensor& param, const Tensor& grad) override {
+        float* ptr = param.data();
+        
+        // Initialize state if needed
+        if (states_.find(ptr) == states_.end()) {
+            std::vector<int64_t> shape;
+            for (int i = 0; i < param.ndim(); ++i) shape.push_back(param.size(i));
+            
+            State s;
+            s.m = Tensor::zeros(shape);
+            s.v = Tensor::zeros(shape);
+            s.t = 0;
+            states_[ptr] = s;
+        }
+        
+        State& s = states_[ptr];
+        s.t++;
+        
+        // Flux: Apply scale to LR
+        float effective_lr = lr_ * flux_scale_;
+        
+        // AdamW Logic with State Map
+        for (int64_t i = 0; i < param.numel(); ++i) {
+            // Weight decay
+            param.data()[i] *= (1.0f - effective_lr * weight_decay_);
+            
+            s.m.data()[i] = beta1_ * s.m.data()[i] + (1.0f - beta1_) * grad.data()[i];
+            s.v.data()[i] = beta2_ * s.v.data()[i] + (1.0f - beta2_) * grad.data()[i] * grad.data()[i];
+            
+            float m_hat = s.m.data()[i] / (1.0f - std::pow(beta1_, s.t));
+            float v_hat = s.v.data()[i] / (1.0f - std::pow(beta2_, s.t));
+            
+            param.data()[i] -= effective_lr * m_hat / (std::sqrt(v_hat) + epsilon_);
+        }
+    }
+
+private:
+   // Using AdamW protected members
 };
 
 } // namespace mm_rec

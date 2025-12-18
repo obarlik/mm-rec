@@ -10,7 +10,7 @@ num_experts=2
 top_k=1
 
 # Training (HIGHER LR + proper settings)
-optimizer_type=adamw
+optimizer_type=flux
 learning_rate=0.01
 warmup_steps=10
 total_steps=100

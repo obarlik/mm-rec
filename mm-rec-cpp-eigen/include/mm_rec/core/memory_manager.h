@@ -325,6 +325,10 @@ public:
         GlobalBlockPool::instance().set_memory_limit(max_bytes);
     }
     
+    static size_t get_global_memory_usage() {
+        return GlobalBlockPool::instance().get_current_usage();
+    }
+    
     void* allocate(size_t bytes) {
         // 1. Try current block
         if (current_block_) {

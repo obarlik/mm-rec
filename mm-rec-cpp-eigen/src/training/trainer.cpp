@@ -30,8 +30,10 @@ Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
         config.learning_rate * 0.01f  // min_lr
     );
     
-    // Create optimizer
-    if (config.optimizer_type == "adamw") {
+    if (config.optimizer_type == "flux") {
+        std::cout << "Creating Flux Optimizer (Adaptive Complexity Scaling)" << std::endl;
+        optimizer_ = std::make_unique<Flux>(config.learning_rate, 0.9f, 0.999f, 1e-8f, config.weight_decay);
+    } else if (config.optimizer_type == "adamw") {
         std::cout << "Creating AdamW Optimizer (LR=" << config.learning_rate << ", WD=" << config.weight_decay << ")" << std::endl;
         optimizer_ = std::make_unique<AdamW>(config.learning_rate, 0.9f, 0.999f, 1e-8f, config.weight_decay);
     } else if (config.optimizer_type == "adam") {

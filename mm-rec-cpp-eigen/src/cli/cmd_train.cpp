@@ -315,7 +315,7 @@ int cmd_train(int argc, char* argv[]) {
                  // Show PPL of the FIRST sample as representative (just for log)
                  float first_ppl = std::exp(probe_losses.data()[0]);
                  
-                 size_t mem_bytes = MemoryManager::instance().get_total_memory();
+                 size_t mem_bytes = MemoryManager::get_global_memory_usage();
                  double mem_mb = mem_bytes / (1024.0 * 1024.0);
                  
                  std::cout << "[Ep " << iteration << "] Batch " << batch_idx << "/" << num_batches
@@ -349,6 +349,31 @@ int cmd_train(int argc, char* argv[]) {
             }
             
             TrainingBatch final_batch{f_input, f_target, f_mask};
+            // FLUX OPTIMIZER LOGIC
+            // Calculate difficulty score (0.0 = Easy, 1.0 = Threshold)
+            // Scale update to be aggressive on confident data, cautious on hard data.
+            // PPL of the *Medium* batch we just created.
+            // We don't have PPL of the final batch readily available without re-running forward.
+            // Approximation: Use the average PPL of the samples we selected.
+            
+            float avg_ppl = 0.0f;
+            for (int64_t idx : medium_indices) {
+                avg_ppl += std::exp(probe_losses.data()[idx]);
+            }
+            if (!medium_indices.empty()) avg_ppl /= medium_indices.size();
+            
+            float difficulty_ratio = std::min(1.0f, avg_ppl / hard_threshold);
+            
+            // Flux Formula: 
+            // If near hard threshold (ratio=1.0) -> scale = 0.5 (Cautious)
+            // If very easy (ratio=0.0) -> scale = 1.25 (Aggressive)
+            // Linear Interpolation
+            float flux_scale = 1.25f - (0.75f * difficulty_ratio);
+            
+            if (train_config.optimizer_type == "flux") {
+                trainer.get_optimizer()->set_flux_scale(flux_scale);
+            }
+
             float loss = trainer.train_step(final_batch);
             
             // Check for NaN
@@ -368,10 +393,30 @@ int cmd_train(int argc, char* argv[]) {
                  // Average speed over epoch
                  double speed_tps = (epoch_steps * filtered_size * seq_len) / (step_dur + 1e-9);
                  
+                 auto current_time = std::chrono::steady_clock::now();
+                 double total_elapsed = std::chrono::duration<double>(current_time - epoch_start_time).count();
+                 int elapsed_m = (int)total_elapsed / 60;
+                 int elapsed_s = (int)total_elapsed % 60;
+                 
+                 // ETA Calculation
+                 double avg_step_time = total_elapsed / std::max((int64_t)1, (int64_t)total_steps);
+                 int64_t remaining_steps = train_config.total_steps - total_steps;
+                 double eta_seconds = remaining_steps * avg_step_time;
+                 int eta_h = (int)eta_seconds / 3600;
+                 int eta_m = ((int)eta_seconds % 3600) / 60;
+                 int eta_s = (int)eta_seconds % 60;
+
                  std::cout << " -> Step " << total_steps 
+                           << " | Time: " << elapsed_m << "m" << elapsed_s << "s"
+                           << " | ETA: " << eta_h << "h" << eta_m << "m" << eta_s << "s"
                            << " | Loss: " << std::fixed << std::setprecision(4) << loss
-                           << " | LR: " << std::fixed << std::setprecision(5) << current_lr
-                           << " | " << (int)speed_tps << " tok/s" 
+                           << " | LR: " << std::fixed << std::setprecision(5) << current_lr;
+                           
+                 if (train_config.optimizer_type == "flux") {
+                     std::cout << " | Flux: " << std::fixed << std::setprecision(2) << flux_scale;
+                 }
+                 
+                 std::cout << " | " << (int)speed_tps << " tok/s" 
                            << std::endl << std::flush;
             }
             
