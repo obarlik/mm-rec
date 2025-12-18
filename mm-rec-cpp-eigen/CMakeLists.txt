@@ -22,7 +22,32 @@ if(OpenMP_CXX_FOUND)
     message(STATUS "✅ OpenMP found")
 else()
     message(STATUS "⚠️  OpenMP not found (single-threaded)")
+    message(STATUS "⚠️  OpenMP not found (single-threaded)")
 endif()
+
+# Find OpenCL (for iGPU offloading)
+find_package(OpenCL)
+if(OpenCL_FOUND)
+    message(STATUS "✅ OpenCL found: ${OpenCL_VERSION_STRING}")
+    add_definitions(-DUSE_OPENCL)
+    include_directories(${OpenCL_INCLUDE_DIRS})
+else()
+    message(STATUS "⚠️  OpenCL not found. iGPU offloading disabled.")
+endif()
+
+# ==========================================
+# GPU / CUDA Configuration (Ready for Future)
+# ==========================================
+# option(USE_CUDA "Enable CUDA Support" OFF)
+# if(USE_CUDA)
+#     enable_language(CUDA)
+#     find_package(CUDAToolkit REQUIRED)
+#     add_definitions(-DUSE_CUDA)
+#     message(STATUS "🚀 GPU Mode: ON (CUDA Enabled)")
+# else()
+#     message(STATUS "ℹ️  GPU Mode: OFF (CPU Only)")
+# endif()
+# ==========================================
 
 # Find Eigen3 (header-only!)
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
@@ -150,6 +175,16 @@ add_executable(test_adversarial tests/test_adversarial.cpp)
 target_link_libraries(test_adversarial mm_rec_eigen)
 add_test(NAME test_adversarial COMMAND test_adversarial)
 
+add_executable(hardware_probe tests/hardware_probe.cpp)
+# Enable F16C and AVX2 explicitly for this probe
+target_compile_options(hardware_probe PRIVATE -mf16c -mavx2)
+target_link_libraries(hardware_probe mm_rec_eigen)
+
+add_executable(test_compressed_integration tests/test_compressed_integration.cpp)
+target_compile_options(test_compressed_integration PRIVATE -mf16c -mavx2)
+target_link_libraries(test_compressed_integration mm_rec_eigen)
+add_test(NAME test_compressed_integration COMMAND test_compressed_integration)
+
 # Memory Manager Benchmark
 add_executable(test_memory_benchmark tests/test_memory_benchmark.cpp)
 target_link_libraries(test_memory_benchmark mm_rec_eigen)
@@ -158,6 +193,35 @@ target_link_libraries(test_memory_benchmark mm_rec_eigen)
 add_executable(test_pool_benchmark tests/test_pool_benchmark.cpp)
 target_link_libraries(test_pool_benchmark mm_rec_eigen)
 add_test(NAME test_pool_benchmark COMMAND test_pool_benchmark)
+
+add_executable(test_system_optimizer tests/test_system_optimizer.cpp)
+target_link_libraries(test_system_optimizer mm_rec_eigen)
+add_test(NAME test_system_optimizer COMMAND test_system_optimizer)
+
+add_executable(test_optimizer_benchmark tests/test_optimizer_benchmark.cpp)
+target_link_libraries(test_optimizer_benchmark mm_rec_eigen)
+add_test(NAME test_optimizer_benchmark COMMAND test_optimizer_benchmark)
+
+add_executable(test_igpu tests/test_igpu.cpp)
+target_link_libraries(test_igpu mm_rec_eigen ${CMAKE_DL_LIBS}) # Link dl for dlopen
+add_test(NAME test_igpu COMMAND test_igpu)
+
+add_executable(test_vulkan_probe tests/test_vulkan_probe.cpp)
+target_link_libraries(test_vulkan_probe ${CMAKE_DL_LIBS})
+add_test(NAME test_vulkan_probe COMMAND test_vulkan_probe)
+
+add_executable(test_compression_benchmark tests/test_compression_benchmark.cpp)
+target_compile_options(test_compression_benchmark PRIVATE -mf16c -mavx2)
+target_link_libraries(test_compression_benchmark mm_rec_eigen)
+add_test(NAME test_compression_benchmark COMMAND test_compression_benchmark)
+
+add_executable(test_opengl_probe tests/test_opengl_probe.cpp)
+target_link_libraries(test_opengl_probe ${CMAKE_DL_LIBS})
+add_test(NAME test_opengl_probe COMMAND test_opengl_probe)
+
+add_executable(benchmark_final_suite tests/benchmark_final_suite.cpp)
+target_link_libraries(benchmark_final_suite mm_rec_eigen ${CMAKE_DL_LIBS})
+add_test(NAME benchmark_final_suite COMMAND benchmark_final_suite)
 add_executable(inference_demo src/inference_demo.cpp)
 target_link_libraries(inference_demo mm_rec_eigen)
 

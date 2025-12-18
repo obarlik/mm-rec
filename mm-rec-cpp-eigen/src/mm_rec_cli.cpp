@@ -3,6 +3,9 @@
 #include <vector>
 #include <cstring>
 #include "cli/commands.h"
+#include "mm_rec/utils/system_optimizer.h"
+
+using namespace mm_rec;
 
 void print_usage(const char* prog_name) {
     std::cerr << "Usage: " << prog_name << " <command> [args...]" << std::endl;
@@ -12,6 +15,20 @@ void print_usage(const char* prog_name) {
 }
 
 int main(int argc, char* argv[]) {
+    // 🔥 AUTO-TUNE: SystemOptimizer
+    // By default, we use ALL cores for maximum throughput (1.5 GFLOPS).
+    // If the user wants stability/efficiency (0.8 GFLOPS but low heat), they can enable P-Core pinning.
+    // For now, we disable it by default based on benchmark results.
+    // SystemOptimizer::optimize_runtime();
+    
+    // Check for explicit flag (simple check)
+    for(int i=1; i<argc; ++i) {
+        if(std::string(argv[i]) == "--p-core-only") {
+            SystemOptimizer::optimize_runtime();
+            break;
+        }
+    }
+
     if (argc < 2) {
         print_usage(argv[0]);
         return 1;
@@ -20,9 +37,6 @@ int main(int argc, char* argv[]) {
     std::string command = argv[1];
 
     if (command == "prepare") {
-        // Shift args so argv[0] is "prepare" and argv[1] is the first arg
-        // But cmd_prepare expects traditional argc/argv where argv[0] is prog name
-        // We will pass &argv[1] as the new argv array, effectively making "prepare" the new argv[0]
         return cmd_prepare(argc - 1, &argv[1]);
     } else if (command == "train") {
         return cmd_train(argc - 1, &argv[1]);
