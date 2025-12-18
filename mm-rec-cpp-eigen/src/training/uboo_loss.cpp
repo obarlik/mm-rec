@@ -4,7 +4,7 @@
 
 #include "mm_rec/training/uboo_loss.h"
 #include <cmath>
-
+#include <vector>
 #include <algorithm>
 
 namespace mm_rec {
@@ -14,18 +14,18 @@ Tensor cross_entropy_loss(const Tensor& logits, const Tensor& targets, const Ten
     // targets: [batch, seq]
     // mask: [batch, seq] - optional, 1=compute, 0=skip
     
-
-
     int64_t batch = logits.size(0);
     int64_t seq = logits.size(1);
     int64_t vocab = logits.size(2);
     
-    float total_loss = 0.0f;
-    int64_t total_tokens = 0;
+    Tensor loss_per_sample = Tensor::zeros({batch});
     
     bool use_mask = (mask.numel() > 0);
     
     for (int64_t b = 0; b < batch; ++b) {
+        float sample_total_loss = 0.0f;
+        int64_t sample_tokens = 0;
+        
         for (int64_t s = 0; s < seq; ++s) {
             // Skip if masked
             if (use_mask && mask.data()[b * seq + s] < 0.5f) {
@@ -56,22 +56,19 @@ Tensor cross_entropy_loss(const Tensor& logits, const Tensor& targets, const Ten
             // Log probability (stable)
             float log_prob = target_logit - max_logit - log_sum_exp;
             
-            // Neg log likelihood
-
-            
-            total_loss += -log_prob;
-            total_tokens++;
+            sample_total_loss += -log_prob;
+            sample_tokens++;
+        }
+        
+        // Average per sample
+        if (sample_tokens > 0) {
+            loss_per_sample.data()[b] = sample_total_loss / sample_tokens;
+        } else {
+             loss_per_sample.data()[b] = 0.0f;
         }
     }
     
-    // Average over tokens (handle empty mask case)
-    float avg_loss = (total_tokens > 0) ? (total_loss / total_tokens) : 0.0f;
-    
-    // Return as scalar tensor
-    Tensor loss_tensor = Tensor::zeros({1});
-    loss_tensor.data()[0] = avg_loss;
-    
-    return loss_tensor;
+    return loss_per_sample;
 }
 
 Tensor compute_uboo_loss(const Tensor& all_layer_logits, const Tensor& targets, const Tensor& mask) {
@@ -84,9 +81,8 @@ Tensor compute_uboo_loss(const Tensor& all_layer_logits, const Tensor& targets, 
     int64_t seq = all_layer_logits.size(2);
     int64_t vocab = all_layer_logits.size(3);
     
-
-
-    std::vector<float> layer_losses;
+    // We need to store [Batch] sized tensor for each layer
+    std::vector<Tensor> layer_losses;
     
     // Compute loss for each layer
     for (int64_t layer = 0; layer < num_layers; ++layer) {
@@ -108,31 +104,33 @@ Tensor compute_uboo_loss(const Tensor& all_layer_logits, const Tensor& targets, 
             }
         }
         
-        // Compute loss for this layer (with mask)
-        auto layer_loss = cross_entropy_loss(layer_logits, targets, mask);
-        layer_losses.push_back(layer_loss.data()[0]);
+        // Compute loss for this layer (with mask) -> Returns [Batch]
+        layer_losses.push_back(cross_entropy_loss(layer_logits, targets, mask));
     }
     
-    // Final layer loss
-    float final_loss = layer_losses.back();
+    // Final layer loss: [Batch]
+    Tensor final_loss = layer_losses.back();
     
-    // Auxiliary losses (all except final)
-    float auxiliary_loss = 0.0f;
+    // Auxiliary losses: [Batch]
+    Tensor auxiliary_loss = Tensor::zeros({batch});
     if (num_layers > 1) {
         for (size_t i = 0; i < layer_losses.size() - 1; ++i) {
-            auxiliary_loss += layer_losses[i];
+             for (int64_t b = 0; b < batch; ++b) {
+                auxiliary_loss.data()[b] += layer_losses[i].data()[b];
+             }
         }
-        auxiliary_loss /= (num_layers - 1);
+        for (int64_t b = 0; b < batch; ++b) {
+             auxiliary_loss.data()[b] /= (num_layers - 1);
+        }
     }
     
-    // UBOO weighted combination
-    // Critical: 0.5 weight prevents auxiliary from dominating
-    float total_loss = 0.5f * final_loss + 0.5f * auxiliary_loss;
+    // UBOO weighted combination: [Batch]
+    Tensor total_loss = Tensor::zeros({batch});
+    for (int64_t b = 0; b < batch; ++b) {
+        total_loss.data()[b] = 0.5f * final_loss.data()[b] + 0.5f * auxiliary_loss.data()[b];
+    }
     
-    Tensor result = Tensor::zeros({1});
-    result.data()[0] = total_loss;
-    
-    return result;
+    return total_loss;
 }
 
 } // namespace mm_rec

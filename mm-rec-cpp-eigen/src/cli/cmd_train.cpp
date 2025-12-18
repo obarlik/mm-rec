@@ -291,6 +291,41 @@ int cmd_train(int argc, char* argv[]) {
                 
                 if (ppl < easy_threshold) {
                     epoch_easy++;
+                    
+                    // DIAGNOSTIC: Analyze why it is "Easy"
+                    // Only verify the first few easy samples to avoid spam
+                    if (epoch_easy <= 3) {
+                        std::cout << "\n🔍 Analyzing Easy Sample (BatchIdx " << b << "): "
+                                  << "PPL = " << ppl << std::endl;
+                        
+                        // Count trainable tokens in this sequence
+                        int trainable_count = 0;
+                        for(int s=0; s<seq_len; ++s) {
+                             if (loss_mask.data()[b*seq_len + s] > 0.5f) trainable_count++;
+                        }
+                        
+                        std::cout << "   📊 Trainable Tokens: " << trainable_count << "/" << seq_len << std::endl;
+                                  
+                        if (trainable_count == 0) {
+                            std::cout << "   ✅ Reason: Fully Masked / Empty Target (Nothing to learn)." << std::endl;
+                        } else if (std::abs(ppl - 1.0f) < 0.01f) {
+                             std::cout << "   ⚠️  Reason: Has trainable tokens but Loss is 0? Suspicious!" << std::endl;
+                             std::cout << "   First 5 Tokens: ";
+                             for(int s=0; s<5; ++s) std::cout << (int)input_ids.data()[b*seq_len + s] << " ";
+                             std::cout << "\n   First 5 Target: ";
+                             for(int s=0; s<5; ++s) std::cout << (int)targets.data()[b*seq_len + s] << " ";
+                             std::cout << std::endl;
+                             
+                             // Check for trivial match
+                             bool exact_match = true;
+                             for(int s=0; s<seq_len; ++s) { // Input[s] predicts Target[s]? 
+                                 // Target[s] should generally be Input[s+1].
+                                 // If Input[s] == Target[s], we are predicting the current token? No.
+                             }
+                        } else {
+                            std::cout << "   ✅ Reason: Model confidently predicts this sequence." << std::endl;
+                        }
+                    }
                 } else if (ppl > hard_threshold) {
                     epoch_hard++;
                 } else {
