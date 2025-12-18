@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <future>
 #include "mm_rec/core/vulkan_compute.h"
+#include "mm_rec/core/vulkan_op.h"
 
 namespace mm_rec {
 
@@ -53,51 +54,37 @@ Tensor Linear::forward(const Tensor& input) {
     // Slices (dim 0)
     Tensor input_cpu = input.slice(0, 0, cpu_batch);
     Tensor input_gpu = input.slice(0, cpu_batch, gpu_batch);
-    
+
     // 1. Launch GPU Async
     auto gpu_future = std::async(std::launch::async, [this, &input_gpu, gpu_batch]() {
         Tensor result_gpu = Tensor::zeros({gpu_batch, out_features_});
-        // We need weight transpose for MatMul: (B x I) * (I x O) -> (B x O) ?
-        // Wait, input.matmul(weight.T) : (B x I) * (O x I).T = (B x I) * (I x O) = (B x O).
-        // Vulkan matmul expects A, B, C pointers.
-        // A = input_gpu (RowMajor) [gpu_batch, in_features]
-        // B = weight.T (RowMajor) [in_features, out_features]
-        
-        // Note: transpose() creates a copy. That's fine for now (can cache if weight fixed).
-        Tensor W_T = weight_.transpose(); 
+        Tensor W_T = weight_.transpose();
         
         // Runtime Kernel Selection
-        // Default to the optimized "Micro-Tile" (4x4) shader which hit 348 GFLOPS
         std::string shaderPath = "src/shaders/matmul_4x4.spv";
-        
         if(const char* env_kernel = std::getenv("MM_REC_GPU_KERNEL")) {
             std::string mode(env_kernel);
-            if (mode == "16x16") shaderPath = "src/shaders/matmul_16x16.spv"; // scalar/old default
+            if (mode == "16x16") shaderPath = "src/shaders/matmul_16x16.spv";
             else if (mode == "8x8")   shaderPath = "src/shaders/matmul_8x8.spv";
             else if (mode == "4x4")   shaderPath = "src/shaders/matmul_4x4.spv";
             else if (mode == "2x2")   shaderPath = "src/shaders/matmul_2x2.spv";
             else if (mode == "fp16")  shaderPath = "src/shaders/matmul_fp16.spv";
-            else if (mode == "32x32") shaderPath = "src/shaders/matmul_32x32.spv";
-        }
-        // Backward compatibility with the boolean flag
-        else if(const char* env_p = std::getenv("MM_REC_USE_FP16")) {
-             if(std::string(env_p) == "1") shaderPath = "src/shaders/matmul_fp16.spv";
         }
 
+        // Use stateless, robust dispatch (Allocates per frame, but stable 148 GFLOPS)
         bool ok = VulkanCompute::matmul(
             input_gpu.data(), 
             W_T.data(), 
             result_gpu.data(), 
             gpu_batch, 
-            out_features_, // N
-            in_features_,  // K (common dim)
-            shaderPath.c_str() // <--- Dynamic Path
+            out_features_, 
+            in_features_, 
+            shaderPath
         );
         
         if (!ok) throw std::runtime_error("GPU Dispatch Failed");
         
-        // Add bias on CPU after (or implement bias shader later).
-        // Let's add bias here quickly (CPU is fast enough for vector add).
+        // Add bias (CPU)
         float* out_data = result_gpu.data();
         const float* bias_data = bias_.data();
         for (int64_t b = 0; b < gpu_batch; ++b) {

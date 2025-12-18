@@ -6,6 +6,10 @@
 
 #pragma once
 
+#include <vector>
+#include <cstdint>
+#include <cmath>
+#include <memory> // Fix for shared_ptr
 #include "mm_rec/core/tensor.h"
 
 namespace mm_rec {
@@ -19,12 +23,16 @@ public:
     // Getters
     Tensor& weight() { return weight_; }
     Tensor& bias() { return bias_; }
-    
+
 private:
     Tensor weight_;  // [out_features, in_features]
     Tensor bias_;    // [out_features]
     int64_t in_features_;
     int64_t out_features_;
+    
+    // Opaque pointer to implementation
+    struct Impl;
+    std::shared_ptr<void> vulkan_op_; // Using void* to avoid including heavy Vulkan headers here
 };
 
 } // namespace mm_rec

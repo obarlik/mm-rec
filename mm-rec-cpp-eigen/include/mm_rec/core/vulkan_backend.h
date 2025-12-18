@@ -312,6 +312,8 @@ namespace mm_rec {
 
 class VulkanBackend {
     friend class VulkanCompute;
+    friend class VulkanMatrixOp;
+    friend class PipelineCache;
 private:
     void* lib_handle = nullptr;
     VkInstance instance = nullptr;
