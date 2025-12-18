@@ -78,6 +78,15 @@ float Trainer::train_step(const TrainingBatch& batch) {
     // Add Aux Loss from MoE
     float total_step_loss = loss + cache.total_aux_loss * 0.01f;
     
+    // Safety Check: Detect NaN in Loss (Pre-Backward)
+    // If loss is broken, gradients will be broken. Don't waste compute.
+    if (!is_robust_finite(total_step_loss)) {
+        std::cerr << "⚠️  Loss Explosion/NaN detected (Loss: " << total_step_loss << "). Skipping Step." << std::endl;
+        MemoryManager::instance().clear_persistent();
+        MemoryManager::instance().reset_arena();
+        return total_step_loss;
+    }
+    
     // 4. Backward Pass (Full Batch)
     ModelGradients grads = model_.backward(batch.targets, cache);
     

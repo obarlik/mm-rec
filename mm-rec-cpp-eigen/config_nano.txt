@@ -13,7 +13,7 @@ top_k=1
 # Training
 batch_size=32
 max_seq_len=32
-learning_rate=0.003
+learning_rate=0.0005
 optimizer_type=flux
 weight_decay=0.00
 max_iterations=50 # epochs
