@@ -122,8 +122,20 @@ constexpr char DASHBOARD_HTML[] = R"HTML(
 
         async function stopTraining() {
             if (confirm('Are you sure you want to stop training?')) {
-                await fetch('/api/stop', { method: 'POST' });
-                alert('Stop signal sent!');
+                const btn = document.querySelector('button.stop-btn'); // Assuming class or ID
+                if (btn) {
+                    btn.disabled = true;
+                    btn.innerText = "Stopping... ⏳";
+                    btn.style.backgroundColor = "#666";
+                }
+                
+                try {
+                    await fetch('/api/stop', { method: 'POST' });
+                    // alert('Stop signal sent!'); // Remove blocking alert
+                } catch (e) {
+                    alert('Failed to send stop signal');
+                    if (btn) btn.disabled = false;
+                }
             }
         }
 

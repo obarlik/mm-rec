@@ -422,6 +422,12 @@ int cmd_train(int argc, char* argv[]) {
             if (train_config.optimizer_type == "flux") {
                 trainer.get_optimizer()->set_flux_scale(flux_scale);
             }
+            
+            // Check stop signal from Dashboard (BEFORE expensive step)
+            if (trainer.should_stop()) {
+                ui::warning("Training stopped by user request (Dashboard).");
+                break;
+            }
 
             float loss = trainer.train_step(final_batch);
             
