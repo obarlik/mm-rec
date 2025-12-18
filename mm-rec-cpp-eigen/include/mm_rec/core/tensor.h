@@ -68,8 +68,9 @@ public:
         return shape_[dim];
     }
 
-    // Reshape
+    // Reshape & Slice
     Tensor reshape(std::vector<int64_t> new_shape) const;
+    Tensor slice(int64_t dim, int64_t start, int64_t end) const;
     
     // Matrix Multiplication
     Tensor matmul(const Tensor& other) const;
@@ -87,7 +88,7 @@ public:
     Tensor relu() const;
     
     // Utilities
-    Tensor cat(const std::vector<Tensor>& tensors, int64_t dim);
+    Tensor cat(const std::vector<Tensor>& tensors, int64_t dim) const;
     Tensor sum() const;
     Tensor mean() const;
     float item() const;  // For scalar tensors

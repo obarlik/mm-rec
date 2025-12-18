@@ -179,6 +179,43 @@ Tensor Tensor::reshape(std::vector<int64_t> new_shape) const {
     return t;
 }
 
+Tensor Tensor::slice(int64_t dim, int64_t start, int64_t len) const {
+    if (dim < 0 || dim >= ndim()) throw std::runtime_error("Invalid slice dimension");
+    if (start < 0 || len < 0 || start + len > shape_[dim]) throw std::runtime_error("Invalid slice range");
+    
+    std::vector<int64_t> new_shape = shape_;
+    new_shape[dim] = len;
+    Tensor result(new_shape);
+    
+    // Calculate strides
+    int64_t outer_stride = 1;
+    for(int i=0; i<dim; ++i) outer_stride *= shape_[i];
+    
+    int64_t inner_stride = 1;
+    for(int i=dim+1; i<ndim(); ++i) inner_stride *= shape_[i];
+    
+    int64_t dim_stride = inner_stride;
+    
+    // Copy data
+    const float* src = data_ptr_ + start * dim_stride;
+    float* dst = result.data_ptr_;
+    
+    // If dim is 0 (outermost), it's a contiguous block copy
+    if (dim == 0) {
+        std::memcpy(dst, src, len * dim_stride * sizeof(float));
+    } else {
+        // Strided copy
+        // For each outer element...
+        for(int64_t i=0; i<outer_stride; ++i) {
+            std::memcpy(dst, src, len * inner_stride * sizeof(float));
+            src += shape_[dim] * inner_stride;
+            dst += len * inner_stride;
+        }
+    }
+    
+    return result;
+}
+
 // ============================================================================
 // Linear Algebra (Eigen-based - ZERO RUNTIME DEPENDENCY!)
 // ============================================================================
@@ -368,6 +405,74 @@ Tensor Tensor::sum() const {
     }
     
     return from_data({result}, {1});
+}
+
+Tensor Tensor::cat(const std::vector<Tensor>& tensors, int64_t dim) const {
+    if (tensors.empty()) throw std::runtime_error("cat: empty tensor list");
+    
+    // Validate split dim
+    int64_t ndim = tensors[0].ndim();
+    if (dim < 0 || dim >= ndim) throw std::runtime_error("cat: invalid dim");
+    
+    // Calculate new shape
+    std::vector<int64_t> new_shape = tensors[0].sizes();
+    int64_t dim_sum = 0;
+    
+    for(const auto& t : tensors) {
+        if (t.ndim() != ndim) throw std::runtime_error("cat: ndim mismatch");
+        for(int i=0; i<ndim; ++i) {
+            if (i != dim && t.size(i) != new_shape[i]) throw std::runtime_error("cat: shape mismatch");
+        }
+        dim_sum += t.size(dim);
+    }
+    new_shape[dim] = dim_sum;
+    
+    Tensor result(new_shape);
+    
+    // Strides
+    int64_t outer_stride = 1;
+    for(int i=0; i<dim; ++i) outer_stride *= new_shape[i];
+    
+    int64_t inner_stride = 1;
+    for(int i=dim+1; i<ndim; ++i) inner_stride *= new_shape[i];
+    
+    int64_t offset = 0;
+    
+    // Data copy
+    float* dst = result.data();
+    
+    for(const auto& t : tensors) {
+        int64_t dim_size = t.size(dim);
+        const float* src = t.data();
+        
+        if (dim == 0) {
+            // Contiguous copy
+            int64_t copy_size = t.numel();
+            std::memcpy(dst + offset, src, copy_size * sizeof(float));
+            offset += copy_size;
+        } else {
+            // Strided copy (interleaved)
+            // This is complex. For now, assuming dim=0 (batch dim) which is contiguous for row-major?
+            // Yes, dim=0 is contiguous blocks.
+            // If dim != 0, we need to interleave.
+            // But for Linear layer batch splitting, we split on dim 0.
+            // So dim=0 optimization is sufficient for this task.
+            // Let's implement generic anyway for safety.
+            
+             // Current offset in dim direction
+             int64_t current_dim_offset = offset; // Wait, offset above is flat index.
+             // We need to track where we are in 'dim'.
+             // Let's restart logic.
+             
+             // Actually, easier implementation:
+             // Iterate through outer loop, copy inner block from input to output.
+             // But 'dst' pointer advances differently.
+             // Let's assume dim=0 for now as it's the critical path.
+             throw std::runtime_error("cat: only dim=0 implemented for now");
+        }
+    }
+    
+    return result;
 }
 
 Tensor Tensor::mean() const {
