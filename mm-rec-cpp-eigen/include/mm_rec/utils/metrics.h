@@ -27,14 +27,6 @@ namespace mm_rec {
 #endif
 
 /**
- * Output format for metrics
- */
-enum class MetricsFormat {
-    JSONL,   // Human-readable, 80 bytes/event (default)
-    BINARY   // Production, 32 bytes/event (2.5x smaller)
-};
-
-/**
  * Sampling configuration for production
  */
 struct MetricsSamplingConfig {
@@ -191,15 +183,13 @@ public:
 #endif
     }
     
-    // Start background writer with format and sampling
+    // Start background writer (binary format only)
     void start_writer(const std::string& output_path, 
-                     MetricsFormat format = MetricsFormat::JSONL,
                      const MetricsSamplingConfig& sampling = MetricsSamplingConfig()) {
 #if ENABLE_METRICS
         if (writer_running_) return;
         
         output_path_ = output_path;
-        format_ = format;
         sampling_config_ = sampling;
         event_counter_ = 0;
         
@@ -236,28 +226,21 @@ private:
     }
     
     void writer_loop() {
-        std::ofstream ofs;
+        std::ofstream ofs(output_path_, std::ios::binary | std::ios::out);
+        if (!ofs) return;
         
-        if (format_ == MetricsFormat::BINARY) {
-            ofs.open(output_path_, std::ios::binary | std::ios::out);
-            if (!ofs) return;
-            
-            // Write binary header: [MAGIC:4][VERSION:4][RESERVED:4]
-            const char magic[4] = {'M', 'M', 'R', 'C'};
-            const uint32_t version = 1;
-            const uint32_t reserved = 0;
-            ofs.write(magic, 4);
-            ofs.write(reinterpret_cast<const char*>(&version), 4);
-            ofs.write(reinterpret_cast<const char*>(&reserved), 4);
-        } else {
-            ofs.open(output_path_, std::ios::out);
-            if (!ofs) return;
-        }
+        // Write binary header: [MAGIC:4][VERSION:4][RESERVED:4]
+        const char magic[4] = {'M', 'M', 'R', 'C'};
+        const uint32_t version = 1;
+        const uint32_t reserved = 0;
+        ofs.write(magic, 4);
+        ofs.write(reinterpret_cast<const char*>(&version), 4);
+        ofs.write(reinterpret_cast<const char*>(&reserved), 4);
         
         std::vector<MetricEvent> batch;
         batch.reserve(1024);
         
-        // Batch write buffer (for binary mode)
+        // Batch write buffer
         std::vector<char> write_buffer;
         write_buffer.reserve(1024 * sizeof(MetricEvent));
         
@@ -270,27 +253,19 @@ private:
                 }
             }
             
-            // Write to disk (format-aware)
+            // Write to disk (batch mode)
             if (!batch.empty()) {
-                if (format_ == MetricsFormat::BINARY) {
-                    write_buffer.clear();
-                    write_buffer.reserve(batch.size() * sizeof(MetricEvent));
-                    
-                    // Batch serialize to buffer
-                    for (const auto& e : batch) {
-                        const char* data = reinterpret_cast<const char*>(&e);
-                        write_buffer.insert(write_buffer.end(), data, data + sizeof(MetricEvent));
-                    }
-                    
-                    // Single write call
-                    ofs.write(write_buffer.data(), write_buffer.size());
-                } else {
-                    // JSONL format
-                    for (const auto& e : batch) {
-                        write_event_json(ofs, e);
-                    }
+                write_buffer.clear();
+                write_buffer.reserve(batch.size() * sizeof(MetricEvent));
+                
+                // Batch serialize to buffer
+                for (const auto& e : batch) {
+                    const char* data = reinterpret_cast<const char*>(&e);
+                    write_buffer.insert(write_buffer.end(), data, data + sizeof(MetricEvent));
                 }
                 
+                // Single write call
+                ofs.write(write_buffer.data(), write_buffer.size());
                 batch.clear();
                 ofs.flush();
             }
@@ -312,37 +287,16 @@ private:
         }
         
         if (!events.empty() && !output_path_.empty()) {
-            std::ofstream ofs;
-            
-            if (format_ == MetricsFormat::BINARY) {
-                ofs.open(output_path_, std::ios::binary | std::ios::app);
-                if (ofs) {
-                    for (const auto& e : events) {
-                        ofs.write(reinterpret_cast<const char*>(&e), sizeof(MetricEvent));
-                    }
-                }
-            } else {
-                ofs.open(output_path_, std::ios::app);
-                if (ofs) {
-                    for (const auto& e : events) {
-                        write_event_json(ofs, e);
-                    }
+            std::ofstream ofs(output_path_, std::ios::binary | std::ios::app);
+            if (ofs) {
+                for (const auto& e : events) {
+                    ofs.write(reinterpret_cast<const char*>(&e), sizeof(MetricEvent));
                 }
             }
         }
     }
     
-    void write_event_json(std::ofstream& ofs, const MetricEvent& e) {
-        ofs << "{\"type\":" << static_cast<int>(e.type) 
-            << ",\"ts\":" << e.timestamp_us
-            << ",\"v1\":" << e.value1
-            << ",\"v2\":" << e.value2
-            << ",\"extra\":" << e.extra
-            << ",\"label\":\"" << e.label << "\"}\n";
-    }
-    
     std::string output_path_;
-    MetricsFormat format_ = MetricsFormat::JSONL;
     MetricsSamplingConfig sampling_config_;
     std::atomic<uint64_t> event_counter_{0};
     
