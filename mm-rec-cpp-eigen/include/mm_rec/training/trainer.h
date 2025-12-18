@@ -110,6 +110,7 @@ private:
     // Dashboard Components
     std::unique_ptr<net::HttpServer> dashboard_server_;
     std::atomic<bool> stop_requested_{false};
+    void setup_dashboard_handlers();
     
     // Stats for API (Protected by mutex)
     mutable std::mutex stats_mutex_;

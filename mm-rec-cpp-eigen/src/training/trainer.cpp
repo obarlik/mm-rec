@@ -67,6 +67,40 @@ Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
         return net::HttpServer::build_response(200, "text/html", ui::DASHBOARD_HTML);
     });
     
+    // Try ports 8080 to 8090
+    int port = 8080;
+    while (port < 8090) {
+        dashboard_server_ = std::make_unique<net::HttpServer>(port);
+        
+        // Re-register handlers (since we created a new server instance)
+        // Note: Ideally HttpServer should allow dynamic binding, but our simple impl needs reconstruction.
+        // Let's refactor slightly to separate setup from binding?
+        // Or just lazy lambda registration. Pity I have to duplicate registration code.
+        // Let's just try to bind. If fail, recreate.
+        
+        // Refactored approach: helper method
+        setup_dashboard_handlers();
+        
+        if (dashboard_server_->start()) {
+            LOG_UI("📊 Dashboard active at http://localhost:" + std::to_string(port));
+            break;
+        } else {
+            // Port busy, try next
+            port++;
+        }
+    }
+    
+    if (port == 8090) {
+        LOG_UI("⚠️  Failed to start Dashboard (all ports 8080-8089 busy).");
+    }
+}
+
+void Trainer::setup_dashboard_handlers() {
+    // Serve HTML
+    dashboard_server_->register_handler("/", [](const std::string&) -> std::string {
+        return net::HttpServer::build_response(200, "text/html", ui::DASHBOARD_HTML);
+    });
+    
     // API: Stop
     dashboard_server_->register_handler("/api/stop", [this](const std::string&) -> std::string {
         this->stop_requested_ = true;
@@ -95,12 +129,6 @@ Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
         json << "}";
         return net::HttpServer::build_response(200, "application/json", json.str());
     });
-    
-    if (dashboard_server_->start()) {
-        LOG_UI("📊 Dashboard active at http://localhost:8080");
-    } else {
-        LOG_UI("⚠️  Failed to start Dashboard on port 8080 (Port busy?)");
-    }
 }
 
 Trainer::~Trainer() {
