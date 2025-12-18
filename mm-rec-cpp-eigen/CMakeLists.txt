@@ -229,6 +229,13 @@ add_test(NAME test_vulkan_memory COMMAND test_vulkan_memory)
 add_executable(inference_demo src/inference_demo.cpp)
 target_link_libraries(inference_demo mm_rec_eigen)
 
+add_executable(test_tokenizer tests/test_tokenizer.cpp)
+target_link_libraries(test_tokenizer mm_rec_eigen)
+add_test(NAME test_tokenizer COMMAND test_tokenizer)
+
+add_executable(benchmark_tokenizer tests/benchmark_tokenizer.cpp)
+target_link_libraries(benchmark_tokenizer mm_rec_eigen)
+
 add_executable(demo_training_cpp src/demo_training_cpp.cpp)
 target_link_libraries(demo_training_cpp mm_rec_eigen)
 

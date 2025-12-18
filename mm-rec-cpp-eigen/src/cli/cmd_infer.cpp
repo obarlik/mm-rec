@@ -50,15 +50,24 @@ int cmd_infer(int argc, char* argv[]) {
               << " | Hidden: " << config.hidden_dim 
               << " | Layers: " << config.num_layers << std::endl;
 
-    // 2. Load Vocab
-    std::cout << "📚 Loading vocab from: " << vocab_path << std::endl;
+    // 2. Load Vocab (BPE Model)
+    std::cout << "📚 Loading tokenizer from: " << vocab_path << std::endl;
     Tokenizer tokenizer;
-    // Use load_vocab
-    tokenizer.load_vocab(vocab_path);
+    // Infers merges.txt path (e.g. vocab.json -> merges.txt in same dir)
+    // Assuming vocab_path is the directory or full path to vocab.json
+    // Logic: if passed "vocab.txt" (legacy), try usage.
+    // If passed "dir/vocab.json", look for "dir/merges.txt".
+    std::string merges_path = "merges.txt"; // Default
+    size_t last_slash = vocab_path.find_last_of("/\\");
+    if (last_slash != std::string::npos) {
+        merges_path = vocab_path.substr(0, last_slash + 1) + "merges.txt";
+    }
+    // Also handle if user passed just the file name
+    
+    tokenizer.load_model(vocab_path, merges_path);
     
     if (tokenizer.vocab_size() == 0) {
-         std::cerr << "⚠️  Vocab looks empty. Loading failed?" << std::endl;
-         // return 1; // Don't fail hard yet
+         std::cerr << "⚠️  Vocab empty. BPE loading failed?" << std::endl;
     }
 
     // 3. Initialize Model
