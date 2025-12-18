@@ -125,6 +125,21 @@ int main() {
     double gflops_pack = (ops / dt_pack.count()) / 1e9;
     std::cout << "Time: " << dt_pack.count() << "s | GFLOPS: " << gflops_pack << std::endl;
     std::cout << ">>> Packed GFLOPS: " << gflops_pack << " (Speedup: " << std::fixed << std::setprecision(2) << gflops_pack/gflops_scalar << "x)" << std::endl;
+
+    // 7. Prefetch (Double Buffering) Benchmark
+    std::cout << "\n--- [Prefetch (Double Buffer) Shader] ---" << std::endl;
+    // Uses standard matmul call
+    VulkanCompute::matmul(A.data(), B.data(), C.data(), M, N, K, "src/shaders/matmul_prefetch.spv");
+    
+    t0 = std::chrono::high_resolution_clock::now();
+    for(int i=0; i<ITER; ++i)
+        VulkanCompute::matmul(A.data(), B.data(), C.data(), M, N, K, "src/shaders/matmul_prefetch.spv");
+    t1 = std::chrono::high_resolution_clock::now();
+    
+    std::chrono::duration<double> dt_pre = (t1 - t0) / ITER;
+    double gflops_pre = (ops / dt_pre.count()) / 1e9;
+    std::cout << "Time: " << dt_pre.count() << "s | GFLOPS: " << gflops_pre << std::endl;
+    std::cout << ">>> Prefetch GFLOPS: " << gflops_pre << " (Speedup: " << std::fixed << std::setprecision(2) << gflops_pre/gflops_scalar << "x)" << std::endl;
     
     return 0;
 }

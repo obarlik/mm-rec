@@ -1,0 +1,98 @@
+#version 450
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) readonly buffer InputA { float dataA[]; };
+layout(binding = 1) readonly buffer InputB { float dataB[]; };
+layout(binding = 2) writeonly buffer OutputC { float dataC[]; };
+
+layout(push_constant) uniform PushConsts {
+    int M, N, K;
+} params;
+
+const int TS = 16;
+shared float As[TS][TS];
+shared float Bs[TS][TS];
+
+void main() {
+    int tx = int(gl_LocalInvocationID.x);
+    int ty = int(gl_LocalInvocationID.y);
+    int row = int(gl_GlobalInvocationID.y);
+    int col = int(gl_GlobalInvocationID.x);
+    
+    float acc = 0.0;
+    int numTiles = (params.K + TS - 1) / TS;
+
+    // Registers for prefetching next tile
+    float nextA = 0.0;
+    float nextB = 0.0;
+
+    // --- PROLOGUE: Load Tile 0 ---
+    {
+        int t = 0;
+        int rA = row;
+        int cA = t * TS + tx;
+        int rB = t * TS + ty;
+        int cB = col;
+        
+        if (rA < params.M && cA < params.K)
+            As[ty][tx] = dataA[rA * params.K + cA];
+        else
+            As[ty][tx] = 0.0;
+            
+        if (rB < params.K && cB < params.N)
+            Bs[ty][tx] = dataB[rB * params.N + cB];
+        else
+            Bs[ty][tx] = 0.0;
+    }
+    
+    // Barrier to ensure Tile 0 is ready in Shared
+    barrier();
+
+    // --- MAIN LOOP from t=0 to numTiles-2 ---
+    // We compute Tile t, while fetching Tile t+1
+    for (int t = 0; t < numTiles - 1; ++t) {
+        
+        // 1. Issue Global Load for Tile t+1 into Registers (Async-ish)
+        int next_t = t + 1;
+        int rA = row;
+        int cA = next_t * TS + tx;
+        int rB = next_t * TS + ty;
+        int cB = col;
+        
+        // Use ternary to avoid branching that kills helper threads?
+        // Actually unconditional load with masked write is better but risk of OOB read.
+        // OOB read is specific to buffer size. We should verify index.
+        bool validA = (rA < params.M && cA < params.K);
+        nextA = validA ? dataA[rA * params.K + cA] : 0.0;
+        
+        bool validB = (rB < params.K && cB < params.N);
+        nextB = validB ? dataB[rB * params.N + cB] : 0.0;
+        
+        // 2. Compute Tile t (Data is in Shared Mem As/Bs)
+        // Independent of nextA/nextB registers.
+        for (int k = 0; k < TS; ++k) {
+            acc += As[ty][k] * Bs[k][tx];
+        }
+        
+        // 3. Sync: Ensure everyone finished computing Tile t before we overwrite Shared
+        barrier();
+        
+        // 4. Move Prefetched Registers to Shared Memory
+        As[ty][tx] = nextA;
+        Bs[ty][tx] = nextB;
+        
+        // 5. Sync: Ensure Shared Memory is updated before next Compute starts
+        barrier();
+    }
+    
+    // --- EPILOGUE: Compute last Tile (numTiles-1) ---
+    // No more prefetching needed.
+    for (int k = 0; k < TS; ++k) {
+        acc += As[ty][k] * Bs[k][tx];
+    }
+
+    // Write Result
+    if (row < params.M && col < params.N) {
+        dataC[row * params.N + col] = acc;
+    }
+}
