@@ -7,6 +7,8 @@
 #include "mm_rec/data/tokenizer.h"
 #include "mm_rec/utils/checkpoint.h"
 #include "mm_rec/utils/metrics.h"  // Zero-overhead metrics
+#include "mm_rec/utils/logger.h"
+#include "mm_rec/utils/ui.h"
 #include "commands.h"
 
 #include <iostream>
@@ -17,6 +19,7 @@
 #include <chrono>
 
 using namespace mm_rec;
+using namespace mm_rec::ui;
 
 int cmd_infer(int argc, char* argv[]) {
     if (argc < 4) {
@@ -38,13 +41,17 @@ int cmd_infer(int argc, char* argv[]) {
         }
     }
     
+    // Start Logger
+    Logger::instance().start_writer("inference.log", LogLevel::INFO);
+    ui::print_header("MM-Rec Inference Engine");
+    
     if (enable_metrics) {
         MetricsManager::instance().start_writer("inference_metrics.bin");
-        std::cout << "📊 Metrics enabled → inference_metrics.bin" << std::endl;
+        LOG_INFO("Metrics enabled → inference_metrics.bin");
     }
 
     // 1. Load Config
-    std::cout << "📄 Loading config from: " << config_path << std::endl;
+    ui::info("Loading config from: " + config_path);
     // Use ModelConfig::from_file instead of non-existent loader
     ModelConfig cfg = ModelConfig::from_file(config_path);
     
@@ -62,12 +69,12 @@ int cmd_infer(int argc, char* argv[]) {
     config.num_experts = cfg.num_experts;
     config.top_k = cfg.top_k;
     
-    std::cout << "   Vocab: " << config.vocab_size 
-              << " | Hidden: " << config.hidden_dim 
-              << " | Layers: " << config.num_layers << std::endl;
+    LOG_INFO("Vocab: " + std::to_string(config.vocab_size) + 
+             " | Hidden: " + std::to_string(config.hidden_dim) + 
+             " | Layers: " + std::to_string(config.num_layers));
 
     // 2. Load Vocab (BPE Model)
-    std::cout << "📚 Loading tokenizer from: " << vocab_path << std::endl;
+    ui::info("Loading tokenizer from: " + vocab_path);
     Tokenizer tokenizer;
     // Infers merges.txt path (e.g. vocab.json -> merges.txt in same dir)
     // Assuming vocab_path is the directory or full path to vocab.json
@@ -83,15 +90,15 @@ int cmd_infer(int argc, char* argv[]) {
     tokenizer.load_model(vocab_path, merges_path);
     
     if (tokenizer.vocab_size() == 0) {
-         std::cerr << "⚠️  Vocab empty. BPE loading failed?" << std::endl;
+         ui::warning("Vocab empty. BPE loading failed?");
     }
 
     // 3. Initialize Model
-    std::cout << "🧠 Initializing model..." << std::endl;
+    ui::info("Initializing model...");
     MMRecModel model(config);
 
     // 4. Load Checkpoint
-    std::cout << "📥 Loading weights from: " << model_path << std::endl;
+    ui::info("Loading weights from: " + model_path);
     CheckpointMetadata metadata;
     
     auto load_start = std::chrono::high_resolution_clock::now();
@@ -103,7 +110,7 @@ int cmd_infer(int argc, char* argv[]) {
         std::cout << "   Resumed from Epoch: " << metadata.epoch << ", Loss: " << metadata.loss << std::endl;
         METRIC_RECORD(CHECKPOINT_SAVE, load_time_ms, metadata.epoch, 0, "load");
     } catch (const std::exception& e) {
-        std::cerr << "❌ Failed to load checkpoint: " << e.what() << std::endl;
+        ui::error("Failed to load checkpoint: " + std::string(e.what()));
         return 1;
     }
 
@@ -113,8 +120,10 @@ int cmd_infer(int argc, char* argv[]) {
         tokens.push_back(tokenizer.bos_id()); // Default to BOS
     }
     
-    std::cout << "\n📝 Prompt: \"" << prompt << "\" (" << tokens.size() << " tokens)" << std::endl;
-    std::cout << "----------------------------------------" << std::endl;
+    std::cout << "\n";
+    ui::print_header("Generation Start", 40);
+    std::cout << color::BOLD << "Prompt:" << color::RESET << " \"" << prompt << "\" (" << tokens.size() << " tokens)\n" << std::endl;
+    
     std::cout << prompt << std::flush;
 
     // 6. Generation Loop
@@ -195,17 +204,27 @@ int cmd_infer(int argc, char* argv[]) {
     METRIC_INFERENCE(total_time_s * 1000, generated_count);
     METRIC_RECORD(CUSTOM, tokens_per_sec, total_time_s, 0, "tps");
 
-    std::cout << "\n\n----------------------------------------" << std::endl;
-    std::cout << "📊 Inference Stats:" << std::endl;
-    std::cout << "  Tokens Generated: " << generated_count << std::endl;
-    std::cout << "  Total Time: " << std::fixed << std::setprecision(3) << total_time_s << "s" << std::endl;
-    std::cout << "  Speed: " << std::fixed << std::setprecision(2) << tokens_per_sec << " tokens/s" << std::endl;
-    std::cout << "  Avg Latency: " << std::fixed << std::setprecision(1) << avg_latency_ms << " ms/token" << std::endl;
-    std::cout << "----------------------------------------" << std::endl;
+    std::cout << "\n\n";
+    
+    Table stats({"Metric", "Value", "Unit"}, 20);
+    stats.add_row({"Tokens Generated", std::to_string(generated_count), ""});
+    
+    std::stringstream time_ss; time_ss << std::fixed << std::setprecision(3) << total_time_s;
+    stats.add_row({"Total Time", time_ss.str(), "s"});
+    
+    std::stringstream speed_ss; speed_ss << std::fixed << std::setprecision(2) << tokens_per_sec;
+    stats.add_row({"Speed", speed_ss.str(), "tok/s"});
+    
+    std::stringstream lat_ss; lat_ss << std::fixed << std::setprecision(2) << avg_latency_ms;
+    stats.add_row({"Avg Latency", lat_ss.str(), "ms/tok"});
+    
+    stats.finish();
     
     if (enable_metrics) {
         MetricsManager::instance().stop_writer();
     }
+    
+    Logger::instance().stop_writer();
     
     return 0;
 }

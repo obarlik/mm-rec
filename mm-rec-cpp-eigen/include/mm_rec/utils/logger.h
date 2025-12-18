@@ -151,10 +151,19 @@ public:
         get_local_buffer().push(event);
     }
     
+    // String overload
+    static inline void log(LogLevel level, const std::string& msg) {
+        log(level, msg.c_str());
+    }
+    
     // Convenience methods
     static void ui(const char* msg)    { log(LogLevel::UI, msg); }
     static void info(const char* msg)  { log(LogLevel::INFO, msg); }
     static void debug(const char* msg) { log(LogLevel::DEBUG, msg); }
+    
+    static void ui(const std::string& msg)    { log(LogLevel::UI, msg); }
+    static void info(const std::string& msg)  { log(LogLevel::INFO, msg); }
+    static void debug(const std::string& msg) { log(LogLevel::DEBUG, msg); }
     
     // Start background writer
     void start_writer(const std::string& log_file = "mm_rec.log", 

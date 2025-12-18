@@ -17,11 +17,11 @@
 #include "mm_rec/training/gradient_utils.h"
 #include "mm_rec/training/sample_tracker.h"
 #include "mm_rec/utils/checkpoint.h"
-#include "mm_rec/utils/checkpoint.h"
 #include "mm_rec/core/memory_manager.h"
 #include "mm_rec/utils/logger.h"
-#include "mm_rec/core/vulkan_backend.h" // [NEW] GPS Support
-#include "mm_rec/utils/metrics.h" // [NEW] Zero-overhead metrics
+#include "mm_rec/utils/ui.h"            // [NEW] UI library
+#include "mm_rec/core/vulkan_backend.h"
+#include "mm_rec/utils/metrics.h"
 
 #include <iostream>
 #include <iomanip>
@@ -32,6 +32,7 @@
 #include <vector>
 
 using namespace mm_rec;
+using namespace mm_rec::ui;  // [NEW] Use UI namespace
 
 // Simple binary dataset structure
 struct InstructionDataset {
@@ -43,7 +44,7 @@ struct InstructionDataset {
     bool load_binary(const std::string& path) {
         std::ifstream ifs(path, std::ios::binary);
         if (!ifs) {
-            std::cerr << "Failed to open: " << path << std::endl;
+            ui::error("Failed to open: " + path);
             return false;
         }
         
@@ -55,7 +56,7 @@ struct InstructionDataset {
         int64_t count;
         ifs.read(reinterpret_cast<char*>(&count), sizeof(int64_t));
         
-        std::cout << "Loading " << count << " tokens (version " << version << ")..." << std::endl;
+        ui::info("Loading " + std::to_string(count) + " tokens (version " + std::to_string(version) + ")...");
         
         // Read tokens
         tokens.resize(count);
@@ -88,9 +89,9 @@ int cmd_train(int argc, char* argv[]) {
     // This allows the user to continue using the PC without lag.
     id_t pid = getpid();
     if (setpriority(PRIO_PROCESS, pid, 19) == 0) {
-        std::cout << "ℹ️  Process priority set to lowest (nice 19) for background training." << std::endl;
+        LOG_INFO("Process priority set to lowest (nice 19) for background training.");
     } else {
-        std::cerr << "⚠️  Failed to set process priority." << std::endl;
+        LOG_DEBUG("Failed to set process priority.");
     }
 
     if (argc < 3) {
@@ -102,22 +103,16 @@ int cmd_train(int argc, char* argv[]) {
     std::string config_path = argv[1];
     std::string data_path = argv[2];
     
-    // --- 1. Setup Logging (Tee to train.log) ---
-    std::ofstream log_file("train.log", std::ios::app); // Append mode
-    TeeBuf tee_cout_buf(std::cout.rdbuf(), log_file.rdbuf());
-    TeeBuf tee_cerr_buf(std::cerr.rdbuf(), log_file.rdbuf());
+    // --- 1. Setup Logging ---
+    Logger::instance().start_writer("train.log", LogLevel::DEBUG);
     
-    // Save old buffers to restore later (RAII would be better but this is simple CLI)
-    std::streambuf* old_cout = std::cout.rdbuf(&tee_cout_buf);
-    std::streambuf* old_cerr = std::cerr.rdbuf(&tee_cerr_buf);
-    
-    std::cout << "=== Adaptive Curriculum Training (Online) ===" << std::endl;
+    ui::print_header("Adaptive Curriculum Training (Online)");
 
     // 0. Initialize GPU (Hybrid)
     if (VulkanBackend::get().init()) {
-         std::cout << "🚀 GPU Backend Enabled. (Full Power Mode)" << std::endl;
+         ui::success("GPU Backend Enabled (Full Power Mode)");
     } else {
-         std::cout << "⚠️ GPU Backend Failed. Using CPU." << std::endl;
+         ui::warning("GPU Backend Failed. Using CPU.");
     }
     MMRecModelConfig config;
     float learning_rate = 0.01f;
@@ -173,12 +168,13 @@ int cmd_train(int argc, char* argv[]) {
         }
     }
     
-    std::cout << "Config Loaded: Hard Threshold = " << hard_threshold << std::endl;
-    std::cout << "               Batch Size = " << batch_size << std::endl;
-    std::cout << "               Num Layers = " << config.num_layers << std::endl;
-    std::cout << "               Num Experts = " << config.num_experts << std::endl;
+    LOG_INFO("Config Loaded: Hard Threshold = " + std::to_string(hard_threshold));
+    LOG_INFO("               Batch Size = " + std::to_string(batch_size));
+    LOG_INFO("               Num Layers = " + std::to_string(config.num_layers));
+    LOG_INFO("               Num Experts = " + std::to_string(config.num_experts));
     
     // Load dataset
+    ui::info("Loading dataset: " + data_path);
     InstructionDataset dataset;
     if (!dataset.load_binary(data_path)) return 1;
     
@@ -209,8 +205,8 @@ int cmd_train(int argc, char* argv[]) {
     // This ensures seqs in a batch are far apart (Decorrelated).
     // Correct.
     
-    std::cout << "\n🚀 STARTING ONLINE ADAPTIVE TRAINING" << std::endl;
-    std::cout << "Batches: " << num_batches << " | Stride: " << stride << std::endl;
+    ui::print_header("STARTING ONLINE ADAPTIVE TRAINING");
+    LOG_INFO("Batches: " + std::to_string(num_batches) + " | Stride: " + std::to_string(stride));
     
     // --- 2. Auto-Resume Logic ---
     int start_epoch = 1;
@@ -221,18 +217,18 @@ int cmd_train(int argc, char* argv[]) {
     // Try to load latest
     try {
         if (std::ifstream(latest_ckpt_path).good()) {
-            std::cout << "🔄 Found latest checkpoint. Resuming..." << std::endl;
+            ui::info("Found latest checkpoint. Resuming...");
             CheckpointMetadata loaded_meta;
             CheckpointManager::load_checkpoint(latest_ckpt_path, model, loaded_meta);
             start_epoch = loaded_meta.epoch + 1;
             best_loss = loaded_meta.loss; // Assuming latest was 'ok'. Better to track best separately but this is fine.
             
             // Fix: If checkoint says epoch 5, we finished 5. Start 6.
-            std::cout << "✅ Resumed from Epoch " << loaded_meta.epoch 
-                      << " (Loss: " << loaded_meta.loss << ")" << std::endl;
+            ui::success("Resumed from Epoch " + std::to_string(loaded_meta.epoch) + 
+                       " (Loss: " + std::to_string(loaded_meta.loss) + ")");
         }
     } catch (const std::exception& e) {
-        std::cerr << "⚠️  Failed to resume: " << e.what() << ". Starting from scratch." << std::endl;
+        ui::warning("Failed to resume: " + std::string(e.what()) + ". Starting from scratch.");
     }
     
     int64_t total_steps = 0;
@@ -242,7 +238,8 @@ int cmd_train(int argc, char* argv[]) {
     init_meta.epoch = 0; // Represents "Before Epoch 1"
     init_meta.learning_rate = learning_rate;
     CheckpointManager::save_checkpoint(latest_ckpt_path, model, init_meta);
-    std::cout << "💾 Initial state saved (for Robustness safety)." << std::endl;
+    CheckpointManager::save_checkpoint(latest_ckpt_path, model, init_meta);
+    LOG_INFO("Initial state saved (for Robustness safety).");
     
     // Metrics enabled by default (--no-metrics to disable)
     bool enable_metrics = true;
@@ -261,11 +258,13 @@ int cmd_train(int argc, char* argv[]) {
         sampling.warmup_events = 100;
         
         MetricsManager::instance().start_writer("training_metrics.bin", sampling);
-        std::cout << "📊 Metrics enabled → training_metrics.bin (use --no-metrics to disable)" << std::endl;
+        MetricsManager::instance().start_writer("training_metrics.bin", sampling);
+        ui::info("Metrics enabled → training_metrics.bin");
     }
     
     for (int iteration = start_epoch; iteration <= max_iterations; ++iteration) {
-        std::cout << "\n=== Epoch " << iteration << " ===" << std::endl;
+        std::cout << "\n"; // Clean separation
+        ui::print_header("Epoch " + std::to_string(iteration) + " / " + std::to_string(max_iterations), 40);
         
         int64_t epoch_easy = 0;
         int64_t epoch_medium = 0;
@@ -335,7 +334,7 @@ int cmd_train(int argc, char* argv[]) {
                 }
             }
             
-            // Log progress every 10 batches
+             // Log progress every 10 batches
             if (batch_idx % 10 == 0) {
                  auto now = std::chrono::steady_clock::now();
                  double elapsed_sec = std::chrono::duration<double>(now - epoch_start_time).count();
@@ -347,12 +346,16 @@ int cmd_train(int argc, char* argv[]) {
                  size_t mem_bytes = MemoryManager::get_global_memory_usage();
                  double mem_mb = mem_bytes / (1024.0 * 1024.0);
                  
-                 std::cout << "[Ep " << iteration << "] Batch " << batch_idx << "/" << num_batches
-                           << " | E:" << epoch_easy << " M:" << epoch_medium << " H:" << epoch_hard
-                           << " | Probe PPL: " << std::fixed << std::setprecision(1) << first_ppl
-                           << " | " << std::setprecision(2) << batches_per_sec << " it/s"
-                           << " | Mem: " << (int)mem_mb << "MB"
-                           << std::endl << std::flush;
+                 std::stringstream ss;
+                 ss << "[Ep " << iteration << "] Batch " << batch_idx << "/" << num_batches
+                    << " | E:" << epoch_easy << " M:" << epoch_medium << " H:" << epoch_hard
+                    << " | Probe PPL: " << std::fixed << std::setprecision(1) << first_ppl
+                    << " | " << std::setprecision(2) << batches_per_sec << " it/s"
+                    << " | Mem: " << (int)mem_mb << "MB";
+                 
+                 // Using direct cout with carriage return for smooth update, LOG_INFO for history
+                 std::cout << "\r" << color::CYAN << ss.str() << color::RESET << std::flush;
+                 if (batch_idx % 100 == 0) LOG_INFO(ss.str().c_str());
             }
             
             // If no medium samples, skip training this batch
@@ -423,21 +426,22 @@ int cmd_train(int argc, char* argv[]) {
             float loss = trainer.train_step(final_batch);
             
             // Check for NaN - Auto-Rollback Mechanism
+            // Check for NaN - Auto-Rollback Mechanism
             if (!is_robust_finite(loss)) {
-                std::cerr << "💥 EXPLOSION DETECTED at Batch " << batch_idx << "! Initiating Auto-Rollback..." << std::endl;
+                ui::error("EXPLOSION DETECTED at Batch " + std::to_string(batch_idx) + "! Initiating Auto-Rollback...");
                 
                 // 1. Reload Last Good Checkpoint
                 try {
                     CheckpointMetadata loaded_meta;
                     if (std::ifstream(latest_ckpt_path).good()) {
                         CheckpointManager::load_checkpoint(latest_ckpt_path, model, loaded_meta);
-                        std::cout << "🔄 Rolled back to safely saved stats (Epoch " << loaded_meta.epoch << ")" << std::endl;
+                        ui::info("Rolled back to safely saved stats (Epoch " + std::to_string(loaded_meta.epoch) + ")");
                     } else {
-                        std::cerr << "❌ No checkpoint to roll back to! Cannot recover." << std::endl;
+                        ui::error("No checkpoint to roll back to! Cannot recover.");
                         return 1; // Fatal if no backup
                     }
                 } catch (...) {
-                    std::cerr << "❌ Rollback Failed." << std::endl;
+                    ui::error("Rollback Failed.");
                     return 1;
                 }
                 
@@ -448,7 +452,7 @@ int cmd_train(int argc, char* argv[]) {
                 // CRITICAL: Update Scheduler and Optimizer via Trainer
                 trainer.update_learning_rate(learning_rate);
                 
-                std::cout << "📉 Emergency Brake: LR slashed to " << learning_rate << std::endl;
+                ui::warning("Emergency Brake: LR slashed to " + std::to_string(learning_rate));
                 
                 // 3. Clear Memory & Retry (Skip this toxic batch)
                 MemoryManager::instance().reset_arena();
@@ -474,39 +478,32 @@ int cmd_train(int argc, char* argv[]) {
                  double step_dur = std::chrono::duration<double>(step_end - epoch_start_time).count();
                  double speed_tps = (epoch_steps * filtered_size * seq_len) / (step_dur + 1e-9);
                  
-                 auto current_time = std::chrono::steady_clock::now();
-                 double total_elapsed = std::chrono::duration<double>(current_time - epoch_start_time).count();
-                 int elapsed_m = (int)total_elapsed / 60;
-                 int elapsed_s = (int)total_elapsed % 60;
-                 
-                 // ETA Calculation
-                 double avg_step_time = total_elapsed / std::max((int64_t)1, (int64_t)total_steps);
-                 int64_t remaining_steps = train_config.total_steps - total_steps;
-                 double eta_seconds = remaining_steps * avg_step_time;
-                 int eta_h = (int)eta_seconds / 3600;
-                 int eta_m = ((int)eta_seconds % 3600) / 60;
-                 int eta_s = (int)eta_seconds % 60;
-
-                 std::cout << " -> Step " << total_steps 
-                           << " | Time: " << elapsed_m << "m" << elapsed_s << "s"
-                           << " | ETA: " << eta_h << "h" << eta_m << "m" << eta_s << "s"
-                           << " | Loss: " << std::fixed << std::setprecision(4) << loss
-                           << " | LR: " << std::fixed << std::setprecision(5) << current_lr;
+                 // formatted output using stringstream
+                 std::stringstream ss;
+                 ss << "\r -> Step " << total_steps 
+                    << " | Loss: " << std::fixed << std::setprecision(4) << loss
+                    << " | LR: " << std::fixed << std::setprecision(5) << current_lr;
                            
                  if (train_config.optimizer_type == "flux") {
-                     std::cout << " | Flux: " << std::fixed << std::setprecision(2) << flux_scale;
+                     ss << " | Flux: " << std::fixed << std::setprecision(2) << flux_scale;
                  }
                  
-                 std::cout << " | " << (int)speed_tps << " tok/s" 
-                           << std::endl << std::flush;
+                 ss << " | " << (int)speed_tps << " tok/s    ";
+                 
+                 std::cout << color::GREEN << ss.str() << color::RESET << std::flush;
+                 if (total_steps % 1000 == 0) LOG_INFO(ss.str().c_str());
             }
             
             // CRITICAL: Reset Arena (Free memory) at end of batch
             MemoryManager::instance().reset_arena();
         }
         
-        std::cout << std::endl;
-        std::cout << "Epoch Stats: E=" << epoch_easy << " M=" << epoch_medium << " H=" << epoch_hard << std::endl;
+        std::cout << "\n";
+        Table stats({"Category", "Count"}, 15);
+        stats.add_row({"Easy", std::to_string(epoch_easy)});
+        stats.add_row({"Medium", std::to_string(epoch_medium)});
+        stats.add_row({"Hard", std::to_string(epoch_hard)});
+        stats.finish();
         
         // Save epoch checkpoint (Atomically overwrite latest)
         CheckpointMetadata meta;
@@ -514,26 +511,24 @@ int cmd_train(int argc, char* argv[]) {
         meta.loss = (epoch_steps > 0) ? epoch_loss / epoch_steps : 0.0f;
         meta.learning_rate = learning_rate;
         
-        std::cout << "💾 Saving " << latest_ckpt_path << "..." << std::endl;
+        LOG_INFO("Saving " + latest_ckpt_path + "...");
         CheckpointManager::save_checkpoint(latest_ckpt_path, model, meta);
         
         // Save Best
         if (meta.loss < best_loss && meta.loss > 0.0f) {
-             std::cout << "🏆 New Best Loss! (" << meta.loss << " < " << best_loss << "). Saving " << best_ckpt_path << std::endl;
+             ui::success("New Best Loss! (" + std::to_string(meta.loss) + " < " + std::to_string(best_loss) + "). Saving " + best_ckpt_path);
              best_loss = meta.loss;
              CheckpointManager::save_checkpoint(best_ckpt_path, model, meta);
         }
         
         if (epoch_medium == 0) {
-            std::cout << "\n🛑 Early Stopping: No trainable samples found in this epoch." << std::endl;
-            std::cout << "   (All samples were either too Easy or too Hard)" << std::endl;
+            ui::error("Early Stopping: No trainable samples found in this epoch.");
+            LOG_INFO("All samples were either too Easy or too Hard");
             break; 
         }
     }
     
     // Final
-
-
     CheckpointMetadata final_meta;
     final_meta.epoch = max_iterations;
     final_meta.learning_rate = learning_rate;
@@ -542,11 +537,9 @@ int cmd_train(int argc, char* argv[]) {
     // Stop metrics writer (flushes remaining events to disk)
     MetricsManager::instance().stop_writer();
     
-    std::cout << "\n✅ DONE" << std::endl;
+    ui::success("DONE");
     
-    // Restore streams (Just good hygiene)
-    std::cout.rdbuf(old_cout);
-    std::cerr.rdbuf(old_cerr);
+    Logger::instance().stop_writer();
     
     return 0;
 }
