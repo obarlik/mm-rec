@@ -188,7 +188,8 @@ std::vector<std::string> Tokenizer::bpe(const std::string& token) const {
         // We need to re-insert it with NEW rank because L changed!
         if (left != word.begin()) {
             auto prev = std::prev(left);
-            int r_old = get_rank(*prev, *right /* old L was not saved, tricky! */, bpe_ranks_); 
+            int r_old = get_rank(*prev, *right /* old L was not saved, tricky! */, bpe_ranks_);
+            (void)r_old; // Silence unused variable warning 
             // WAIT. "*left" has already been mutated to "new_merged_token"!
             // So we can't calculate r_old using *left now.
             // We need to remove (Prev, L) BEFORE mutating L.

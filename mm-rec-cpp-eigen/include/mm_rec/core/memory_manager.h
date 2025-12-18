@@ -346,7 +346,7 @@ public:
         return current_block_->allocate(bytes);
     }
     
-    void deallocate(void* ptr) {
+    void deallocate(void* /*ptr*/) {
         // No-op
     }
     

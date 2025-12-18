@@ -341,7 +341,7 @@ int cmd_train(int argc, char* argv[]) {
             
             size_t copy_size = seq_len * sizeof(float);
             
-            for (size_t i = 0; i < filtered_size; ++i) {
+            for (int64_t i = 0; i < filtered_size; ++i) {
                 int64_t src_b = medium_indices[i];
                 // Copy from candidate batch
                 std::memcpy(f_input.data() + i*seq_len,   candidate_batch.input_ids.data() + src_b*seq_len, copy_size);

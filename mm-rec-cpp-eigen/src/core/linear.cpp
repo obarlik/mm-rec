@@ -30,10 +30,10 @@ Linear::Linear(int64_t in_features, int64_t out_features)
 Tensor Linear::forward(const Tensor& input) {
     // input: [batch, in_features]
     int64_t batch = input.size(0);
-    int64_t workload = batch * in_features_ * out_features_;
+    // int64_t workload = batch * in_features_ * out_features_;
     
     // Threshold for Hybrid Execution (e.g., 10M FLOPs)
-    const int64_t GPU_THRESHOLD = 0; // User request: No threshold
+    // const int64_t GPU_THRESHOLD = 0; // User request: No threshold
 
     // If Vulkan not ready, use CPU
     if (!VulkanCompute::is_ready()) {

@@ -31,7 +31,7 @@ public:
     virtual float get_lr() const = 0;
     
     // Flux Extension: Dynamic Scaling Factor
-    virtual void set_flux_scale(float scale) {} 
+    virtual void set_flux_scale(float /*scale*/) {} 
 };
 
 /**

@@ -58,9 +58,6 @@ Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
 
 // Vectorized training step (Full Batch GPU Offload)
 float Trainer::train_step(const TrainingBatch& batch) {
-    int64_t batch_size = batch.input_ids.size(0);
-    int64_t seq_len = batch.input_ids.size(1);
-    
     // 1. Mark persistent memory start
     // We want gradients to survive until update_parameters
     MemoryManager::instance().mark_persistent();

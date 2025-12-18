@@ -29,7 +29,7 @@ void operator delete(void* ptr) noexcept {
     mm_rec::PoolAllocator::instance().deallocate(ptr);
 }
 
-void operator delete(void* ptr, size_t size) noexcept {
+void operator delete(void* ptr, size_t /*size*/) noexcept {
     // We can ignore size hint and trust our header
     mm_rec::PoolAllocator::instance().deallocate(ptr);
 }
@@ -43,6 +43,6 @@ void operator delete[](void* ptr) noexcept {
     mm_rec::PoolAllocator::instance().deallocate(ptr);
 }
 
-void operator delete[](void* ptr, size_t size) noexcept {
+void operator delete[](void* ptr, size_t /*size*/) noexcept {
     mm_rec::PoolAllocator::instance().deallocate(ptr);
 }

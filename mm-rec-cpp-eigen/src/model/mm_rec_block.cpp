@@ -234,7 +234,7 @@ std::pair<Tensor, Tensor> MMRecBlock::backward(
     int64_t seq = cache.x.size(1);
     int64_t hidden_dim = config_.hidden_dim;
     int64_t mem_dim = config_.mem_dim;
-    int64_t ffn_dim = config_.ffn_dim;
+    // int64_t ffn_dim = config_.ffn_dim;
     int64_t vocab = config_.vocab_size;
     
     // Gradients w.r.t input x and memory

@@ -104,7 +104,7 @@ Tensor MMRecModel::forward(Tensor input_ids, ForwardCache* cache, bool is_infere
         (*active_memory)[0].size(0) != batch) {
         
         // Resize vector if needed
-        if (active_memory->size() != config_.num_layers) {
+        if (active_memory->size() != static_cast<size_t>(config_.num_layers)) {
              active_memory->resize(config_.num_layers);
         }
         // Initialize tensors

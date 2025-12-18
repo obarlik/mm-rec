@@ -275,12 +275,14 @@ Tensor MoELayer::forward(const Tensor& x, MoECache* cache) {
 }
 
 // Check helper
+/*
 static bool is_expert_active(int expert_idx, const float* indices, int top_k) {
     for(int k=0; k<top_k; ++k) {
         if ((int)indices[k] == expert_idx) return true;
     }
     return false;
 }
+*/
 
 Tensor MoELayer::backward(
     const Tensor& d_output,
@@ -475,7 +477,7 @@ Tensor MoELayer::backward(
     for(int64_t i=0; i<batch*seq; ++i) {
         // Re-compute Softmax P for this token
         // Use simplified recompute as in forward
-        const float* x_ptr = x_flat.data() + i * hidden;
+        // const float* x_ptr = x_flat.data() + i * hidden;
         // Need to recompute logits? Or use Router forward?
         // We verified logits are needed. We didn't cache full logits, only sparse ones?
         // Wait, cache->router_logits IS full logits [Batch, Seq, Experts].

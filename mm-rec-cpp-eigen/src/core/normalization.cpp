@@ -57,7 +57,7 @@ Tensor RMSNorm::backward(const Tensor& d_out, const Tensor& x, RMSNormGradients&
     // x: [..., dim]
     // d_out: [..., dim] produces d_x and d_weight
     
-    int64_t last_dim = x.sizes().back();
+    // int64_t last_dim = x.sizes().back();
     int64_t numels = x.numel();
     int64_t num_vectors = numels / dim_;
     

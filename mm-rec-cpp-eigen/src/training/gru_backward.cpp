@@ -17,9 +17,9 @@ void gru_backward(
     const Tensor& r,
     const Tensor& u,
     const Tensor& h_tilde,
-    const Tensor& W_r, const Tensor& U_r, const Tensor& b_r,
-    const Tensor& W_u, const Tensor& U_u, const Tensor& b_u,
-    const Tensor& W_h, const Tensor& U_h, const Tensor& b_h,
+    const Tensor& W_r, const Tensor& U_r, const Tensor& /*b_r*/,
+    const Tensor& W_u, const Tensor& U_u, const Tensor& /*b_u*/,
+    const Tensor& W_h, const Tensor& U_h, const Tensor& /*b_h*/,
     const Tensor& dh_new,
     GRUGradients& grads,
     Tensor& dx,
@@ -27,7 +27,7 @@ void gru_backward(
 ) {
     // Dimensions
     int64_t batch = x.size(0);
-    int64_t in_dim = x.size(1);
+    // int64_t in_dim = x.size(1);
     int64_t hidden_dim = h_prev.size(1);
     
     // Map tensors to Eigen for vectorized operations

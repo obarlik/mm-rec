@@ -78,7 +78,7 @@ void linear_backward(
     // dy: [batch, out_dim]
     
     int64_t batch = x.size(0);
-    int64_t in_dim = x.size(1);
+    // int64_t in_dim = x.size(1);
     int64_t out_dim = dy.size(1);
     
     // dx = dy @ W  

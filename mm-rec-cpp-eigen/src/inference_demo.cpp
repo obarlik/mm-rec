@@ -14,7 +14,7 @@
 
 using namespace mm_rec;
 
-int main(int argc, char** argv) {
+int main(int /*argc*/, char** /*argv*/) {
     std::cout << "=== MM-Rec Streaming Generation Demo ===" << std::endl;
     
     // 1. Setup Tokenizer (Mock)
@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
         int32_t best_token = 0;
         float max_val = -1e9;
         
-        for(int v=0; v<vocab.size(); ++v) { // Only check valid vocab
+        for(size_t v=0; v<vocab.size(); ++v) { // Only check valid vocab
             if (vocab_logits[v] > max_val) {
                 max_val = vocab_logits[v];
                 best_token = v;

@@ -140,7 +140,7 @@ void DataLoader::worker_loop() {
             }
         }
         
-        TrainingBatch batch { input, target };
+        TrainingBatch batch { input, target, Tensor::zeros({0}) };
         
         // 3. Push to Buffer
         std::unique_lock<std::mutex> lock(mutex_);
