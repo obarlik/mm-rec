@@ -270,6 +270,11 @@ add_executable(test_logger tests/test_logger.cpp)
 target_link_libraries(test_logger mm_rec_eigen)
 add_test(NAME test_logger COMMAND test_logger)
 
+# UI Demo
+add_executable(demo_ui tests/demo_ui.cpp)
+target_link_libraries(demo_ui mm_rec_eigen)
+
+
 
 
 # Config/Info
