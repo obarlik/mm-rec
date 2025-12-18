@@ -16,6 +16,10 @@ compile_commands.json
 /demo_training_cpp
 /inference_demo
 /train_kernel
+/bench_log
+/bench_metrics
+/test_bin
+/test_flux_opt
 *.a
 *.o
 *.so
