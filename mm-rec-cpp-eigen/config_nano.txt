@@ -2,7 +2,7 @@
 # Designed for instant training and testing
 
 # Architecture (Tiny)
-vocab_size=128
+vocab_size=16
 hidden_dim=64
 mem_dim=64
 ffn_dim=128
@@ -13,8 +13,8 @@ top_k=1
 # Training
 batch_size=32
 max_seq_len=32
-learning_rate=0.001
-optimizer_type=adamw
+learning_rate=0.003
+optimizer_type=flux
 weight_decay=0.00
 max_iterations=50 # epochs
 

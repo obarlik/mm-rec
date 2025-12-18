@@ -349,13 +349,11 @@ int cmd_train(int argc, char* argv[]) {
             }
             
             TrainingBatch final_batch{f_input, f_target, f_mask};
-            // FLUX OPTIMIZER LOGIC
+            // FLUX OPTIMIZER V2 (Holistic Adaptive Scaling)
             // Calculate difficulty score (0.0 = Easy, 1.0 = Threshold)
             // Scale update to be aggressive on confident data, cautious on hard data.
-            // PPL of the *Medium* batch we just created.
-            // We don't have PPL of the final batch readily available without re-running forward.
-            // Approximation: Use the average PPL of the samples we selected.
             
+            // 1. Medium Batch Difficulty (Local)
             float avg_ppl = 0.0f;
             for (int64_t idx : medium_indices) {
                 avg_ppl += std::exp(probe_losses.data()[idx]);
@@ -364,11 +362,30 @@ int cmd_train(int argc, char* argv[]) {
             
             float difficulty_ratio = std::min(1.0f, avg_ppl / hard_threshold);
             
-            // Flux Formula: 
-            // If near hard threshold (ratio=1.0) -> scale = 0.5 (Cautious)
-            // If very easy (ratio=0.0) -> scale = 1.25 (Aggressive)
-            // Linear Interpolation
-            float flux_scale = 1.25f - (0.75f * difficulty_ratio);
+            // 2. Hard Sample Feedback (Global Health)
+            // If we are rejecting many samples as "Hard", the model is struggling.
+            // We must slow down globally, even if the "Medium" (easy) samples look fine.
+            int64_t local_hard_count = 0;
+            // Iterate original indices to find hard ones
+            for(int64_t b=0; b<batch_size; ++b) {
+                bool was_valid = false;
+                for(auto idx : original_indices) if(idx == b) was_valid = true;
+                if(!was_valid) continue;
+                
+                float ppl = std::exp(probe_losses.data()[b]);
+                if (ppl > hard_threshold) local_hard_count++;
+            }
+            
+            float hard_ratio = (float)local_hard_count / (float)std::max((int64_t)1, (int64_t)original_indices.size());
+            
+            // Flux Formula V2: 
+            // Base Aggression: 1.25x
+            // Difficulty Penalty: -0.75x (If Medium batch is tricky)
+            // Hardness Penalty: -2.0x (If we are skipping too much data - CRITICAL)
+            // Min Scale: 0.1x (Never zero, always slow learning)
+            
+            float flux_scale = 1.25f - (0.75f * difficulty_ratio) - (2.0f * hard_ratio);
+            flux_scale = std::max(0.1f, flux_scale);
             
             if (train_config.optimizer_type == "flux") {
                 trainer.get_optimizer()->set_flux_scale(flux_scale);

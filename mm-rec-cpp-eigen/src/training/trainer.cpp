@@ -15,6 +15,17 @@
 #include <atomic> // Used for total_loss
 #include <omp.h> // Good practice
 
+namespace {
+    // Robust Finite Check (Bypasses -ffast-math)
+    // IEEE 754: Exponent bits (23-30) all 1s means Inf or NaN.
+    // Mask: 0x7F800000
+    inline bool is_robust_finite(float f) {
+        uint32_t u;
+        std::memcpy(&u, &f, sizeof(float));
+        return (u & 0x7F800000) != 0x7F800000;
+    }
+}
+
 namespace mm_rec {
 
 Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
@@ -45,7 +56,6 @@ Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
     }
 }
 
-    // 44-50 original
 // Vectorized training step (Full Batch GPU Offload)
 float Trainer::train_step(const TrainingBatch& batch) {
     int64_t batch_size = batch.input_ids.size(0);
@@ -56,13 +66,10 @@ float Trainer::train_step(const TrainingBatch& batch) {
     MemoryManager::instance().mark_persistent();
     
     // 2. Forward Pass (Full Batch)
-    // The Linear layer will see [batch, in_features] and dispatch to GPU if batch is large enough.
-    // With batch=8, it goes to GPU (since Threshold=0).
     ForwardCache cache;
     Tensor logits = model_.forward(batch.input_ids, &cache);
     
     // 3. Loss Calculation (Full Batch)
-    // UBOO loss supports batching naturally
     Tensor loss_tensor = compute_uboo_loss(logits, batch.targets, batch.loss_mask);
     float loss = 0.0f;
     for(int i=0; i<loss_tensor.size(0); ++i) loss += loss_tensor.data()[i];
@@ -72,20 +79,23 @@ float Trainer::train_step(const TrainingBatch& batch) {
     float total_step_loss = loss + cache.total_aux_loss * 0.01f;
     
     // 4. Backward Pass (Full Batch)
-    // Gradients are computed for the whole batch at once
     ModelGradients grads = model_.backward(batch.targets, cache);
     
     // 5. Gradient Clipping
-    clip_gradients_by_norm(grads, config_.grad_clip_norm);
+    float grad_norm = clip_gradients_by_norm(grads, config_.grad_clip_norm);
+    
+    // Safety Check: Detect NaN/Inf in gradients (Bitwise)
+    // std::isnan often fails with -ffast-math, so we use robust check.
+    if (!is_robust_finite(grad_norm)) {
+        std::cerr << "⚠️  Gradient Explosion/NaN detected (Norm: " << grad_norm << "). Skipping parameter update." << std::endl;
+        
+        // Clean up memory before returning
+        MemoryManager::instance().clear_persistent();
+        MemoryManager::instance().reset_arena();
+        return total_step_loss; // Return loss but do not update
+    }
     
     // 6. Update Parameters
-    // Scale gradients by 1.0 (already averaged in backward/loss)?
-    // Usually loss is average, so gradients are average.
-    // Check compute_uboo_loss: returns average.
-    // Check linear_backward: db sums over batch. dW sums over batch.
-    // If loss is avg, then dL/dy is 1/N.
-    // So gradients are 1/N * sum(grads). Correct.
-    
     float current_lr = scheduler_->get_lr(step_);
     optimizer_->set_lr(current_lr);
     model_.update_parameters(*optimizer_, grads);
@@ -93,18 +103,6 @@ float Trainer::train_step(const TrainingBatch& batch) {
     step_++;
     
     // 7. Cleanup
-    // Free everything allocated during this step (logits, cache, grads)
-    // EXCEPT parameters which are in a deeper scope or marked differently?
-    // No, parameters are members of Model, not in Arena.
-    // Intermediates are in Arena.
-    // We marked persistent at start? No, mark_persistent saves STATE.
-    // reset_arena rewinds to that state.
-    // Wait, mark_persistent establishes a "save point".
-    // If we call reset_arena(), it wipes everything AFTER mark_persistent.
-    // But we just updated parameters (which are safe).
-    // So we can wipe everything.
-    
-    // Unmark to clear the save point?
     MemoryManager::instance().clear_persistent();
     MemoryManager::instance().reset_arena();
 

@@ -20,9 +20,9 @@ def create_nano_data():
         "[EOS]": 3,
     }
     
-    # Add numbers 0-20 to vocab
+    # Add numbers 0-3 to vocab
     # In BPE, these are usually strings.
-    for i in range(20):
+    for i in range(4):
         vocab[str(i)] = 4 + i
     
     # 3. Create Merges (Empty for this simple digit-level vocab)
