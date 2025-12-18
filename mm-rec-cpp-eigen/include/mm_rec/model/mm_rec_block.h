@@ -16,6 +16,8 @@
 #include "mm_rec/core/normalization.h"
 #include <memory>
 
+#include "mm_rec/training/optimizer.h"
+
 namespace mm_rec {
 
 struct MMRecBlockConfig {
@@ -29,7 +31,6 @@ struct MMRecBlockConfig {
 
 struct BlockCache; // Forward decl
 struct BlockGradients; // Forward decl
-class SGD; // Forward decl
 
 class MMRecBlock {
 public:
@@ -70,7 +71,7 @@ public:
     /**
      * Update parameters using optimizer and gradients
      */
-    void update_parameters(SGD& optimizer, const BlockGradients& grads);
+    void update_parameters(Optimizer& optimizer, const BlockGradients& grads);
 
 private:
     MMRecBlockConfig config_;

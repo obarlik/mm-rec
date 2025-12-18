@@ -31,7 +31,16 @@ Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
     );
     
     // Create optimizer
-    optimizer_ = std::make_unique<SGD>(config.learning_rate);
+    if (config.optimizer_type == "adamw") {
+        std::cout << "Creating AdamW Optimizer (LR=" << config.learning_rate << ", WD=" << config.weight_decay << ")" << std::endl;
+        optimizer_ = std::make_unique<AdamW>(config.learning_rate, 0.9f, 0.999f, 1e-8f, config.weight_decay);
+    } else if (config.optimizer_type == "adam") {
+         std::cout << "Creating Adam Optimizer (LR=" << config.learning_rate << ")" << std::endl;
+        optimizer_ = std::make_unique<Adam>(config.learning_rate);
+    } else {
+         std::cout << "Creating SGD Optimizer (LR=" << config.learning_rate << ")" << std::endl;
+        optimizer_ = std::make_unique<SGD>(config.learning_rate);
+    }
 }
 
     // 44-50 original
@@ -53,7 +62,9 @@ float Trainer::train_step(const TrainingBatch& batch) {
     // 3. Loss Calculation (Full Batch)
     // UBOO loss supports batching naturally
     Tensor loss_tensor = compute_uboo_loss(logits, batch.targets, batch.loss_mask);
-    float loss = loss_tensor.item();
+    float loss = 0.0f;
+    for(int i=0; i<loss_tensor.size(0); ++i) loss += loss_tensor.data()[i];
+    if(loss_tensor.size(0) > 0) loss /= loss_tensor.size(0);
     
     // Add Aux Loss from MoE
     float total_step_loss = loss + cache.total_aux_loss * 0.01f;
@@ -168,7 +179,11 @@ float Trainer::validate_step(const TrainingBatch& batch) {
     Tensor logits = model_.forward(batch.input_ids);
     Tensor loss_tensor = compute_uboo_loss(logits, batch.targets);
     
-    return loss_tensor.item();
+    float avg_loss = 0.0f;
+    for(int i=0; i<loss_tensor.size(0); ++i) avg_loss += loss_tensor.data()[i];
+    if(loss_tensor.size(0) > 0) avg_loss /= loss_tensor.size(0);
+    
+    return avg_loss;
 }
 
 float Trainer::get_current_lr() const {

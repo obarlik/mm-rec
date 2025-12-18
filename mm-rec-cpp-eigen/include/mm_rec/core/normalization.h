@@ -2,6 +2,9 @@
 
 #include "mm_rec/core/tensor.h"
 #include "mm_rec/training/optimizer.h"
+#include "mm_rec/training/optimizer.h"
+
+#include "mm_rec/training/optimizer.h"
 
 namespace mm_rec {
 
@@ -17,7 +20,7 @@ public:
 
     Tensor backward(const Tensor& d_out, const Tensor& x, RMSNormGradients& grads);
 
-    void update_parameters(SGD& optimizer, const RMSNormGradients& grads);
+    void update_parameters(Optimizer& optimizer, const RMSNormGradients& grads);
     
     // Accessors
     Tensor& weight() { return weight_; }

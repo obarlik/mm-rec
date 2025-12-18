@@ -149,7 +149,7 @@ Tensor RMSNorm::backward(const Tensor& d_out, const Tensor& x, RMSNormGradients&
     return dx;
 }
 
-void RMSNorm::update_parameters(SGD& optimizer, const RMSNormGradients& grads) {
+void RMSNorm::update_parameters(Optimizer& optimizer, const RMSNormGradients& grads) {
     optimizer.step(weight_, grads.d_weight);
 }
 

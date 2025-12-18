@@ -34,7 +34,10 @@ struct TrainingConfig {
     float grad_clip_norm = 1.0f;
     std::string checkpoint_dir = "checkpoints/";
     int warmup_steps = 100;
+
     int total_steps = 10000;
+    std::string optimizer_type = "sgd"; // sgd, adam, adamw
+    float weight_decay = 0.01f;
 };
 
 /**
@@ -79,13 +82,14 @@ public:
     void increment_step() { step_++; }
     int get_step() const { return step_; }
     
-    SGD* get_optimizer() { return optimizer_.get(); }
+    
+    Optimizer* get_optimizer() { return optimizer_.get(); }
     
 private:
     MMRecModel& model_;
     TrainingConfig config_;
     std::unique_ptr<LRScheduler> scheduler_;
-    std::unique_ptr<SGD> optimizer_;
+    std::unique_ptr<Optimizer> optimizer_;
     int step_;
 };
 

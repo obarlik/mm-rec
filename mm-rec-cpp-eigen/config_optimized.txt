@@ -1,7 +1,7 @@
 # Kernel-Optimized (Fixed: LR + Full Vocab)
 
 # FULL VOCAB (no clipping!)
-vocab_size=32000
+vocab_size=128
 hidden_dim=128
 mem_dim=128
 ffn_dim=384

@@ -29,7 +29,7 @@ struct MMRecModelConfig {
 };
 
 struct ForwardCache; // Forward declaration
-class SGD; // Forward decl
+#include "mm_rec/training/optimizer.h"
 
 class MMRecModel {
 public:
@@ -54,7 +54,7 @@ public:
     /**
      * Update all model parameters
      */
-    void update_parameters(SGD& optimizer, const ModelGradients& grads);
+    void update_parameters(Optimizer& optimizer, const ModelGradients& grads);
 
     /**
      * Reset memory states (start new sequence)

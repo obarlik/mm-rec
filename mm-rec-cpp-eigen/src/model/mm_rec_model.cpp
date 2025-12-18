@@ -298,7 +298,7 @@ ModelGradients MMRecModel::backward(const Tensor& targets, const ForwardCache& c
     return grads;
 }
 
-void MMRecModel::update_parameters(SGD& optimizer, const ModelGradients& grads) {
+void MMRecModel::update_parameters(Optimizer& optimizer, const ModelGradients& grads) {
     // 1. Update Embeddings
     optimizer.step(embedding_weights_, grads.embedding_grads);
     

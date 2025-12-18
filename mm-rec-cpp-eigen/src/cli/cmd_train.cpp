@@ -119,6 +119,8 @@ int cmd_train(int argc, char* argv[]) {
     }
     MMRecModelConfig config;
     float learning_rate = 0.01f;
+    std::string optimizer_type = "sgd";
+    float weight_decay = 0.01f;
     int batch_size = 8;
     int max_seq_len = 128; // Restored
     // Adaptive params (defaults)
@@ -153,6 +155,8 @@ int cmd_train(int argc, char* argv[]) {
         else if (key == "num_experts") config.num_experts = std::stoi(val);
         else if (key == "top_k") config.top_k = std::stoi(val);
         else if (key == "learning_rate") learning_rate = std::stof(val);
+        else if (key == "optimizer_type") optimizer_type = val;
+        else if (key == "weight_decay") weight_decay = std::stof(val);
         else if (key == "batch_size") batch_size = std::stoi(val);
         else if (key == "max_seq_len") max_seq_len = std::stoi(val);
         // Adaptive params
@@ -180,9 +184,12 @@ int cmd_train(int argc, char* argv[]) {
     MMRecModel model(config);
     
     // Initialize trainer
+    // Initialize trainer
     TrainingConfig train_config;
     train_config.learning_rate = learning_rate;
     train_config.batch_size = batch_size;
+    train_config.optimizer_type = optimizer_type;
+    train_config.weight_decay = weight_decay;
     Trainer trainer(model, train_config);
     
     // CRITICAL: Mark model weights as persistent so they aren't wiped by reset_arena()
@@ -291,41 +298,6 @@ int cmd_train(int argc, char* argv[]) {
                 
                 if (ppl < easy_threshold) {
                     epoch_easy++;
-                    
-                    // DIAGNOSTIC: Analyze why it is "Easy"
-                    // Only verify the first few easy samples to avoid spam
-                    if (epoch_easy <= 3) {
-                        std::cout << "\n🔍 Analyzing Easy Sample (BatchIdx " << b << "): "
-                                  << "PPL = " << ppl << std::endl;
-                        
-                        // Count trainable tokens in this sequence
-                        int trainable_count = 0;
-                        for(int s=0; s<seq_len; ++s) {
-                             if (loss_mask.data()[b*seq_len + s] > 0.5f) trainable_count++;
-                        }
-                        
-                        std::cout << "   📊 Trainable Tokens: " << trainable_count << "/" << seq_len << std::endl;
-                                  
-                        if (trainable_count == 0) {
-                            std::cout << "   ✅ Reason: Fully Masked / Empty Target (Nothing to learn)." << std::endl;
-                        } else if (std::abs(ppl - 1.0f) < 0.01f) {
-                             std::cout << "   ⚠️  Reason: Has trainable tokens but Loss is 0? Suspicious!" << std::endl;
-                             std::cout << "   First 5 Tokens: ";
-                             for(int s=0; s<5; ++s) std::cout << (int)input_ids.data()[b*seq_len + s] << " ";
-                             std::cout << "\n   First 5 Target: ";
-                             for(int s=0; s<5; ++s) std::cout << (int)targets.data()[b*seq_len + s] << " ";
-                             std::cout << std::endl;
-                             
-                             // Check for trivial match
-                             bool exact_match = true;
-                             for(int s=0; s<seq_len; ++s) { // Input[s] predicts Target[s]? 
-                                 // Target[s] should generally be Input[s+1].
-                                 // If Input[s] == Target[s], we are predicting the current token? No.
-                             }
-                        } else {
-                            std::cout << "   ✅ Reason: Model confidently predicts this sequence." << std::endl;
-                        }
-                    }
                 } else if (ppl > hard_threshold) {
                     epoch_hard++;
                 } else {
@@ -390,9 +362,16 @@ int cmd_train(int argc, char* argv[]) {
             total_steps++;
             
             if (epoch_steps < 20 || epoch_steps % 10 == 0) {
-                 std::cout << " -> TRAIN Step " << total_steps 
-                           << " | BatchSize: " << filtered_size // Show dynamic batch size
+                 float current_lr = trainer.get_current_lr();
+                 auto step_end = std::chrono::steady_clock::now();
+                 double step_dur = std::chrono::duration<double>(step_end - epoch_start_time).count();
+                 // Average speed over epoch
+                 double speed_tps = (epoch_steps * filtered_size * seq_len) / (step_dur + 1e-9);
+                 
+                 std::cout << " -> Step " << total_steps 
                            << " | Loss: " << std::fixed << std::setprecision(4) << loss
+                           << " | LR: " << std::fixed << std::setprecision(5) << current_lr
+                           << " | " << (int)speed_tps << " tok/s" 
                            << std::endl << std::flush;
             }
             

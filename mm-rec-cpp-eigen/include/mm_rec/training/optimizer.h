@@ -12,16 +12,33 @@
 namespace mm_rec {
 
 /**
+ * Base Optimizer Class
+ */
+class Optimizer {
+public:
+    virtual ~Optimizer() = default;
+    
+    virtual void step(Tensor& param, const Tensor& grad) = 0;
+    virtual void step(std::vector<Tensor*> params, const std::vector<Tensor>& grads) {
+        for (size_t i = 0; i < params.size(); ++i) {
+            step(*params[i], grads[i]);
+        }
+    }
+    virtual void set_lr(float lr) = 0;
+    virtual float get_lr() const = 0;
+};
+
+/**
  * Simple SGD optimizer
  */
-class SGD {
+class SGD : public Optimizer {
 public:
     explicit SGD(float learning_rate) : lr_(learning_rate) {}
     
     /**
      * Update parameters: W = W - lr * dW
      */
-    void step(Tensor& param, const Tensor& grad) {
+    void step(Tensor& param, const Tensor& grad) override {
         for (int64_t i = 0; i < param.numel(); ++i) {
             param.data()[i] -= lr_ * grad.data()[i];
         }
@@ -36,8 +53,8 @@ public:
         }
     }
     
-    void set_lr(float lr) { lr_ = lr; }
-    float get_lr() const { return lr_; }
+    void set_lr(float lr) override { lr_ = lr; }
+    float get_lr() const override { return lr_; }
     
 private:
     float lr_;
@@ -47,7 +64,7 @@ private:
  * Adam Optimizer
  * Adaptive Moment Estimation
  */
-class Adam {
+class Adam : public Optimizer {
 public:
     Adam(float learning_rate, float beta1 = 0.9f, float beta2 = 0.999f, float epsilon = 1e-8f)
         : lr_(learning_rate), beta1_(beta1), beta2_(beta2), epsilon_(epsilon), t_(0) {}
@@ -82,8 +99,8 @@ public:
         }
     }
     
-    void set_lr(float lr) { lr_ = lr; }
-    float get_lr() const { return lr_; }
+    void set_lr(float lr) override { lr_ = lr; }
+    float get_lr() const override { return lr_; }
     void reset() { t_ = 0; m_ = Tensor(); v_ = Tensor(); }
     
 private:
@@ -101,7 +118,7 @@ private:
  * Adam with decoupled Weight Decay (the correct way)
  * This is the industry standard for LLM training
  */
-class AdamW {
+class AdamW : public Optimizer {
 public:
     AdamW(float learning_rate, float beta1 = 0.9f, float beta2 = 0.999f, 
           float epsilon = 1e-8f, float weight_decay = 0.01f)
@@ -141,8 +158,8 @@ public:
         }
     }
     
-    void set_lr(float lr) { lr_ = lr; }
-    float get_lr() const { return lr_; }
+    void set_lr(float lr) override { lr_ = lr; }
+    float get_lr() const override { return lr_; }
     void reset() { t_ = 0; m_ = Tensor(); v_ = Tensor(); }
     
 private:

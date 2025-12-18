@@ -13,9 +13,11 @@
 #include <memory>
 #include <tuple>
 
+#include "mm_rec/training/optimizer.h"
+
 namespace mm_rec {
 
-class SGD; // Forward declaration
+
 
 struct MoEConfig {
     int64_t hidden_dim;
@@ -100,7 +102,7 @@ public:
     /**
      * Initializer parameters
      */
-    void update_parameters(SGD& optimizer, const MoEGradients& grads);
+    void update_parameters(Optimizer& optimizer, const MoEGradients& grads);
 
 private:
     MoEConfig config_;

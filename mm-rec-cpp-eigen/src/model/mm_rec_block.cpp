@@ -407,7 +407,7 @@ std::pair<Tensor, Tensor> MMRecBlock::backward(
     return {dx, dmemory};
 }
 
-void MMRecBlock::update_parameters(SGD& optimizer, const BlockGradients& grads) {
+void MMRecBlock::update_parameters(Optimizer& optimizer, const BlockGradients& grads) {
     // 1. Update MoE
     moe_layer_->update_parameters(optimizer, grads.moe_grads);
     

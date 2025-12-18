@@ -527,7 +527,7 @@ Tensor MoELayer::backward(
     return dx.reshape(x.sizes());
 }
 
-void MoELayer::update_parameters(SGD& optimizer, const MoEGradients& grads) {
+void MoELayer::update_parameters(Optimizer& optimizer, const MoEGradients& grads) {
     // 1. Update Gate
     optimizer.step(gate_->weight(), grads.d_gate);
     optimizer.step(gate_->bias(), grads.db_gate);
