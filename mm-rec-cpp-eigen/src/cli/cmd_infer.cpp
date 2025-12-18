@@ -6,9 +6,11 @@
 #include "mm_rec/config/model_config.h"
 #include "mm_rec/data/tokenizer.h"
 #include "mm_rec/utils/checkpoint.h"
+#include "mm_rec/utils/metrics.h"  // Zero-overhead metrics
 #include "commands.h"
 
 #include <iostream>
+#include <iomanip>
 #include <vector>
 #include <string>
 #include <thread>
@@ -18,7 +20,7 @@ using namespace mm_rec;
 
 int cmd_infer(int argc, char* argv[]) {
     if (argc < 4) {
-        std::cerr << "Usage: mm_rec infer <config_file> <model_path> <vocab_file> [prompt]" << std::endl;
+        std::cerr << "Usage: mm_rec infer <config_file> <model_path> <vocab_file> [prompt] [--metrics]" << std::endl;
         return 1;
     }
 
@@ -26,6 +28,20 @@ int cmd_infer(int argc, char* argv[]) {
     std::string model_path = argv[2];
     std::string vocab_path = argv[3];
     std::string prompt = (argc > 4) ? argv[4] : "The";
+    
+    // Check for --metrics flag
+    bool enable_metrics = false;
+    for (int i = 5; i < argc; ++i) {
+        if (std::string(argv[i]) == "--metrics") {
+            enable_metrics = true;
+            break;
+        }
+    }
+    
+    if (enable_metrics) {
+        MetricsManager::instance().start_writer("inference_metrics.jsonl");
+        std::cout << "📊 Metrics enabled -> inference_metrics.jsonl" << std::endl;
+    }
 
     // 1. Load Config
     std::cout << "📄 Loading config from: " << config_path << std::endl;
@@ -77,10 +93,15 @@ int cmd_infer(int argc, char* argv[]) {
     // 4. Load Checkpoint
     std::cout << "📥 Loading weights from: " << model_path << std::endl;
     CheckpointMetadata metadata;
-    // Use CheckpointManager::load_checkpoint
+    
+    auto load_start = std::chrono::high_resolution_clock::now();
     try {
         CheckpointManager::load_checkpoint(model_path, model, metadata);
+        auto load_end = std::chrono::high_resolution_clock::now();
+        float load_time_ms = std::chrono::duration<float, std::milli>(load_end - load_start).count();
+        
         std::cout << "   Resumed from Epoch: " << metadata.epoch << ", Loss: " << metadata.loss << std::endl;
+        METRIC_RECORD(CHECKPOINT_SAVE, load_time_ms, metadata.epoch, 0, "load");
     } catch (const std::exception& e) {
         std::cerr << "❌ Failed to load checkpoint: " << e.what() << std::endl;
         return 1;
@@ -111,13 +132,22 @@ int cmd_infer(int argc, char* argv[]) {
     int32_t current_token = tokens.back();
     int generated_count = 0;
     int max_generate = 50;
+    
+    auto gen_start = std::chrono::high_resolution_clock::now();
+    float total_token_latency_ms = 0.0f;
 
     while (generated_count < max_generate) {
         Tensor input = Tensor::zeros({1, 1});
         input.data()[0] = (float)current_token;
 
-        // Forward
+        // Forward (timed)
+        auto token_start = std::chrono::high_resolution_clock::now();
         Tensor logits = model.forward(input); 
+        auto token_end = std::chrono::high_resolution_clock::now();
+        
+        float token_latency_ms = std::chrono::duration<float, std::milli>(token_end - token_start).count();
+        total_token_latency_ms += token_latency_ms;
+        
         // logits: [layers, batch, seq, vocab]
         
         // Extract final layer logits
@@ -134,6 +164,9 @@ int cmd_infer(int argc, char* argv[]) {
                 best_token = v;
             }
         }
+        
+        // Record per-token metrics
+        METRIC_RECORD(FORWARD_PASS, token_latency_ms, generated_count, best_token, "");
 
         // Decode and Print
         std::string word = tokenizer.decode({best_token});
@@ -149,10 +182,30 @@ int cmd_infer(int argc, char* argv[]) {
         current_token = best_token;
         generated_count++;
         
-        // Sleep for effect
+        // Sleep for effect (optional visual)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
+    
+    auto gen_end = std::chrono::high_resolution_clock::now();
+    float total_time_s = std::chrono::duration<float>(gen_end - gen_start).count();
+    float tokens_per_sec = generated_count / std::max(0.001f, total_time_s);
+    float avg_latency_ms = generated_count > 0 ? total_token_latency_ms / generated_count : 0.0f;
+    
+    // Record total stats
+    METRIC_INFERENCE(total_time_s * 1000, generated_count);
+    METRIC_RECORD(CUSTOM, tokens_per_sec, total_time_s, 0, "tps");
 
     std::cout << "\n\n----------------------------------------" << std::endl;
+    std::cout << "📊 Inference Stats:" << std::endl;
+    std::cout << "  Tokens Generated: " << generated_count << std::endl;
+    std::cout << "  Total Time: " << std::fixed << std::setprecision(3) << total_time_s << "s" << std::endl;
+    std::cout << "  Speed: " << std::fixed << std::setprecision(2) << tokens_per_sec << " tokens/s" << std::endl;
+    std::cout << "  Avg Latency: " << std::fixed << std::setprecision(1) << avg_latency_ms << " ms/token" << std::endl;
+    std::cout << "----------------------------------------" << std::endl;
+    
+    if (enable_metrics) {
+        MetricsManager::instance().stop_writer();
+    }
+    
     return 0;
 }
