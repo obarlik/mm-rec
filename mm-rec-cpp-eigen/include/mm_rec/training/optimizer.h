@@ -11,6 +11,7 @@
 #include <vector>
 #include <unordered_map>
 #include <cmath>
+#include <Eigen/Dense>
 
 namespace mm_rec {
 
@@ -202,7 +203,11 @@ public:
         flux_scale_ = scale;
     }
     
-    // Override step to apply flux scaling
+    // Telemetry
+    uint64_t get_brake_stats() const { return brake_count_; }
+    void reset_brake_stats() { brake_count_ = 0; }
+
+    // Override step to apply flux scaling with Safety Brake (Trust Region)
     void step(Tensor& param, const Tensor& grad) override {
         float* ptr = param.data();
         
@@ -221,26 +226,67 @@ public:
         State& s = states_[ptr];
         s.t++;
         
-        // Flux: Apply scale to LR
-        float effective_lr = lr_ * flux_scale_;
+        // Vectorized Implementation using Eigen
+        int64_t n = param.numel();
         
-        // AdamW Logic with State Map
-        for (int64_t i = 0; i < param.numel(); ++i) {
-            // Weight decay
-            param.data()[i] *= (1.0f - effective_lr * weight_decay_);
-            
-            s.m.data()[i] = beta1_ * s.m.data()[i] + (1.0f - beta1_) * grad.data()[i];
-            s.v.data()[i] = beta2_ * s.v.data()[i] + (1.0f - beta2_) * grad.data()[i] * grad.data()[i];
-            
-            float m_hat = s.m.data()[i] / (1.0f - std::pow(beta1_, s.t));
-            float v_hat = s.v.data()[i] / (1.0f - std::pow(beta2_, s.t));
-            
-            param.data()[i] -= effective_lr * m_hat / (std::sqrt(v_hat) + epsilon_);
-        }
+        // Map data to Eigen Arrays for element-wise operations
+        Eigen::Map<Eigen::ArrayXf> p(param.data(), n);
+        Eigen::Map<const Eigen::ArrayXf> g(grad.data(), n);
+        Eigen::Map<Eigen::ArrayXf> m(s.m.data(), n);
+        Eigen::Map<Eigen::ArrayXf> v(s.v.data(), n);
+        
+        // 1. Update Moments
+        m = beta1_ * m + (1.0f - beta1_) * g;
+        v = beta2_ * v + (1.0f - beta2_) * g.square();
+        
+        // 2. Bias Correction
+        // We compute scalars first
+        float m_corr = 1.0f - std::pow(beta1_, s.t);
+        float v_corr = 1.0f - std::pow(beta2_, s.t);
+        
+        // 3. Weight Decay (AdamW)
+        float effective_lr = lr_ * flux_scale_;
+        p *= (1.0f - effective_lr * weight_decay_);
+        
+        // 4. Compute Update Step (Raw)
+        // update = lr * (m/m_corr) / (sqrt(v/v_corr) + eps)
+        Eigen::ArrayXf m_hat = m / m_corr;
+        Eigen::ArrayXf v_hat = v / v_corr;
+        Eigen::ArrayXf update = effective_lr * m_hat / (v_hat.sqrt() + epsilon_);
+        
+        // 5. Flux Safety Brake (Vectorized)
+        // Threshold = max(0.01, |p| * 0.5)
+        Eigen::ArrayXf threshold = (p.abs() * 0.5f).max(0.01f);
+        
+        // Count violations (Telemetry)
+        // Note: This forces evaluation, but it's worth it for stats.
+        // We can optimize it out in RELEASE if needed, but for now we keep it.
+        // (Use select to avoid branching?)
+        // Let's just do the check implicitly by checking diff later if we want speed
+        // or just use count() which is optimized.
+        
+        // Eigen bool masking:
+        // brake_count_ += (update.abs() > threshold).count(); 
+        
+        // 6. Apply Brake (Clamp update to [-thresh, +thresh])
+        // This is the core "Flux" logic - preventing explosion
+        Eigen::ArrayXf clipped_update = update.min(threshold).max(-threshold);
+        
+        // Telemetry Update
+        // We'll increment only if we actually clipped something.
+        // Doing this per-step might be slightly costly but O(N).
+        // For max speed, we might skip this or do it stochastically.
+        // Let's do it:
+        brake_count_ += (update.abs() > threshold).count();
+
+        // 7. Apply Update
+        p -= clipped_update;
     }
 
 private:
+    uint64_t brake_count_ = 0;
    // Using AdamW protected members
 };
+
 
 } // namespace mm_rec

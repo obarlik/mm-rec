@@ -13,7 +13,7 @@ top_k=1
 # Training
 batch_size=8
 max_seq_len=32
-learning_rate=0.002
+learning_rate=0.005
 # optimizer_type=sgd
 optimizer_type=flux
 weight_decay=0.00

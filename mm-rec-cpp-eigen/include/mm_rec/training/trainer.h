@@ -85,6 +85,12 @@ public:
     
     Optimizer* get_optimizer() { return optimizer_.get(); }
     
+    // Update base learning rate (needed for Auto-Rollback)
+    void update_learning_rate(float new_lr) {
+        if (scheduler_) scheduler_->set_base_lr(new_lr);
+        if (optimizer_) optimizer_->set_lr(new_lr); // Immediate effect
+    }
+    
 private:
     MMRecModel& model_;
     TrainingConfig config_;

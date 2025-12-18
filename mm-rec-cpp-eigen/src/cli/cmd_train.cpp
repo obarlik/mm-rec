@@ -236,6 +236,13 @@ int cmd_train(int argc, char* argv[]) {
     
     int64_t total_steps = 0;
     
+    // SAVE INITIAL CHECKPOINT (For Epoch 1 Rollback)
+    CheckpointMetadata init_meta;
+    init_meta.epoch = 0; // Represents "Before Epoch 1"
+    init_meta.learning_rate = learning_rate;
+    CheckpointManager::save_checkpoint(latest_ckpt_path, model, init_meta);
+    std::cout << "💾 Initial state saved (for Robustness safety)." << std::endl;
+    
     for (int iteration = start_epoch; iteration <= max_iterations; ++iteration) {
         std::cout << "\n=== Epoch " << iteration << " ===" << std::endl;
         
@@ -394,9 +401,36 @@ int cmd_train(int argc, char* argv[]) {
 
             float loss = trainer.train_step(final_batch);
             
-            // Check for NaN
+            // Check for NaN - Auto-Rollback Mechanism
             if (!is_robust_finite(loss)) {
-                std::cerr << "⚠️  NAN LOSS DETECTED at Batch " << batch_idx << "!" << std::endl << std::flush;
+                std::cerr << "💥 EXPLOSION DETECTED at Batch " << batch_idx << "! Initiating Auto-Rollback..." << std::endl;
+                
+                // 1. Reload Last Good Checkpoint
+                try {
+                    CheckpointMetadata loaded_meta;
+                    if (std::ifstream(latest_ckpt_path).good()) {
+                        CheckpointManager::load_checkpoint(latest_ckpt_path, model, loaded_meta);
+                        std::cout << "🔄 Rolled back to safely saved stats (Epoch " << loaded_meta.epoch << ")" << std::endl;
+                    } else {
+                        std::cerr << "❌ No checkpoint to roll back to! Cannot recover." << std::endl;
+                        return 1; // Fatal if no backup
+                    }
+                } catch (...) {
+                    std::cerr << "❌ Rollback Failed." << std::endl;
+                    return 1;
+                }
+                
+                // 2. Slash Learning Rate (The "Foolproof" Correction)
+                learning_rate *= 0.5f; 
+                train_config.learning_rate = learning_rate; 
+                
+                // CRITICAL: Update Scheduler and Optimizer via Trainer
+                trainer.update_learning_rate(learning_rate);
+                
+                std::cout << "📉 Emergency Brake: LR slashed to " << learning_rate << std::endl;
+                
+                // 3. Clear Memory & Retry (Skip this toxic batch)
+                MemoryManager::instance().reset_arena();
                 continue; 
             }
             

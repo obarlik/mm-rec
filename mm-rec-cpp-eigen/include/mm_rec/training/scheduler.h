@@ -17,6 +17,9 @@ class LRScheduler {
 public:
     virtual ~LRScheduler() = default;
     virtual float get_lr(int step) const = 0;
+    
+    // Allow dynamic updating of base LR (for Auto-Rollback)
+    virtual void set_base_lr(float lr) {}
 };
 
 /**
@@ -38,6 +41,8 @@ public:
     );
     
     float get_lr(int step) const override;
+    
+    void set_base_lr(float lr) override { base_lr_ = lr; }
     
 private:
     float base_lr_;
