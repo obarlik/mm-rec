@@ -12,6 +12,7 @@
 #include "mm_rec/core/memory_manager.h"
 #include "mm_rec/utils/metrics.h"
 #include "mm_rec/utils/logger.h"
+#include "mm_rec/utils/dashboard_html.h"
 #include <iostream>
 #include <cstring>  // memcpy
 #include <cmath>
@@ -56,6 +57,54 @@ Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
     } else {
         LOG_INFO("Creating SGD Optimizer (LR=" + std::to_string(config.learning_rate) + ")");
         optimizer_ = std::make_unique<SGD>(config.learning_rate);
+    }
+    
+    // Initialize Dashboard
+    dashboard_server_ = std::make_unique<net::HttpServer>(8080);
+    
+    // Serve HTML
+    dashboard_server_->register_handler("/", [](const std::string&) -> std::string {
+        return net::HttpServer::build_response(200, "text/html", ui::DASHBOARD_HTML);
+    });
+    
+    // API: Stop
+    dashboard_server_->register_handler("/api/stop", [this](const std::string&) -> std::string {
+        this->stop_requested_ = true;
+        LOG_UI("🛑 Stop requested via Dashboard!");
+        return net::HttpServer::build_response(200, "application/json", "{\"status\": \"stopping\"}");
+    });
+    
+    // API: Stats
+    dashboard_server_->register_handler("/api/stats", [this](const std::string&) -> std::string {
+        std::stringstream json;
+        json << "{";
+        json << "\"epoch\": " << (this->step_ / 1000) << ", "; // Approximate
+        json << "\"step\": " << this->step_ << ", ";
+        json << "\"lr\": " << this->get_current_lr() << ", ";
+        json << "\"speed\": " << this->current_speed_ << ", ";
+        json << "\"loss\": " << (this->loss_history_.empty() ? 0.0f : this->loss_history_.back()) << ", ";
+        
+        json << "\"history\": [";
+        for (size_t i = 0; i < this->loss_history_.size(); ++i) {
+            json << this->loss_history_[i];
+            if (i < this->loss_history_.size() - 1) json << ",";
+        }
+        json << "]";
+        
+        json << "}";
+        return net::HttpServer::build_response(200, "application/json", json.str());
+    });
+    
+    if (dashboard_server_->start()) {
+        LOG_UI("📊 Dashboard active at http://localhost:8080");
+    } else {
+        LOG_UI("⚠️  Failed to start Dashboard on port 8080 (Port busy?)");
+    }
+}
+
+Trainer::~Trainer() {
+    if (dashboard_server_) {
+        dashboard_server_->stop();
     }
 }
 
@@ -108,6 +157,9 @@ float Trainer::train_step(const TrainingBatch& batch) {
     model_.update_parameters(*optimizer_, grads);
     
     step_++;
+    
+    // Update dashboard stats
+    update_stats(total_step_loss, 0.0f); // Speed updated by caller mostly, but we track loss here
     
     // 7. Cleanup
     MemoryManager::instance().clear_persistent();
@@ -195,6 +247,12 @@ float Trainer::validate_step(const TrainingBatch& batch) {
 
 float Trainer::get_current_lr() const {
     return scheduler_->get_lr(step_);
+}
+
+void Trainer::update_stats(float loss, float speed) {
+    if (loss_history_.size() >= 100) loss_history_.pop_front();
+    loss_history_.push_back(loss);
+    if (speed > 0) current_speed_ = speed;
 }
 
 } // namespace mm_rec
