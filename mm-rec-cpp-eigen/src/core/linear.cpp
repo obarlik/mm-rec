@@ -61,11 +61,28 @@ Tensor Linear::forward(const Tensor& input) {
         // Vulkan matmul expects A, B, C pointers.
         // A = input_gpu (RowMajor) [gpu_batch, in_features]
         // B = weight.T (RowMajor) [in_features, out_features]
-        // C = result (RowMajor)
         
         // Note: transpose() creates a copy. That's fine for now (can cache if weight fixed).
         Tensor W_T = weight_.transpose(); 
         
+        // Runtime Kernel Selection
+        // Default to the optimized "Micro-Tile" (4x4) shader which hit 348 GFLOPS
+        std::string shaderPath = "src/shaders/matmul_4x4.spv";
+        
+        if(const char* env_kernel = std::getenv("MM_REC_GPU_KERNEL")) {
+            std::string mode(env_kernel);
+            if (mode == "16x16") shaderPath = "src/shaders/matmul_16x16.spv"; // scalar/old default
+            else if (mode == "8x8")   shaderPath = "src/shaders/matmul_8x8.spv";
+            else if (mode == "4x4")   shaderPath = "src/shaders/matmul_4x4.spv";
+            else if (mode == "2x2")   shaderPath = "src/shaders/matmul_2x2.spv";
+            else if (mode == "fp16")  shaderPath = "src/shaders/matmul_fp16.spv";
+            else if (mode == "32x32") shaderPath = "src/shaders/matmul_32x32.spv";
+        }
+        // Backward compatibility with the boolean flag
+        else if(const char* env_p = std::getenv("MM_REC_USE_FP16")) {
+             if(std::string(env_p) == "1") shaderPath = "src/shaders/matmul_fp16.spv";
+        }
+
         bool ok = VulkanCompute::matmul(
             input_gpu.data(), 
             W_T.data(), 
@@ -73,7 +90,7 @@ Tensor Linear::forward(const Tensor& input) {
             gpu_batch, 
             out_features_, // N
             in_features_,  // K (common dim)
-            (std::getenv("MM_REC_USE_FP16") ? "src/shaders/matmul_fp16.spv" : "src/shaders/matmul.spv")
+            shaderPath.c_str() // <--- Dynamic Path
         );
         
         if (!ok) throw std::runtime_error("GPU Dispatch Failed");

@@ -1,0 +1,76 @@
+#version 450
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) readonly buffer InputA {
+    float dataA[];
+};
+
+layout(binding = 1) readonly buffer InputB {
+    float dataB[];
+};
+
+layout(binding = 2) writeonly buffer OutputC {
+    float dataC[];
+};
+
+layout(push_constant) uniform PushConsts {
+    int M;
+    int N;
+    int K;
+} params;
+
+// Block size for tiling
+const int TS = 16; /* Tile Size */
+
+// Shared memory for tiles
+shared float As[TS][TS];
+shared float Bs[TS][TS];
+
+void main() {
+    // Thread indices
+    int tx = int(gl_LocalInvocationID.x);
+    int ty = int(gl_LocalInvocationID.y);
+    int row = int(gl_GlobalInvocationID.y);
+    int col = int(gl_GlobalInvocationID.x);
+
+    float acc = 0.0;
+
+    // Loop over tiles
+    int numTiles = (params.K + TS - 1) / TS;
+
+    for (int t = 0; t < numTiles; ++t) {
+        // Load tile from A
+        int r = row;
+        int c = t * TS + tx;
+        if (r < params.M && c < params.K) {
+            As[ty][tx] = dataA[r * params.K + c];
+        } else {
+            As[ty][tx] = 0.0;
+        }
+
+        // Load tile from B
+        r = t * TS + ty;
+        c = col;
+        if (r < params.K && c < params.N) {
+            Bs[ty][tx] = dataB[r * params.N + c];
+        } else {
+            Bs[ty][tx] = 0.0;
+        }
+
+        // Barrier to ensure tile is loaded
+        barrier();
+
+        // Dot product for this tile
+        for (int k = 0; k < TS; ++k) {
+            acc += As[ty][k] * Bs[k][tx];
+        }
+
+        // Barrier before next tile load
+        barrier();
+    }
+
+    // Write result
+    if (row < params.M && col < params.N) {
+        dataC[row * params.N + col] = acc;
+    }
+}
