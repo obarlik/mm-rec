@@ -261,6 +261,16 @@ add_executable(test_binary_metrics test_binary_metrics.cpp)
 target_link_libraries(test_binary_metrics mm_rec_eigen)
 add_test(NAME test_binary_metrics COMMAND test_binary_metrics)
 
+# Logger Tests
+add_executable(benchmark_logger_overhead tests/benchmark_logger_overhead.cpp)
+target_link_libraries(benchmark_logger_overhead mm_rec_eigen)
+add_test(NAME benchmark_logger_overhead COMMAND benchmark_logger_overhead)
+
+add_executable(test_logger tests/test_logger.cpp)
+target_link_libraries(test_logger mm_rec_eigen)
+add_test(NAME test_logger COMMAND test_logger)
+
+
 
 # Config/Info
 message(STATUS "========================================")
