@@ -33,11 +33,19 @@ Tensor Linear::forward(const Tensor& input) {
     int64_t workload = batch * in_features_ * out_features_;
     
     // Threshold for Hybrid Execution (e.g., 10M FLOPs)
-    const int64_t GPU_THRESHOLD = 512 * 512 * 64; // Tunable
+    const int64_t GPU_THRESHOLD = 0; // Force GPU for verification
     
     // If small batch or not available, use CPU
     if (workload < GPU_THRESHOLD || !VulkanCompute::is_ready()) {
          Tensor output = input.matmul(weight_.transpose());
+         if (!VulkanCompute::is_ready()) {
+             static bool once = false;
+             if (!once) { std::cout << "⚠️ Vulkan NOT READY. Workload: " << workload << " Threshold: " << GPU_THRESHOLD << std::endl; once = true; }
+         } else if (workload < GPU_THRESHOLD) {
+             static bool once = false;
+             if (!once) { std::cout << "ℹ️ Workload too small for GPU (" << workload << " < " << GPU_THRESHOLD << "). Using CPU." << std::endl; once = true; }
+         }
+
          // Bias add (CPU)
          int64_t out_f = out_features_;
          float* out_data = output.data();
@@ -49,18 +57,49 @@ Tensor Linear::forward(const Tensor& input) {
          return output;
     }
     
+    // int64_t in_feat = input.size(1); // Already verified
+    
     // --- Hybrid Execution ---
     // Updated Ratio for 4x4 Kernel (350 GFLOPS vs CPU 70 GFLOPS)
-    // CPU should take ~15-20% of the load.
-    int64_t cpu_batch = batch * 0.15; // 15% CPU, 85% GPU
-    int64_t gpu_batch = batch - cpu_batch; // Remainder to GPU
+    // 0. Decision: CPU or GPU?
+    // Check Environment Variable for Force CPU
+    static bool force_cpu = (std::getenv("MM_REC_FORCE_CPU") != nullptr);
+    static bool printed_mode = false;
+    if (!printed_mode) {
+        if (force_cpu) std::cout << "⚠️ MM_REC_FORCE_CPU detected. Using CPU Only." << std::endl;
+        printed_mode = true;
+    }
+
+    // GRU steps (Batch=32) -> CPU
+    // MoE Router (Batch=2048) -> GPU
+    if (force_cpu) {
+         // Pure CPU Path
+         Tensor result = Tensor::zeros({batch, out_features_});
+         #pragma omp parallel for collapse(2)
+         for(int64_t b=0; b<batch; ++b) {
+             for(int64_t f=0; f<out_features_; ++f) {
+                 float sum = bias_.data()[f];
+                 for(int64_t k=0; k<in_features_; ++k) {
+                     sum += input.data()[b * in_features_ + k] * weight_.data()[f * in_features_ + k];
+                 }
+                 result.data()[b * out_features_ + f] = sum;
+             }
+         }
+         return result;
+    }
     
-    // Slices (dim 0)
+    // Log removed for production performance
+    // if (batch > 1000 && ... log ...)
+    int64_t gpu_batch = (int64_t)(batch * 0.8);
+    int64_t cpu_batch = batch - gpu_batch;
     Tensor input_cpu = input.slice(0, 0, cpu_batch);
     Tensor input_gpu = input.slice(0, cpu_batch, gpu_batch);
-
+    
     // 1. Launch GPU Async
     auto gpu_future = std::async(std::launch::async, [this, &input_gpu, gpu_batch]() {
+        static bool once_gpu = false;
+        if (!once_gpu) { std::cout << "🚀 Executing on GPU! Workload>" << (gpu_batch * in_features_ * out_features_) << std::endl; once_gpu = true; }
+
         Tensor result_gpu = Tensor::zeros({gpu_batch, out_features_});
         Tensor W_T = weight_.transpose();
         

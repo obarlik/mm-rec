@@ -13,6 +13,7 @@
 #include "mm_rec/training/trainer.h"
 #include "mm_rec/data/data_loader.h"
 #include "mm_rec/data/tokenizer.h"
+#include "mm_rec/core/vulkan_backend.h"
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -45,15 +46,24 @@ void generate_data(const std::string& path, int64_t num_tokens) {
 int main() {
     std::cout << "🚀 Starting Pure C++ Training Engine" << std::endl;
     
+    // 0. Initialize GPU Backend (if available)
+    if (VulkanBackend::get().init()) {
+        std::cout << "✅ Vulkan Backend Initialized Successfully" << std::endl;
+    } else {
+        std::cout << "⚠️ Vulkan Backend Initialization Failed (Falling back to CPU)" << std::endl;
+    }
+    
+    // 1. Setup Data
     // 1. Setup Data
     std::string data_path = "train_data.bin";
-    int64_t total_tokens = 100000; // 100K tokens
+    int64_t total_tokens = 500000; // 500K tokens for longer run
     generate_data(data_path, total_tokens);
     
     // 2. Setup Pipeline
     auto dataset = std::make_shared<Dataset>(data_path);
-    int64_t batch_size = 32;
+    int64_t batch_size = 512; // Threshold for GPU
     int64_t seq_len = 64;
+    // Note: 256 * 64 = 16,384 tokens per batch.
     DataLoader loader(dataset, batch_size, seq_len, /*shuffle=*/false, /*workers=*/4);
     
     std::cout << "📊 Pipeline Ready. Batches: " << loader.total_batches() << std::endl;
@@ -62,7 +72,7 @@ int main() {
     MMRecModelConfig config;
     config.vocab_size = 100; // Matches data generation
     config.hidden_dim = 128;
-    config.mem_dim = 64;
+    config.mem_dim = 128; // Must match hidden_dim if MoE processes memory
     config.ffn_dim = 256;
     config.num_layers = 4;
     config.num_experts = 4; // MoE enabled
@@ -94,13 +104,13 @@ int main() {
         running_loss += loss;
         steps++;
         
-        if (steps % 10 == 0) {
+        if (steps % 1 == 0) { // Print EVERY step
             auto now = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
             float tps = (steps * batch_size * seq_len) / (duration / 1000.0f);
             
             std::cout << "\rStep " << steps 
-                      << " | Loss: " << (running_loss / 10.0f) 
+                      << " | Loss: " << (running_loss / 1.0f) 
                       << " | Speed: " << (int)tps << " tokens/sec" << std::flush;
             running_loss = 0.0f;
         }

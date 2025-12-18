@@ -78,14 +78,11 @@ public:
     }
 
     void uploadA(const float* data, size_t size_bytes) {
-        auto t0 = std::chrono::high_resolution_clock::now();
         auto& vk = VulkanBackend::get();
         void* ptr;
         vk.vkMapMemory(vk.device, memA, 0, size_bytes, 0, &ptr);
         memcpy(ptr, data, size_bytes);
         vk.vkUnmapMemory(vk.device, memA);
-        auto t1 = std::chrono::high_resolution_clock::now();
-        // std::cout << "UploadA: " << std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count() << "us\n";
     }
     
     void uploadB(const float* data, size_t size_bytes) {
@@ -97,14 +94,11 @@ public:
     }
 
     void downloadC(float* data, size_t size_bytes) {
-        auto t0 = std::chrono::high_resolution_clock::now();
         auto& vk = VulkanBackend::get();
         void* ptr;
         vk.vkMapMemory(vk.device, memC, 0, size_bytes, 0, &ptr);
         memcpy(data, ptr, size_bytes);
         vk.vkUnmapMemory(vk.device, memC);
-        auto t1 = std::chrono::high_resolution_clock::now();
-        // std::cout << "DownloadC: " << std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count() << "us\n";
     }
     
     void resize(int M, int N, int K, const std::string& shaderPath) {
@@ -112,15 +106,12 @@ public:
         size_t reqA = M * K * sizeof(float);
         size_t reqB = K * N * sizeof(float);
         size_t reqC = M * N * sizeof(float);
-        
-        bool resources_created = false;
-        
+                
         // Reallocate A if needed
         if (reqA > capA) {
             if (bufA) { vk.vkDestroyBuffer(vk.device, bufA, nullptr); vk.vkFreeMemory(vk.device, memA, nullptr); }
             vk.create_buffer(reqA, bufA, memA);
             capA = reqA;
-            resources_created = true;
         }
         
         // Reallocate B if needed
@@ -128,7 +119,6 @@ public:
             if (bufB) { vk.vkDestroyBuffer(vk.device, bufB, nullptr); vk.vkFreeMemory(vk.device, memB, nullptr); }
             vk.create_buffer(reqB, bufB, memB);
             capB = reqB;
-            resources_created = true;
         }
         
         // Reallocate C if needed
@@ -136,7 +126,6 @@ public:
             if (bufC) { vk.vkDestroyBuffer(vk.device, bufC, nullptr); vk.vkFreeMemory(vk.device, memC, nullptr); }
             vk.create_buffer(reqC, bufC, memC);
             capC = reqC;
-            resources_created = true;
         }
         
         // Setup Pipeline logic ONCE (or if buffers changed)
@@ -195,15 +184,9 @@ public:
     
     void dispatch() {
         auto& vk = VulkanBackend::get();
-        auto t0 = std::chrono::high_resolution_clock::now();
-        
         VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO, nullptr, 0, nullptr, nullptr, 1, &cmdBuffer, 0, nullptr };
         vk.vkQueueSubmit(vk.compute_queue, 1, &submitInfo, nullptr);
         vk.vkQueueWaitIdle(vk.compute_queue);
-        
-        auto t1 = std::chrono::high_resolution_clock::now();
-        auto us = std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count();
-        if (us > 10000) std::cout << "DEBUG: Dispatch took " << us/1000.0 << "ms\n";
     }
 };
 
