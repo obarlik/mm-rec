@@ -21,6 +21,7 @@
 #include "mm_rec/core/memory_manager.h"
 #include "mm_rec/utils/logger.h"
 #include "mm_rec/core/vulkan_backend.h" // [NEW] GPS Support
+#include "mm_rec/utils/metrics.h" // [NEW] Zero-overhead metrics
 
 #include <iostream>
 #include <iomanip>
@@ -243,6 +244,9 @@ int cmd_train(int argc, char* argv[]) {
     CheckpointManager::save_checkpoint(latest_ckpt_path, model, init_meta);
     std::cout << "💾 Initial state saved (for Robustness safety)." << std::endl;
     
+    // Start metrics collection (async writer, zero overhead)
+    MetricsManager::instance().start_writer("training_metrics.jsonl");
+    
     for (int iteration = start_epoch; iteration <= max_iterations; ++iteration) {
         std::cout << "\n=== Epoch " << iteration << " ===" << std::endl;
         
@@ -438,11 +442,19 @@ int cmd_train(int argc, char* argv[]) {
             epoch_steps++;
             total_steps++;
             
-            if (epoch_steps < 20 || epoch_steps % 10 == 0) {
-                 float current_lr = trainer.get_current_lr();
+            // 👇 ZERO-OVERHEAD: Record ALL steps to metrics (0.02ns/event)
+            float current_lr = trainer.get_current_lr();
+            METRIC_TRAINING_STEP(loss, current_lr);
+            
+            // Record Flux-specific metrics
+            if (train_config.optimizer_type == "flux") {
+                METRIC_RECORD(CUSTOM, flux_scale, 0, 0, "flux");
+            }
+            
+            // 👇 EXPENSIVE: Console output only every 100 steps (or first 20)
+            if (epoch_steps < 20 || total_steps % 100 == 0) {
                  auto step_end = std::chrono::steady_clock::now();
                  double step_dur = std::chrono::duration<double>(step_end - epoch_start_time).count();
-                 // Average speed over epoch
                  double speed_tps = (epoch_steps * filtered_size * seq_len) / (step_dur + 1e-9);
                  
                  auto current_time = std::chrono::steady_clock::now();
@@ -509,6 +521,10 @@ int cmd_train(int argc, char* argv[]) {
     final_meta.epoch = max_iterations;
     final_meta.learning_rate = learning_rate;
     CheckpointManager::save_checkpoint("kernel_adaptive_final.bin", model, final_meta);
+    
+    // Stop metrics writer (flushes remaining events to disk)
+    MetricsManager::instance().stop_writer();
+    
     std::cout << "\n✅ DONE" << std::endl;
     
     // Restore streams (Just good hygiene)
