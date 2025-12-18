@@ -223,9 +223,9 @@ add_executable(benchmark_final_suite tests/benchmark_final_suite.cpp)
 target_link_libraries(benchmark_final_suite mm_rec_eigen ${CMAKE_DL_LIBS})
 add_test(NAME benchmark_final_suite COMMAND benchmark_final_suite)
 
-add_executable(test_vulkan_memory tests/test_vulkan_memory.cpp)
-target_link_libraries(test_vulkan_memory ${CMAKE_DL_LIBS})
-add_test(NAME test_vulkan_memory COMMAND test_vulkan_memory)
+# add_executable(test_vulkan_memory tests/test_vulkan_memory.cpp)
+# target_link_libraries(test_vulkan_memory ${CMAKE_DL_LIBS})
+# add_test(NAME test_vulkan_memory COMMAND test_vulkan_memory)
 add_executable(inference_demo src/inference_demo.cpp)
 target_link_libraries(inference_demo mm_rec_eigen)
 
@@ -244,6 +244,12 @@ target_link_libraries(train_kernel mm_rec_eigen)
 
 add_executable(test_hybrid_stability tests/test_hybrid_stability.cpp)
 target_link_libraries(test_hybrid_stability mm_rec_eigen)
+
+add_executable(debug_dataloader tests/debug_dataloader.cpp)
+target_link_libraries(debug_dataloader mm_rec_eigen)
+
+add_executable(debug_overfit tests/debug_overfit.cpp)
+target_link_libraries(debug_overfit mm_rec_eigen)
 
 # Config/Info
 message(STATUS "========================================")

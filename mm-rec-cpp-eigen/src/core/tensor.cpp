@@ -154,6 +154,10 @@ Tensor Tensor::reshape(std::vector<int64_t> new_shape) const {
     for(auto s : new_shape) new_numel *= s;
     
     if(new_numel != numel() && new_numel != -1) {
+         std::cerr << "Reshape Error: Current numel=" << numel() 
+                   << ", Target shape=[";
+         for(auto s : new_shape) std::cerr << s << ",";
+         std::cerr << "], Target numel=" << new_numel << std::endl;
          throw std::runtime_error("Reshape size mismatch");
     }
     
@@ -442,7 +446,7 @@ Tensor Tensor::cat(const std::vector<Tensor>& tensors, int64_t dim) const {
     float* dst = result.data();
     
     for(const auto& t : tensors) {
-        int64_t dim_size = t.size(dim);
+        // int64_t dim_size = t.size(dim);
         const float* src = t.data();
         
         if (dim == 0) {
@@ -460,7 +464,7 @@ Tensor Tensor::cat(const std::vector<Tensor>& tensors, int64_t dim) const {
             // Let's implement generic anyway for safety.
             
              // Current offset in dim direction
-             int64_t current_dim_offset = offset; // Wait, offset above is flat index.
+             // int64_t current_dim_offset = offset; // Wait, offset above is flat index.
              // We need to track where we are in 'dim'.
              // Let's restart logic.
              

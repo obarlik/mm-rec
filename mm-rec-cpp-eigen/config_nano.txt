@@ -6,17 +6,18 @@ vocab_size=16
 hidden_dim=64
 mem_dim=64
 ffn_dim=128
-num_layers=2
-num_experts=2
+num_layers=1
+num_experts=1
 top_k=1
 
 # Training
-batch_size=32
+batch_size=8
 max_seq_len=32
-learning_rate=0.0005
+learning_rate=0.002
+# optimizer_type=sgd
 optimizer_type=flux
 weight_decay=0.00
-max_iterations=100 # epochs
+max_iterations=1000 # epochs
 
 # Adaptive (Flux) - relaxed for nano
 hard_threshold=300.0
