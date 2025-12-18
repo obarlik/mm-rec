@@ -4,6 +4,7 @@
 
 #include "mm_rec/core/linear.h"
 #include <cmath>
+#include <cstdlib>
 #include <future>
 #include "mm_rec/core/vulkan_compute.h"
 
@@ -71,7 +72,8 @@ Tensor Linear::forward(const Tensor& input) {
             result_gpu.data(), 
             gpu_batch, 
             out_features_, // N
-            in_features_   // K (common dim)
+            in_features_,  // K (common dim)
+            (std::getenv("MM_REC_USE_FP16") ? "src/shaders/matmul_fp16.spv" : "src/shaders/matmul.spv")
         );
         
         if (!ok) throw std::runtime_error("GPU Dispatch Failed");

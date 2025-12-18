@@ -9,7 +9,7 @@ namespace mm_rec {
 
 class VulkanCompute {
 public:
-    static bool matmul(const float* A, const float* B, float* C, int M, int N, int K) {
+    static bool matmul(const float* A, const float* B, float* C, int M, int N, int K, const std::string& shaderPath = "src/shaders/matmul.spv") {
         auto& vk = VulkanBackend::get();
         if (!vk.is_ready()) {
              std::cerr << "Vulkan not ready." << std::endl;
@@ -50,7 +50,7 @@ public:
         std::cout << "✅ Vulkan: Buffers allocated & data uploaded." << std::endl;
 
         // 3. Load Shader (Verify Compilation)
-        auto code = read_shader("src/shaders/matmul.spv");
+        auto code = read_shader(shaderPath);
         if (code.empty()) {
             std::cerr << "❌ Failed to read shader file." << std::endl;
             return false;

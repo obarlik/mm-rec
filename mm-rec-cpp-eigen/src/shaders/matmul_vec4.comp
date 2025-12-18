@@ -1,0 +1,145 @@
+#version 450
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Binding 0: Matrix A (M x K) - readonly
+layout(binding = 0) readonly buffer InputA {
+    float dataA[];
+};
+
+// Binding 1: Matrix B (K x N) - readonly
+layout(binding = 1) readonly buffer InputB {
+    float dataB[];
+};
+
+// Binding 2: Matrix C (M x N) - writeonly
+// We write vec4, so we need to be careful with aliasing if we used vec4[] buffer.
+// But standard float[] buffer is fine, we just index carefully.
+layout(binding = 2) writeonly buffer OutputC {
+    float dataC[];
+};
+
+layout(push_constant) uniform PushConsts {
+    int M;
+    int N;
+    int K;
+} params;
+
+// Tile Size Config
+// Logically, we process a tile of C with size (16 rows) x (64 cols).
+// Why 64 cols? Because workgroup_x=16 and each thread does 4 elements (vec4).
+const int TILE_M = 16; 
+const int TILE_K = 16;
+const int TILE_N = 64; // 16 * 4
+
+// Shared Memory
+// As: 16x16 tile of scalar floats
+shared float As[TILE_M][TILE_K];
+
+// Bs: 16x16 tile of vec4s (which is 16 rows x 64 columns of floats)
+shared vec4 Bs[TILE_K][TILE_M]; // TILE_M here corresponds to local_size_x which determines vec4 count
+
+void main() {
+    // Thread IDs
+    int tx = int(gl_LocalInvocationID.x); // 0..15
+    int ty = int(gl_LocalInvocationID.y); // 0..15
+    
+    // Global row index for C (and A)
+    int row = int(gl_WorkGroupID.y) * TILE_M + ty;
+    
+    // Global column index (vec4 aligned) for C (and B)
+    // WorkGroup X covers 64 columns.
+    int col_vec = int(gl_WorkGroupID.x) * (TILE_N / 4) + tx; 
+    // real column index = col_vec * 4
+    
+    vec4 acc = vec4(0.0);
+    
+    // Loop over tiles of K
+    int numTiles = (params.K + TILE_K - 1) / TILE_K;
+    
+    for (int t = 0; t < numTiles; ++t) {
+        // 1. Load A (Scalar)
+        // Each thread loads 1 float.
+        int rA = row;
+        int cA = t * TILE_K + tx;
+        
+        if (rA < params.M && cA < params.K) {
+            As[ty][tx] = dataA[rA * params.K + cA];
+        } else {
+            As[ty][tx] = 0.0;
+        }
+        
+        // 2. Load B (Vec4)
+        // Each thread loads 1 vec4.
+        // B is (K x N). We need rows [t*16 .. t*16+15] and cols [col_vec*4 ...].
+        // Map thread (tx, ty) to B load.
+        // We need to load a 16x64 block from B.
+        // 256 threads. 16*16 vec4s = 256 vec4s. Perfect 1:1 mapping.
+        // Thread (tx, ty) loads row (t*16 + ty) and col (group_x*64 + tx*4).
+        // Wait, for Bs tile organization:
+        // We want Bs[k][tx] to be accessible in the loop.
+        // Loop k=0..15. We need Bs[k][tx] to be the vec4 for that k and our thread's col execution.
+        // So we should load such that Bs[y][x] corresponds to B_row_y and B_col_vec_x.
+        
+        int rB = t * TILE_K + ty;            // Global Row in B
+        int cB_quad = col_vec;               // Global Col (vec4 index) in B -> actually specific to this group
+        // Re-calculate cB based on group:
+        // inner logic: we want to load the rectangle 16(K) x 64(N) of B.
+        // Row of B determined by ty? Yes.
+        // Col of B determined by tx? Yes. tx goes 0..15, covering the 16 vec4s in the N dimension.
+        // BUT my 'col_vec' variable includes the WorkGroupID offset.
+        // Let's check alignment.
+        // We need B to be simple float[], so we manually construct vec4.
+        
+        int gx_base = int(gl_WorkGroupID.x) * (TILE_N / 4); // Base vec4 index for this group
+        int load_c_vec = gx_base + tx; // This thread's load column
+        int load_c_real = load_c_vec * 4;
+        
+        // Check bounds
+        if (rB < params.K && load_c_real < params.N) {
+             // Manual vec4 load due to float[] buffer alignment 
+             // (std430 layout usually implies padding for vec3/vec4 but float[] is packed scalar array).
+             // We can safely read 4 floats if aligned.
+             // float b0 = dataB[rB * params.N + load_c_real + 0];
+             // float b1 = dataB[rB * params.N + load_c_real + 1];
+             // ...
+             // Efficient way:
+             int idx = rB * params.N + load_c_real;
+             // Assume alignment is safe or check N? 
+             // If N is multiple of 4, safe.
+             Bs[ty][tx] = vec4(
+                 dataB[idx + 0],
+                 dataB[idx + 1],
+                 dataB[idx + 2],
+                 dataB[idx + 3]
+             );
+        } else {
+             Bs[ty][tx] = vec4(0.0);
+        }
+        
+        barrier();
+        
+        // 3. Compute
+        // Dot product of (A-row) . (B-col_vec)
+        // A-row is stored in As[ty][...].
+        // B-columns are stored in Bs[...][tx]. 
+        // Note: Bs[k][tx] gives the vec4 for B-row k and the column-set for THIS thread.
+        
+        for (int k = 0; k < TILE_K; ++k) {
+            float a_val = As[ty][k];
+            vec4 b_val = Bs[k][tx];
+            acc += a_val * b_val;
+        }
+        
+        barrier();
+    }
+    
+    // Write
+    int out_idx = row * params.N + col_vec * 4;
+    // Again, assume N % 4 == 0
+    if (row < params.M && (col_vec * 4) < params.N) {
+        dataC[out_idx + 0] = acc.x;
+        dataC[out_idx + 1] = acc.y;
+        dataC[out_idx + 2] = acc.z;
+        dataC[out_idx + 3] = acc.w;
+    }
+}

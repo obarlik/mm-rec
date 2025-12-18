@@ -1,0 +1,129 @@
+#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) readonly buffer InputA { float dataA[]; };
+layout(binding = 1) readonly buffer InputB { float dataB[]; };
+layout(binding = 2) writeonly buffer OutputC { float dataC[]; };
+
+layout(push_constant) uniform PushConsts {
+    int M, N, K;
+} params;
+
+// Tile configuration
+const int TS = 32;     // Tile size for M and N (32x32 block of C)
+const int TS_K = 16;   // Tile size for K (Inner loop step)
+const int WPT = 4;     // Work Per Thread (4x4 elements)
+// Workgroup size is 8x8 = 64 threads. 
+// 8 * 4 = 32, so correct coverage.
+
+// Shared Memory
+shared float As[TS][TS_K];     // 32 x 16
+shared float Bs[TS_K][TS];     // 16 x 32
+
+void main() {
+    int tx = int(gl_LocalInvocationID.x); // 0..7
+    int ty = int(gl_LocalInvocationID.y); // 0..7
+    
+    // Global row/col base for this tile
+    int row_start = int(gl_WorkGroupID.y) * TS;
+    int col_start = int(gl_WorkGroupID.x) * TS;
+    
+    // Registers for Accumulation (4x4 block)
+    float results[WPT][WPT];
+    for(int i=0; i<WPT; ++i)
+        for(int j=0; j<WPT; ++j)
+            results[i][j] = 0.0;
+            
+    // Registers for caching A and B from shared mem during compute
+    float a_reg[WPT];
+    float b_reg[WPT];
+
+    int numTiles = (params.K + TS_K - 1) / TS_K;
+    
+    // Cooperative Load Indices
+    // 64 threads.
+    // As size: 32*16 = 512 elements. 512/64 = 8 loads per thread.
+    // Bs size: 16*32 = 512 elements. 512/64 = 8 loads per thread.
+    int t_idx = ty * 8 + tx; // Linear thread index 0..63
+    
+    for (int t = 0; t < numTiles; ++t) {
+        
+        // 1. Cooperative Load A (32x16) into As
+        // Rows: 0..31, Cols: 0..15
+        // Each thread loads 8 floats.
+        // Let's conceptually view As as float[512].
+        // Thread t_idx loads indices t_idx, t_idx+64, t_idx+128 ... 
+        for(int l=0; l<8; ++l) {
+            int flat_idx = l * 64 + t_idx;
+            // Map flat_idx to (row, col) in As[32][16]
+            // row = flat / 16
+            // col = flat % 16
+            int r = flat_idx / TS_K;
+            int c = flat_idx % TS_K;
+            
+            // Global A Check
+            int global_r = row_start + r;
+            int global_c = t * TS_K + c;
+            
+            if(global_r < params.M && global_c < params.K)
+                As[r][c] = dataA[global_r * params.K + global_c];
+            else
+                As[r][c] = 0.0;
+        }
+        
+        // 2. Cooperative Load B (16x32) into Bs
+        // Rows: 0..15, Cols: 0..31
+        // Same logic: 512 elements.
+        for(int l=0; l<8; ++l) {
+            int flat_idx = l * 64 + t_idx;
+            int r = flat_idx / TS; // / 32
+            int c = flat_idx % TS; // % 32
+            
+            int global_r = t * TS_K + r;
+            int global_c = col_start + c;
+            
+            if(global_r < params.K && global_c < params.N)
+                Bs[r][c] = dataB[global_r * params.N + global_c];
+            else
+                Bs[r][c] = 0.0;
+        }
+        
+        barrier();
+        
+        // 3. Compute (Register Blocked)
+        for (int k = 0; k < TS_K; ++k) {
+            // Load 4 values of A (column k, rows specific to this thread)
+            // My rows in tile: ty * 4 ... ty*4 + 3
+            for(int i=0; i<WPT; ++i) {
+                a_reg[i] = As[ty * WPT + i][k];
+            }
+            
+            // Load 4 values of B (row k, cols specific to this thread)
+            // My cols in tile: tx * 4 ... tx*4 + 3
+            for(int j=0; j<WPT; ++j) {
+                b_reg[j] = Bs[k][tx * WPT + j];
+            }
+            
+            // Outer Product
+            for(int i=0; i<WPT; ++i) {
+                for(int j=0; j<WPT; ++j) {
+                    results[i][j] += a_reg[i] * b_reg[j];
+                }
+            }
+        }
+        
+        barrier();
+    }
+    
+    // 4. Write Result
+    for(int i=0; i<WPT; ++i) {
+        for(int j=0; j<WPT; ++j) {
+            int global_r = row_start + ty * WPT + i;
+            int global_c = col_start + tx * WPT + j;
+            
+            if(global_r < params.M && global_c < params.N) {
+                dataC[global_r * params.N + global_c] = results[i][j];
+            }
+        }
+    }
+}
