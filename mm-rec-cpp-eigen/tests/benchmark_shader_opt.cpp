@@ -89,6 +89,20 @@ int main() {
     double gflops_reg = (ops / dt_reg.count()) / 1e9;
     std::cout << "Time: " << dt_reg.count() << "s | GFLOPS: " << gflops_reg << std::endl;
     std::cout << ">>> RegBlock GFLOPS: " << gflops_reg << " (Speedup: " << std::fixed << std::setprecision(2) << gflops_reg/gflops_scalar << "x)" << std::endl;
+
+    // 5. Unrolled FP16 Shader
+    std::cout << "\n--- [Unrolled FP16 Shader] ---" << std::endl;
+    VulkanCompute::matmul(A.data(), B.data(), C.data(), M, N, K, "src/shaders/matmul_subgroup.spv");
+    
+    t0 = std::chrono::high_resolution_clock::now();
+    for(int i=0; i<ITER; ++i)
+        VulkanCompute::matmul(A.data(), B.data(), C.data(), M, N, K, "src/shaders/matmul_subgroup.spv");
+    t1 = std::chrono::high_resolution_clock::now();
+    
+    std::chrono::duration<double> dt_unroll = (t1 - t0) / ITER;
+    double gflops_unroll = (ops / dt_unroll.count()) / 1e9;
+    std::cout << "Time: " << dt_unroll.count() << "s | GFLOPS: " << gflops_unroll << std::endl;
+    std::cout << ">>> Unrolled GFLOPS: " << gflops_unroll << " (Speedup: " << std::fixed << std::setprecision(2) << gflops_unroll/gflops_scalar << "x)" << std::endl;
     
     return 0;
 }

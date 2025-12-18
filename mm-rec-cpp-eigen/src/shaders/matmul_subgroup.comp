@@ -1,0 +1,87 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) readonly buffer InputA { float dataA[]; };
+layout(binding = 1) readonly buffer InputB { float dataB[]; };
+layout(binding = 2) writeonly buffer OutputC { float dataC[]; };
+
+layout(push_constant) uniform PushConsts {
+    int M, N, K;
+} params;
+
+const int TS = 16;
+shared float16_t As[TS][TS];
+shared float16_t Bs[TS][TS];
+
+void main() {
+    int tx = int(gl_LocalInvocationID.x);
+    int ty = int(gl_LocalInvocationID.y);
+    int row = int(gl_GlobalInvocationID.y);
+    int col = int(gl_GlobalInvocationID.x);
+    
+    // Use FP16 accumulator
+    float16_t acc = float16_t(0.0);
+    
+    int numTiles = (params.K + TS - 1) / TS;
+    
+    for (int t = 0; t < numTiles; ++t) {
+        // Load A (Downcast)
+        int r = row;
+        int c = t * TS + tx;
+        As[ty][tx] = (r < params.M && c < params.K) ? float16_t(dataA[r * params.K + c]) : float16_t(0.0);
+        
+        // Load B (Downcast)
+        r = t * TS + ty;
+        c = col;
+        Bs[ty][tx] = (r < params.K && c < params.N) ? float16_t(dataB[r * params.N + c]) : float16_t(0.0);
+        
+        barrier();
+        
+        // Unrolled Compute (4 steps per iteration -> 16 total / 4 = 4 iters)
+        // This helps instruction scheduling (pipelining)
+        
+        // k=0
+        acc += As[ty][0] * Bs[0][tx];
+        // k=1
+        acc += As[ty][1] * Bs[1][tx];
+        // k=2
+        acc += As[ty][2] * Bs[2][tx];
+        // k=3
+        acc += As[ty][3] * Bs[3][tx];
+        
+        // k=4
+        acc += As[ty][4] * Bs[4][tx];
+        // k=5
+        acc += As[ty][5] * Bs[5][tx];
+        // k=6
+        acc += As[ty][6] * Bs[6][tx];
+        // k=7
+        acc += As[ty][7] * Bs[7][tx];
+        
+        // k=8
+        acc += As[ty][8] * Bs[8][tx];
+        // k=9
+        acc += As[ty][9] * Bs[9][tx];
+        // k=10
+        acc += As[ty][10] * Bs[10][tx];
+        // k=11
+        acc += As[ty][11] * Bs[11][tx];
+        
+        // k=12
+        acc += As[ty][12] * Bs[12][tx];
+        // k=13
+        acc += As[ty][13] * Bs[13][tx];
+        // k=14
+        acc += As[ty][14] * Bs[14][tx];
+        // k=15
+        acc += As[ty][15] * Bs[15][tx];
+        
+        barrier();
+    }
+    
+    if (row < params.M && col < params.N) {
+        dataC[row * params.N + col] = float(acc);
+    }
+}
