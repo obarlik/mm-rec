@@ -29,18 +29,18 @@ int cmd_infer(int argc, char* argv[]) {
     std::string vocab_path = argv[3];
     std::string prompt = (argc > 4) ? argv[4] : "The";
     
-    // Check for --metrics flag
-    bool enable_metrics = false;
-    for (int i = 5; i < argc; ++i) {
-        if (std::string(argv[i]) == "--metrics") {
-            enable_metrics = true;
+    // Metrics enabled by default (--no-metrics to disable)
+    bool enable_metrics = true;
+    for (int i = 0; i < argc; ++i) {
+        if (std::string(argv[i]) == "--no-metrics") {
+            enable_metrics = false;
             break;
         }
     }
     
     if (enable_metrics) {
-        MetricsManager::instance().start_writer("inference_metrics.jsonl");
-        std::cout << "📊 Metrics enabled -> inference_metrics.jsonl" << std::endl;
+        MetricsManager::instance().start_writer("inference_metrics.bin");
+        std::cout << "📊 Metrics enabled → inference_metrics.bin" << std::endl;
     }
 
     // 1. Load Config

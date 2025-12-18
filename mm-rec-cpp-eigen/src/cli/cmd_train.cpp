@@ -244,8 +244,25 @@ int cmd_train(int argc, char* argv[]) {
     CheckpointManager::save_checkpoint(latest_ckpt_path, model, init_meta);
     std::cout << "💾 Initial state saved (for Robustness safety)." << std::endl;
     
-    // Start metrics collection (async writer, zero overhead)
-    MetricsManager::instance().start_writer("training_metrics.jsonl");
+    // Metrics enabled by default (--no-metrics to disable)
+    bool enable_metrics = true;
+    for (int i = 0; i < argc; ++i) {
+        if (std::string(argv[i]) == "--no-metrics") {
+            enable_metrics = false;
+            break;
+        }
+    }
+    
+    if (enable_metrics) {
+        // Production mode: Binary format + sampling
+        MetricsSamplingConfig sampling;
+        sampling.enabled = true;
+        sampling.interval = 10;  // Record every 10th step
+        sampling.warmup_events = 100;
+        
+        MetricsManager::instance().start_writer("training_metrics.bin", sampling);
+        std::cout << "📊 Metrics enabled → training_metrics.bin (use --no-metrics to disable)" << std::endl;
+    }
     
     for (int iteration = start_epoch; iteration <= max_iterations; ++iteration) {
         std::cout << "\n=== Epoch " << iteration << " ===" << std::endl;
