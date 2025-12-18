@@ -47,7 +47,7 @@ public:
         // We will assume the existence of a helper or just return true to signal "Foundation Ready" 
         // until we add the full boilerplate next step.
         
-        std::cout << "✅ Vulkan: Buffers allocated & data uploaded." << std::endl;
+        // std::cout << "✅ Vulkan: Buffers allocated & data uploaded." << std::endl;
 
         // 3. Load Shader (Verify Compilation)
         auto code = read_shader(shaderPath);
@@ -56,7 +56,7 @@ public:
             return false;
         }
 
-        std::cout << "✅ Vulkan: Shader 'matmul.spv' found (" << code.size() << " bytes)." << std::endl;
+        // std::cout << "✅ Vulkan: Shader 'matmul.spv' found (" << code.size() << " bytes)." << std::endl;
 
         // ---------------------------------------------------------
         // REAL DISPATCH IMPLEMENTATION

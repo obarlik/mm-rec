@@ -33,19 +33,12 @@ Tensor Linear::forward(const Tensor& input) {
     int64_t workload = batch * in_features_ * out_features_;
     
     // Threshold for Hybrid Execution (e.g., 10M FLOPs)
-    const int64_t GPU_THRESHOLD = 0; // Force GPU for verification
-    
-    // If small batch or not available, use CPU
-    if (workload < GPU_THRESHOLD || !VulkanCompute::is_ready()) {
-         Tensor output = input.matmul(weight_.transpose());
-         if (!VulkanCompute::is_ready()) {
-             static bool once = false;
-             if (!once) { std::cout << "⚠️ Vulkan NOT READY. Workload: " << workload << " Threshold: " << GPU_THRESHOLD << std::endl; once = true; }
-         } else if (workload < GPU_THRESHOLD) {
-             static bool once = false;
-             if (!once) { std::cout << "ℹ️ Workload too small for GPU (" << workload << " < " << GPU_THRESHOLD << "). Using CPU." << std::endl; once = true; }
-         }
+    const int64_t GPU_THRESHOLD = 0; // User request: No threshold
 
+    // If Vulkan not ready, use CPU
+    if (!VulkanCompute::is_ready()) {
+         // ... (existing CPU fallback logic)
+         Tensor output = input.matmul(weight_.transpose());
          // Bias add (CPU)
          int64_t out_f = out_features_;
          float* out_data = output.data();
@@ -57,22 +50,15 @@ Tensor Linear::forward(const Tensor& input) {
          return output;
     }
     
-    // int64_t in_feat = input.size(1); // Already verified
-    
     // --- Hybrid Execution ---
-    // Updated Ratio for 4x4 Kernel (350 GFLOPS vs CPU 70 GFLOPS)
-    // 0. Decision: CPU or GPU?
-    // Check Environment Variable for Force CPU
     static bool force_cpu = (std::getenv("MM_REC_FORCE_CPU") != nullptr);
-    static bool printed_mode = false;
-    if (!printed_mode) {
-        if (force_cpu) std::cout << "⚠️ MM_REC_FORCE_CPU detected. Using CPU Only." << std::endl;
-        printed_mode = true;
-    }
 
-    // GRU steps (Batch=32) -> CPU
-    // MoE Router (Batch=2048) -> GPU
-    if (force_cpu) {
+    // Calculate Partition
+    int64_t gpu_batch = (int64_t)(batch * 0.8);
+    int64_t cpu_batch = batch - gpu_batch;
+
+    // Safety Guard: If batch is too small to split (gpu_batch=0), run all on CPU.
+    if (force_cpu || gpu_batch == 0) {
          // Pure CPU Path
          Tensor result = Tensor::zeros({batch, out_features_});
          #pragma omp parallel for collapse(2)
@@ -88,10 +74,7 @@ Tensor Linear::forward(const Tensor& input) {
          return result;
     }
     
-    // Log removed for production performance
-    // if (batch > 1000 && ... log ...)
-    int64_t gpu_batch = (int64_t)(batch * 0.8);
-    int64_t cpu_batch = batch - gpu_batch;
+    // Normal Hybrid Path (gpu_batch > 0)
     Tensor input_cpu = input.slice(0, 0, cpu_batch);
     Tensor input_gpu = input.slice(0, cpu_batch, gpu_batch);
     
