@@ -103,6 +103,28 @@ int main() {
     double gflops_unroll = (ops / dt_unroll.count()) / 1e9;
     std::cout << "Time: " << dt_unroll.count() << "s | GFLOPS: " << gflops_unroll << std::endl;
     std::cout << ">>> Unrolled GFLOPS: " << gflops_unroll << " (Speedup: " << std::fixed << std::setprecision(2) << gflops_unroll/gflops_scalar << "x)" << std::endl;
+
+    // 6. Packed Memory Layout Benchmark
+    std::cout << "\n--- [Packed (Unit Stride) Shader] ---" << std::endl;
+    // Creates B_packed = B^T.
+    std::vector<float> B_packed(K * N);
+    for(int n=0; n<N; ++n) {
+        for(int k=0; k<K; ++k) {
+            B_packed[n*K + k] = B[k*N + n];
+        }
+    }
+    
+    VulkanCompute::matmul(A.data(), B_packed.data(), C.data(), M, N, K, "src/shaders/matmul_packed.spv");
+    
+    t0 = std::chrono::high_resolution_clock::now();
+    for(int i=0; i<ITER; ++i)
+        VulkanCompute::matmul(A.data(), B_packed.data(), C.data(), M, N, K, "src/shaders/matmul_packed.spv");
+    t1 = std::chrono::high_resolution_clock::now();
+    
+    std::chrono::duration<double> dt_pack = (t1 - t0) / ITER;
+    double gflops_pack = (ops / dt_pack.count()) / 1e9;
+    std::cout << "Time: " << dt_pack.count() << "s | GFLOPS: " << gflops_pack << std::endl;
+    std::cout << ">>> Packed GFLOPS: " << gflops_pack << " (Speedup: " << std::fixed << std::setprecision(2) << gflops_pack/gflops_scalar << "x)" << std::endl;
     
     return 0;
 }

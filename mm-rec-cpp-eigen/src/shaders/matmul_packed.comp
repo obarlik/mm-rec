@@ -1,0 +1,146 @@
+#version 450
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) readonly buffer InputA { float dataA[]; };
+layout(binding = 1) readonly buffer InputB { float dataB[]; }; // Stored as [N, K] (Transposed)
+layout(binding = 2) writeonly buffer OutputC { float dataC[]; };
+
+layout(push_constant) uniform PushConsts {
+    int M, N, K;
+} params;
+
+// Tile size
+const int TS = 16;
+// Vector size
+const int VEC = 4;
+
+shared float As[TS][TS];
+shared float Bs[TS][TS]; // Caching B is still useful if we reuse it.
+// In 16x16 tile, do we reuse B?
+// We calculate C[row][col].
+// dataB is [N, K]. Row 'col' of dataB contains the column vector 'col' of logical B.
+// We need dataB[col][k].
+// 'col' is constant for the thread. k varies.
+// Thread (row, col) needs A[row][k] and dataB[col][k].
+// A[row][k] is used by all threads with same 'row'. (Reuse = 16x).
+// dataB[col][k] is used by all threads with same 'col'. (Reuse = 16x? NO)
+// Wait. 
+// Standard Matmul: C[y][x] = A[y] . B[x]
+// A[y] is used by threads (y, 0)..(y, 15). reused.
+// B[x] (vector) is used by threads (0, x)..(15, x). reused.
+// YES. B is reused.
+// So Shared Memory IS valuable.
+
+void main() {
+    // Thread IDs
+    int tx = int(gl_LocalInvocationID.x); // 0..15 (col inside tile)
+    int ty = int(gl_LocalInvocationID.y); // 0..15 (row inside tile)
+    int row = int(gl_GlobalInvocationID.y); // global row (M)
+    int col = int(gl_GlobalInvocationID.x); // global col (N)
+    
+    // Accumulator
+    float acc = 0.0;
+    
+    int numTiles = (params.K + TS - 1) / TS;
+    
+    // Loop over tiles
+    for (int t = 0; t < numTiles; ++t) {
+        
+        // Load A[row][k] into As[ty][tx]
+        // We want to load a 16x16 block of A.
+        // A is [M, K].
+        // Row = row (global). Col = t*TS + tx.
+        // This is contiguous for tx.
+        // But we are 16x16 threads.
+        // Address: (row) * K + (t*TS + tx).
+        // This is standard load.
+        int K_idx = t * TS + tx;
+        if(row < params.M && K_idx < params.K)
+            As[ty][tx] = dataA[row * params.K + K_idx];
+        else
+            As[ty][tx] = 0.0;
+            
+        // Load B from "Packed" [N, K] storage.
+        // Logical B tile: B[k][col].
+        // Storage: dataB[col][k].
+        // Row = col (global). Col = t*TS + ty (swapped tx/ty to match k dimension? No).
+        // We need the block of B corresponding to logical rows K_idx..K_idx+15 and logical cols (tile_col)..
+        // Wait, Tiled Matmul loads Block A [16x16] and Block B [16x16].
+        // Block B corresponds to Logical Indices: rows [t*TS..t*TS+15], cols [tile_col..tile_start+15].
+        // In dataB storage (Transposed):
+        // Logical Cols became Storage Rows.
+        // Logical Rows became Storage Cols.
+        // So we want Storage Block: Storage Rows [tile_col..], Storage Cols [t*TS..].
+        // Thread (tx, ty) loading:
+        // We need to fill Bs[ty][tx] which represents Logical B[t*TS+ty][tile_col+tx].
+        // From dataB: index is [tile_col+tx][t*TS+ty].
+        // Global Storage Row = col_start + tx.
+        // Global Storage Col = t*TS + ty.
+        
+        int col_start = int(gl_WorkGroupID.x) * TS;
+        int stor_row = col_start + tx;
+        int stor_col = t * TS + ty;
+        
+        if (stor_row < params.N && stor_col < params.K) 
+            Bs[ty][tx] = dataB[stor_row * params.K + stor_col];
+        else 
+            Bs[ty][tx] = 0.0;
+            
+        barrier();
+        
+        // Compute
+        // Loop k=0..15
+        // We have correct sub-blocks in Shared Memory.
+        // As[ty][k] is A element.
+        // Bs[k][tx] is Logical B element.
+        // Note: We handled the transpose during the LOAD into Shared Memory.
+        // So Bs is now in "Standard Logic" layout (Row of Bs is Row of Logical B).
+        
+        // Optional Unroll
+        for (int k = 0; k < TS; ++k) {
+            acc += As[ty][k] * Bs[k][tx];
+        }
+        
+        barrier();
+    }
+    
+    if (row < params.M && col < params.N) {
+        dataC[row * params.N + col] = acc;
+    }
+}
+// Note: This does NOT use vec4 loads from Global Memory yet because strict types.
+// But addresses are contiguous?
+// A load: dataA[row * params.K + t*TS + tx]. tx varies. contiguous.
+// B load: dataB[stor_row * params.K + stor_col].
+// dataB index = (col_start + tx) * K + (t*TS + ty).
+// tx varies by 1 -> index varies by K. STRIDED LOAD!
+//
+// ABORT! My B load logic above creates Strided Load for B!
+// Thread (tx, ty) loads (tx) row of storage B. 
+// Threads with (0,0) and (1,0) read rows adjacent in N... but Memory is Row Major in K.
+// storage B: Row 0 [0..K], Row 1 [0..K].
+// Thread 0 reads Row 0. Thread 1 reads Row 1.
+// Distance is K. STRIDE K.
+//
+// WE MUST SWAP LOAD RESPONSIBILITY.
+// To get coalesce for B:
+// We want threads to read adjacent addresses in K.
+// Storage Col corresponds to K.
+// So we want tx to map to Storage Col.
+// stor_col = t*TS + tx.
+// stor_row = col_start + ty.
+// Address = (col_start + ty) * K + (t*TS + tx).
+// This is contiguous in tx! YES.
+//
+// So Thread(tx, ty) loads:
+// dataB value at [stor_row][stor_col].
+// This corresponds to Logical B element at logical_row=stor_col, logical_col=stor_row.
+// Logical B index: [t*TS + tx] [col_start + ty].
+// We must put this into Bs [tx] [ty]. (Transposed in Shared Mem).
+//
+// Logic Update:
+// Load B:
+// stor_row = col_start + ty;
+// stor_col = t * TS + tx;
+// val = dataB[...]
+// Bs[tx][ty] = val; // Store transposed so compute loop works as standard.
