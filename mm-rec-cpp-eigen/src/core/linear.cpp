@@ -45,8 +45,9 @@ Tensor Linear::forward(const Tensor& input) {
     }
     
     // --- Hybrid Execution ---
-    // Split Ratio: 45% CPU, 55% GPU
-    int64_t cpu_batch = batch * 0.45;
+    // Updated Ratio for 4x4 Kernel (350 GFLOPS vs CPU 70 GFLOPS)
+    // CPU should take ~15-20% of the load.
+    int64_t cpu_batch = batch * 0.15; // 15% CPU, 85% GPU
     int64_t gpu_batch = batch - cpu_batch; // Remainder to GPU
     
     // Slices (dim 0)
