@@ -148,6 +148,166 @@ typedef struct VkPhysicalDeviceMemoryProperties {
     } memoryHeaps[16];
 } VkPhysicalDeviceMemoryProperties;
 
+typedef struct VkPushConstantRange {
+    VkFlags    stageFlags;
+    uint32_t   offset;
+    uint32_t   size;
+} VkPushConstantRange;
+
+// --- Extended Structs for Compute ---
+
+// Shader
+typedef struct VkShaderModuleCreateInfo {
+    VkStructureType    sType;
+    const void*        pNext;
+    VkFlags            flags;
+    size_t             codeSize;
+    const uint32_t*    pCode;
+} VkShaderModuleCreateInfo;
+
+// Pipeline Layout
+typedef struct VkPipelineLayoutCreateInfo {
+    VkStructureType                 sType;
+    const void*                     pNext;
+    VkFlags                         flags;
+    uint32_t                        setLayoutCount;
+    const VkDescriptorSetLayout*    pSetLayouts;
+    uint32_t                        pushConstantRangeCount;
+    const void*                     pPushConstantRanges;
+} VkPipelineLayoutCreateInfo;
+
+// Descriptors
+typedef struct VkDescriptorSetLayoutBinding {
+    uint32_t              binding;
+    uint32_t              descriptorType; // VK_DESCRIPTOR_TYPE_STORAGE_BUFFER = 7
+    uint32_t              descriptorCount;
+    uint32_t              stageFlags;     // VK_SHADER_STAGE_COMPUTE_BIT = 32
+    const void*           pImmutableSamplers;
+} VkDescriptorSetLayoutBinding;
+
+typedef struct VkDescriptorSetLayoutCreateInfo {
+    VkStructureType                        sType;
+    const void*                            pNext;
+    VkFlags                                flags;
+    uint32_t                               bindingCount;
+    const VkDescriptorSetLayoutBinding*    pBindings;
+} VkDescriptorSetLayoutCreateInfo;
+
+typedef struct VkDescriptorPoolSize {
+    uint32_t    type;
+    uint32_t    descriptorCount;
+} VkDescriptorPoolSize;
+
+typedef struct VkDescriptorPoolCreateInfo {
+    VkStructureType                sType;
+    const void*                    pNext;
+    VkFlags                        flags;
+    uint32_t                       maxSets;
+    uint32_t                       poolSizeCount;
+    const VkDescriptorPoolSize*    pPoolSizes;
+} VkDescriptorPoolCreateInfo;
+
+typedef struct VkDescriptorSetAllocateInfo {
+    VkStructureType                 sType;
+    const void*                     pNext;
+    VkDescriptorPool                descriptorPool;
+    uint32_t                        descriptorSetCount;
+    const VkDescriptorSetLayout*    pSetLayouts;
+} VkDescriptorSetAllocateInfo;
+
+typedef struct VkDescriptorBufferInfo {
+    VkBuffer        buffer;
+    VkDeviceSize    offset;
+    VkDeviceSize    range;
+} VkDescriptorBufferInfo;
+
+typedef struct VkWriteDescriptorSet {
+    VkStructureType                  sType;
+    const void*                      pNext;
+    VkDescriptorSet                  dstSet;
+    uint32_t                         dstBinding;
+    uint32_t                         dstArrayElement;
+    uint32_t                         descriptorCount;
+    uint32_t                         descriptorType;
+    const void*                      pImageInfo;
+    const VkDescriptorBufferInfo*    pBufferInfo;
+    const void*                      pTexelBufferView;
+} VkWriteDescriptorSet;
+
+// Pipeline
+typedef struct VkPipelineShaderStageCreateInfo {
+    VkStructureType     sType;
+    const void*         pNext;
+    VkFlags             flags;
+    uint32_t            stage; // VK_SHADER_STAGE_COMPUTE_BIT
+    VkShaderModule      module;
+    const char*         pName;
+    const void*         pSpecializationInfo;
+} VkPipelineShaderStageCreateInfo;
+
+typedef struct VkComputePipelineCreateInfo {
+    VkStructureType                    sType;
+    const void*                        pNext;
+    VkFlags                            flags;
+    VkPipelineShaderStageCreateInfo    stage;
+    VkPipelineLayout                   layout;
+    VkPipeline                         basePipelineHandle;
+    int32_t                            basePipelineIndex;
+} VkComputePipelineCreateInfo;
+
+// Commands
+typedef struct VkCommandBufferAllocateInfo {
+    VkStructureType    sType;
+    const void*        pNext;
+    VkCommandPool      commandPool;
+    uint32_t           level; // VK_COMMAND_BUFFER_LEVEL_PRIMARY = 0
+    uint32_t           commandBufferCount;
+} VkCommandBufferAllocateInfo;
+
+typedef struct VkCommandBufferBeginInfo {
+    VkStructureType    sType;
+    const void*        pNext;
+    VkFlags            flags; // VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT = 1
+    const void*        pInheritanceInfo;
+} VkCommandBufferBeginInfo;
+
+typedef struct VkSubmitInfo {
+    VkStructureType                sType;
+    const void*                    pNext;
+    uint32_t                       waitSemaphoreCount;
+    const void*                    pWaitSemaphores;
+    const uint32_t*                pWaitDstStageMask;
+    uint32_t                       commandBufferCount;
+    const VkCommandBuffer*         pCommandBuffers;
+    uint32_t                       signalSemaphoreCount;
+    const void*                    pSignalSemaphores;
+} VkSubmitInfo;
+
+typedef struct VkCommandPoolCreateInfo {
+    VkStructureType    sType;
+    const void*        pNext;
+    VkFlags            flags;
+    uint32_t           queueFamilyIndex;
+} VkCommandPoolCreateInfo;
+
+// CONSTANTS
+const uint32_t VK_DESCRIPTOR_TYPE_STORAGE_BUFFER = 7;
+const uint32_t VK_SHADER_STAGE_COMPUTE_BIT = 0x00000020;
+const uint32_t VK_COMMAND_BUFFER_LEVEL_PRIMARY = 0;
+const uint32_t VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT = 0x00000001;
+const VkStructureType VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO = (VkStructureType)16;
+const VkStructureType VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO = (VkStructureType)30;
+const VkStructureType VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO = (VkStructureType)32;
+const VkStructureType VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO = (VkStructureType)33;
+const VkStructureType VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO = (VkStructureType)34;
+const VkStructureType VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET = (VkStructureType)35;
+const VkStructureType VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO = (VkStructureType)29;
+const VkStructureType VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO = (VkStructureType)39;
+const VkStructureType VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO = (VkStructureType)40;
+const VkStructureType VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO = (VkStructureType)42;
+const VkStructureType VK_STRUCTURE_TYPE_SUBMIT_INFO = (VkStructureType)4;
+const VkDeviceSize VK_WHOLE_SIZE = (~0ULL);
+
 namespace mm_rec {
 
 class VulkanBackend {
@@ -157,6 +317,7 @@ private:
     VkInstance instance = nullptr;
     VkPhysicalDevice physical_device = nullptr;
     VkDevice device = nullptr; // Logical device
+    VkQueue compute_queue = nullptr;
     VkPhysicalDeviceMemoryProperties memory_properties;
     uint32_t compute_queue_family_index = 0;
 
@@ -168,6 +329,7 @@ private:
     void (*vkGetPhysicalDeviceMemoryProperties)(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*) = nullptr;
     VkResult (*vkCreateDevice)(VkPhysicalDevice, const VkDeviceCreateInfo*, const void*, VkDevice*) = nullptr;
     void (*vkDestroyDevice)(VkDevice, const void*) = nullptr;
+    void (*vkGetDeviceQueue)(VkDevice, uint32_t, uint32_t, VkQueue*) = nullptr;
     
     // Memory & Buffer
     VkResult (*vkCreateBuffer)(VkDevice, const VkBufferCreateInfo*, const void*, VkBuffer*) = nullptr;
@@ -195,7 +357,7 @@ private:
     VkResult (*vkAllocateDescriptorSets)(VkDevice, const void*, VkDescriptorSet*) = nullptr;
     void (*vkUpdateDescriptorSets)(VkDevice, uint32_t, const void*, uint32_t, const void*) = nullptr;
 
-    // --- Commands ---
+// --- Commands ---
     VkResult (*vkCreateCommandPool)(VkDevice, const void*, const void*, VkCommandPool*) = nullptr;
     void (*vkDestroyCommandPool)(VkDevice, VkCommandPool, const void*) = nullptr;
     VkResult (*vkAllocateCommandBuffers)(VkDevice, const void*, VkCommandBuffer*) = nullptr;
@@ -206,6 +368,7 @@ private:
     void (*vkCmdDispatch)(VkCommandBuffer, uint32_t, uint32_t, uint32_t) = nullptr;
     void (*vkCmdBindPipeline)(VkCommandBuffer, int, VkPipeline) = nullptr;
     void (*vkCmdBindDescriptorSets)(VkCommandBuffer, int, VkPipelineLayout, uint32_t, uint32_t, const VkDescriptorSet*, uint32_t, const uint32_t*) = nullptr;
+    void (*vkCmdPushConstants)(VkCommandBuffer, VkPipelineLayout, uint32_t, uint32_t, uint32_t, const void*) = nullptr;
 
 public:
     inline bool is_ready() const { return device != nullptr; }
@@ -280,6 +443,7 @@ public:
         // ... Load Device pointers using separate specific resolver usually, but here globally for simplicity
         *(void**)(&vkCreateDevice) = dlsym(lib_handle, "vkCreateDevice");
         *(void**)(&vkDestroyDevice) = dlsym(lib_handle, "vkDestroyDevice");
+        *(void**)(&vkGetDeviceQueue) = dlsym(lib_handle, "vkGetDeviceQueue");
         *(void**)(&vkCreateBuffer) = dlsym(lib_handle, "vkCreateBuffer");
         *(void**)(&vkDestroyBuffer) = dlsym(lib_handle, "vkDestroyBuffer");
         *(void**)(&vkGetBufferMemoryRequirements) = dlsym(lib_handle, "vkGetBufferMemoryRequirements");
@@ -311,7 +475,10 @@ public:
         *(void**)(&vkQueueWaitIdle) = dlsym(lib_handle, "vkQueueWaitIdle");
         *(void**)(&vkCmdDispatch) = dlsym(lib_handle, "vkCmdDispatch");
         *(void**)(&vkCmdBindPipeline) = dlsym(lib_handle, "vkCmdBindPipeline");
+        *(void**)(&vkCmdDispatch) = dlsym(lib_handle, "vkCmdDispatch");
+        *(void**)(&vkCmdBindPipeline) = dlsym(lib_handle, "vkCmdBindPipeline");
         *(void**)(&vkCmdBindDescriptorSets) = dlsym(lib_handle, "vkCmdBindDescriptorSets");
+        *(void**)(&vkCmdPushConstants) = dlsym(lib_handle, "vkCmdPushConstants");
 
         if (!vkCreateInstance || !vkEnumeratePhysicalDevices) {
              std::cerr << "❌ Vulkan: Symbols missing." << std::endl;
@@ -367,6 +534,10 @@ public:
         }
 
         std::cout << "🚀 Vulkan: Initialized! Logical Device Ready." << std::endl;
+        
+        // Get Queue
+        vkGetDeviceQueue(device, 0, 0, &compute_queue);
+        
         return true;
     }
 };
