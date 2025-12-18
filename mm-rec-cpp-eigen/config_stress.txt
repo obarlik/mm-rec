@@ -1,0 +1,26 @@
+# Nano Model Stress Test Configuration
+# Designed to break the optimizer
+
+# Architecture (Tiny)
+vocab_size=16
+hidden_dim=64
+mem_dim=64
+ffn_dim=128
+num_layers=1
+num_experts=1
+top_k=1
+
+# Training
+batch_size=8
+max_seq_len=32
+learning_rate=10.0  # <--- ABSURDLY HIGH (Standard is 0.005)
+optimizer_type=flux
+weight_decay=0.00
+max_iterations=50
+
+# Adaptive (Flux)
+hard_threshold=300.0
+easy_threshold=1.0
+
+# System
+checkpoint_path=stress_ckpt.bin
