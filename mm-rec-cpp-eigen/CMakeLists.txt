@@ -252,6 +252,16 @@ target_link_libraries(debug_dataloader mm_rec_eigen)
 add_executable(debug_overfit tests/debug_overfit.cpp)
 target_link_libraries(debug_overfit mm_rec_eigen)
 
+# Metrics Tests
+add_executable(benchmark_metrics_overhead tests/benchmark_metrics_overhead.cpp)
+target_link_libraries(benchmark_metrics_overhead mm_rec_eigen)
+add_test(NAME benchmark_metrics_overhead COMMAND benchmark_metrics_overhead)
+
+add_executable(test_binary_metrics test_binary_metrics.cpp)
+target_link_libraries(test_binary_metrics mm_rec_eigen)
+add_test(NAME test_binary_metrics COMMAND test_binary_metrics)
+
+
 # Config/Info
 message(STATUS "========================================")
 message(STATUS "MM-Rec Eigen (Combined CLI)")

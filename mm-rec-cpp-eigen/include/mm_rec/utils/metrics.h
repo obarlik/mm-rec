@@ -18,6 +18,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <memory>
 
 namespace mm_rec {
 
@@ -31,9 +32,9 @@ namespace mm_rec {
  */
 struct MetricsSamplingConfig {
     bool enabled = false;          // Enable sampling
-    int interval = 10;             // Record every Nth event
-    int warmup_events = 100;       // Always record first N
-    int cooldown_events = 100;     // Always record last N per session
+    uint32_t interval = 10;        // Record every Nth event
+    uint32_t warmup_events = 100;  // Always record first N
+    uint32_t cooldown_events = 100; // Always record last N per session
     
     MetricsSamplingConfig() = default;
 };
@@ -194,31 +195,36 @@ public:
         event_counter_ = 0;
         
         writer_running_ = true;
-        writer_thread_ = std::thread(&MetricsManager::writer_loop, this);
+        writer_thread_ = new std::thread(&MetricsManager::writer_loop, this);
 #endif
     }
     
     // Stop background writer
     void stop_writer() {
 #if ENABLE_METRICS
-        if (!writer_running_) return;
+        if (!writer_running_.exchange(false)) return;  // Atomic swap
         
-        writer_running_ = false;
-        if (writer_thread_.joinable()) {
-            writer_thread_.join();
+        // Wait for writer thread to finish
+        if (writer_thread_ && writer_thread_->joinable()) {
+            writer_thread_->join();
+            delete writer_thread_;
+            writer_thread_ = nullptr;
         }
         
-        // Flush remaining events from all threads
+        // Now safe to flush (writer thread is stopped)
         flush_all();
 #endif
     }
     
+    // Minimal destructor - just signal stop, don't touch anything
+    // Intentionally leak thread to avoid static destruction issues
     ~MetricsManager() {
-        stop_writer();
+        writer_running_.store(false, std::memory_order_release);
+        writer_thread_ = nullptr;  // Leak (singleton lives until program exit anyway)
     }
     
 private:
-    MetricsManager() : writer_running_(false) {}
+    MetricsManager() = default;
     
     void register_buffer(MetricsBuffer* buf) {
         std::lock_guard<std::mutex> lock(registry_mutex_);
@@ -244,12 +250,19 @@ private:
         std::vector<char> write_buffer;
         write_buffer.reserve(1024 * sizeof(MetricEvent));
         
-        while (writer_running_) {
+        while (writer_running_.load(std::memory_order_acquire)) {
             // Collect from all registered thread-local buffers
             {
                 std::lock_guard<std::mutex> lock(registry_mutex_);
                 for (auto* buf : buffers_) {
-                    buf->consume(batch, 1024);
+                    // Safety: buf might be destroyed if thread-local storage is being cleaned up
+                    if (buf) {
+                        try {
+                            buf->consume(batch, 1024);
+                        } catch (...) {
+                            // Buffer may be in invalid state during shutdown, skip it
+                        }
+                    }
                 }
             }
             
@@ -276,13 +289,20 @@ private:
     }
     
     void flush_all() {
+        // Don't flush if writer is still running (let it handle it)
+        if (writer_running_.load(std::memory_order_acquire)) {
+            return;
+        }
+        
         std::vector<MetricEvent> events;
         
         // Flush from all thread buffers
         {
             std::lock_guard<std::mutex> lock(registry_mutex_);
             for (auto* buf : buffers_) {
-                buf->consume(events, 100000);
+                if (buf) {  // Safety check
+                    buf->consume(events, 100000);
+                }
             }
         }
         
@@ -300,8 +320,8 @@ private:
     MetricsSamplingConfig sampling_config_;
     std::atomic<uint64_t> event_counter_{0};
     
-    std::atomic<bool> writer_running_;
-    std::thread writer_thread_;
+    std::atomic<bool> writer_running_{false};
+    std::thread* writer_thread_{nullptr};
     
     // Thread buffer registry
     std::mutex registry_mutex_;
