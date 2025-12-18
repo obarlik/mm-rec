@@ -21,6 +21,7 @@ void print_usage(const char* prog_name) {
     cmds.add_row({"train", "Start adaptive curriculum training"});
     cmds.add_row({"infer", "Run inference with trained model"});
     cmds.add_row({"parse-metrics", "Convert binary metrics to readable format"});
+    cmds.add_row({"view-trace", "Serve trace JSON for browser visualization"});
     cmds.finish();
 }
 
@@ -51,6 +52,7 @@ int main(int argc, char* argv[]) {
     commands["train"] = cmd_train;
     commands["infer"] = cmd_infer;
     commands["parse-metrics"] = cmd_parse_metrics;
+    commands["view-trace"] = cmd_view_trace;
 
     if (commands.find(command) == commands.end()) {
         ui::error("Unknown command: " + command);
