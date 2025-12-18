@@ -1,19 +1,27 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <cstring>
+#include <map>
+#include <functional>
+#include "mm_rec/utils/logger.h"
+#include "mm_rec/utils/ui.h"
 #include "cli/commands.h"
 #include "mm_rec/utils/system_optimizer.h"
 
 using namespace mm_rec;
+using namespace mm_rec::ui;
 
 void print_usage(const char* prog_name) {
-    std::cerr << "Usage: " << prog_name << " <command> [args...]" << std::endl;
-    std::cerr << "Commands:" << std::endl;
-    std::cerr << "  prepare        Convert JSONL to binary training data" << std::endl;
-    std::cerr << "  train          Start adaptive curriculum training" << std::endl;
-    std::cerr << "  infer          Run inference with trained model" << std::endl;
-    std::cerr << "  parse-metrics  Convert binary metrics to readable format" << std::endl;
+    ui::print_header("MM-Rec CLI Utility");
+    
+    std::cout << "Usage: " << prog_name << " <command> [args...]\n\n";
+    
+    ui::Table cmds({"Command", "Description"}, 20);
+    cmds.add_row({"prepare", "Convert JSONL to binary training data"});
+    cmds.add_row({"train", "Start adaptive curriculum training"});
+    cmds.add_row({"infer", "Run inference with trained model"});
+    cmds.add_row({"parse-metrics", "Convert binary metrics to readable format"});
+    cmds.finish();
 }
 
 int main(int argc, char* argv[]) {
@@ -38,17 +46,17 @@ int main(int argc, char* argv[]) {
 
     std::string command = argv[1];
 
-    if (command == "prepare") {
-        return cmd_prepare(argc - 1, &argv[1]);
-    } else if (command == "train") {
-        return cmd_train(argc - 1, &argv[1]);
-    } else if (command == "infer") {
-        return cmd_infer(argc - 1, &argv[1]);
-    } else if (command == "parse-metrics") {
-        return cmd_parse_metrics(argc - 1, &argv[1]);
-    } else {
-        std::cerr << "Unknown command: " << command << std::endl;
+    std::map<std::string, std::function<int(int, char**)>> commands;
+    commands["prepare"] = cmd_prepare;
+    commands["train"] = cmd_train;
+    commands["infer"] = cmd_infer;
+    commands["parse-metrics"] = cmd_parse_metrics;
+
+    if (commands.find(command) == commands.end()) {
+        ui::error("Unknown command: " + command);
         print_usage(argv[0]);
         return 1;
     }
+
+    return commands[command](argc - 1, &argv[1]);
 }

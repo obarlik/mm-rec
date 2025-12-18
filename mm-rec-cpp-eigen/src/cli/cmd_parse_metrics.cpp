@@ -9,24 +9,60 @@
 #include <fstream>
 #include <iomanip>
 #include <vector>
+#include <map>
+#include <cmath>
+#include <numeric> // For std::accumulate
+#include <algorithm> // For std::min/max
+#include <sstream> // For std::stringstream
+
+#include "mm_rec/utils/logger.h"
+#include "mm_rec/utils/ui.h"
 
 using namespace mm_rec;
+using namespace mm_rec::ui;
+
+// Define MMRC_MAGIC for validation
+const char MMRC_MAGIC[4] = {'M', 'M', 'R', 'C'};
+
+// Helper struct to accumulate statistics for each metric type
+struct MetricStats {
+    long count = 0;
+    double sum = 0.0;
+    double min = std::numeric_limits<double>::max();
+    double max = std::numeric_limits<double>::lowest();
+
+    void add_value(double val) {
+        count++;
+        sum += val;
+        min = std::min(min, val);
+        max = std::max(max, val);
+    }
+
+    double avg() const {
+        return count > 0 ? sum / count : 0.0;
+    }
+};
 
 int cmd_parse_metrics(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: mm_rec parse-metrics <metrics_file.bin>" << std::endl;
+        ui::error("Usage: mm_rec parse-metrics <metrics_file.bin>");
         return 1;
     }
+    
+    // Logger init (console output mainly for this tool)
+    Logger::instance().start_writer("metrics_parser.log", LogLevel::INFO);
+    ui::print_header("Metrics Parser");
 
     std::string metrics_path = argv[1];
     
     // Open binary file
     std::ifstream ifs(metrics_path, std::ios::binary);
     if (!ifs) {
-        std::cerr << "❌ Failed to open: " << metrics_path << std::endl;
+        ui::error("Failed to open: " + metrics_path);
         return 1;
     }
     
+    ui::info("Parsing: " + metrics_path);
     // Read header: [MAGIC:4][VERSION:4][RESERVED:4]
     char magic[4];
     uint32_t version, reserved;
@@ -36,8 +72,8 @@ int cmd_parse_metrics(int argc, char* argv[]) {
     ifs.read(reinterpret_cast<char*>(&reserved), 4);
     
     // Validate magic
-    if (magic[0] != 'M' || magic[1] != 'M' || magic[2] != 'R' || magic[3] != 'C') {
-        std::cerr << "❌ Invalid magic number. Not a valid metrics file." << std::endl;
+    if (std::memcmp(magic, MMRC_MAGIC, 4) != 0) {
+        ui::error("Invalid magic number. Not a valid metrics file.");
         return 1;
     }
     
@@ -56,33 +92,42 @@ int cmd_parse_metrics(int argc, char* argv[]) {
     std::cout << "Total Events: " << events.size() << std::endl;
     std::cout << std::endl;
     
-    // Print table
-    std::cout << std::setw(10) << "Type" 
-              << std::setw(18) << "Timestamp (μs)" 
-              << std::setw(12) << "Value1" 
-              << std::setw(12) << "Value2" 
-              << std::setw(10) << "Extra" 
-              << std::setw(10) << "Label" 
-              << std::endl;
-    std::cout << std::string(72, '-') << std::endl;
-    
+    // Aggregate statistics
+    std::map<std::string, MetricStats> stats;
     const char* type_names[] = {
         "TRAIN", "INFER", "FORWARD", "BACKWARD", 
         "OPTIM", "CKPT", "MEMORY", "BRAKE", "CUSTOM"
     };
-    
+
     for (const auto& e : events) {
         int type_idx = static_cast<int>(e.type);
         const char* type_str = (type_idx >= 0 && type_idx < 9) ? type_names[type_idx] : "UNKNOWN";
-        
-        std::cout << std::setw(10) << type_str
-                  << std::setw(18) << e.timestamp_us
-                  << std::setw(12) << std::fixed << std::setprecision(4) << e.value1
-                  << std::setw(12) << std::fixed << std::setprecision(4) << e.value2
-                  << std::setw(10) << e.extra
-                  << std::setw(10) << e.label
-                  << std::endl;
+        stats[type_str].add_value(e.value1); // Assuming value1 is the primary metric
     }
+
+    ui::print_header("Performance Summary", 50);
     
+    Table table({"Metric Type", "Count", "Avg", "Min", "Max"}, 12);
+    
+    for (const auto& pair : stats) {
+        const std::string& name = pair.first;
+        const MetricStats& s = pair.second;
+        
+        std::stringstream ss_avg; ss_avg << std::fixed << std::setprecision(4) << s.avg();
+        std::stringstream ss_min; ss_min << std::fixed << std::setprecision(4) << s.min;
+        std::stringstream ss_max; ss_max << std::fixed << std::setprecision(4) << s.max;
+        
+        table.add_row({
+            name,
+            std::to_string(s.count),
+            ss_avg.str(),
+            ss_min.str(),
+            ss_max.str()
+        });
+    }
+    table.finish();
+    
+    Logger::instance().stop_writer();
     return 0;
 }
+

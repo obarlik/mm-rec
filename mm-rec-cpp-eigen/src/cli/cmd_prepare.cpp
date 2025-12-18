@@ -1,10 +1,15 @@
 #include "mm_rec/data/tokenizer.h"
+#include "mm_rec/utils/logger.h"
+#include "mm_rec/utils/ui.h"
 #include <iostream>
 #include <fstream>
 #include <vector>
 #include <string>
 #include <memory>
 #include <algorithm>
+
+using namespace mm_rec;
+using namespace mm_rec::ui;
 
 // Simple message structure
 struct Message {
@@ -110,10 +115,13 @@ public:
 
 int cmd_prepare(int argc, char* argv[]) {
     if (argc < 3) {
-        std::cerr << "Usage: mm_rec prepare <jsonl_input> <bin_output> [format: alpaca|chat]" << std::endl;
+        ui::error("Usage: mm_rec prepare <jsonl_input> <bin_output> [format: alpaca|chat]");
         return 1;
     }
 
+    // Start Logger
+    Logger::instance().start_writer("prepare.log", LogLevel::INFO);
+    ui::print_header("Data Preparation Tool");
     
     std::string in_path = argv[1];
     std::string out_path = argv[2];
@@ -126,12 +134,12 @@ int cmd_prepare(int argc, char* argv[]) {
         parser = std::make_unique<AlpacaParser>();
     }
 
-    std::cout << "Processing " << in_path << " -> " << out_path << " (Format: " << format << ")" << std::endl;
+    ui::info("Processing " + in_path + " -> " + out_path + " (Format: " + format + ")");
     
     mm_rec::Tokenizer tokenizer;
     
     // Pass 1: Build Vocab (Char level)
-    std::cout << "Pass 1: Building Vocabulary..." << std::endl;
+    ui::info("Pass 1: Building Vocabulary...");
     {
         std::ifstream infile(in_path);
         std::string line;
@@ -140,10 +148,10 @@ int cmd_prepare(int argc, char* argv[]) {
             tokenizer.build_vocab(line);
         }
     }
-    std::cout << "Vocab size: " << tokenizer.vocab_size() << std::endl;
+    LOG_INFO("Vocab size: " + std::to_string(tokenizer.vocab_size()));
     
     // Pass 2: Encode
-    std::cout << "Pass 2: Encoding and Masking..." << std::endl;
+    ui::info("Pass 2: Encoding and Masking...");
     std::ifstream infile(in_path);
     std::vector<int32_t> all_tokens;
     std::vector<int32_t> all_masks;
@@ -173,15 +181,15 @@ int cmd_prepare(int argc, char* argv[]) {
         line_count++;
         if (line_count % 1000 == 0) std::cout << "Processed " << line_count << " lines..." << "\r" << std::flush;
     }
-    std::cout << "\nTotal Tokens: " << all_tokens.size() << std::endl;
+    ui::success("Total Tokens: " + std::to_string(all_tokens.size()));
     
     if (all_tokens.empty()) {
-        std::cerr << "Error: No tokens produced! Check input file format." << std::endl;
+        ui::error("Error: No tokens produced! Check input file format.");
         return 1;
     }
     
     // Write Binary
-    std::cout << "Writing binary file..." << std::endl;
+    ui::info("Writing binary file...");
     std::ofstream outfile(out_path, std::ios::binary);
     
     int32_t magic = 0x4D4D5243;
@@ -194,6 +202,8 @@ int cmd_prepare(int argc, char* argv[]) {
     outfile.write(reinterpret_cast<char*>(all_tokens.data()), total * sizeof(int32_t));
     outfile.write(reinterpret_cast<char*>(all_masks.data()), total * sizeof(int32_t));
     
-    std::cout << "✅ Successfully created " << out_path << std::endl;
+    ui::success("Successfully created " + out_path);
+    
+    Logger::instance().stop_writer();
     return 0;
 }

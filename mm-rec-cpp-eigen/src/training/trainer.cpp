@@ -1,17 +1,20 @@
+
 /**
  * Trainer Implementation
  */
 
 #include "mm_rec/training/trainer.h"
-#include "mm_rec/training/uboo_loss.h"
+#include "mm_rec/model/mm_rec_model.h"
 #include "mm_rec/training/gradient_utils.h"
-#include "mm_rec/training/gradient_accum.h"
-#include "mm_rec/training/forward_cache.h"
-#include "mm_rec/training/optimizer.h"
+#include "mm_rec/training/forward_cache.h" // Keep this, it's used
+#include "mm_rec/training/optimizer.h" // Keep this, it's used
+#include "mm_rec/training/uboo_loss.h" // Keep this, it's used
+#include "mm_rec/core/memory_manager.h"
+#include "mm_rec/utils/metrics.h"
+#include "mm_rec/utils/logger.h"
 #include <iostream>
 #include <cstring>  // memcpy
 #include <cmath>
-#include "mm_rec/core/memory_manager.h"
 #include <atomic> // Used for total_loss
 #include <omp.h> // Good practice
 
@@ -42,16 +45,16 @@ Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
     );
     
     if (config.optimizer_type == "flux") {
-        std::cout << "Creating Flux Optimizer (Adaptive Complexity Scaling)" << std::endl;
+        LOG_INFO("Creating Flux Optimizer (Adaptive Complexity Scaling)");
         optimizer_ = std::make_unique<Flux>(config.learning_rate, 0.9f, 0.999f, 1e-8f, config.weight_decay);
     } else if (config.optimizer_type == "adamw") {
-        std::cout << "Creating AdamW Optimizer (LR=" << config.learning_rate << ", WD=" << config.weight_decay << ")" << std::endl;
+        LOG_INFO("Creating AdamW Optimizer (LR=" + std::to_string(config.learning_rate) + ", WD=" + std::to_string(config.weight_decay) + ")");
         optimizer_ = std::make_unique<AdamW>(config.learning_rate, 0.9f, 0.999f, 1e-8f, config.weight_decay);
     } else if (config.optimizer_type == "adam") {
-         std::cout << "Creating Adam Optimizer (LR=" << config.learning_rate << ")" << std::endl;
+        LOG_INFO("Creating Adam Optimizer (LR=" + std::to_string(config.learning_rate) + ")");
         optimizer_ = std::make_unique<Adam>(config.learning_rate);
     } else {
-         std::cout << "Creating SGD Optimizer (LR=" << config.learning_rate << ")" << std::endl;
+        LOG_INFO("Creating SGD Optimizer (LR=" + std::to_string(config.learning_rate) + ")");
         optimizer_ = std::make_unique<SGD>(config.learning_rate);
     }
 }
@@ -78,10 +81,10 @@ float Trainer::train_step(const TrainingBatch& batch) {
     // Safety Check: Detect NaN in Loss (Pre-Backward)
     // If loss is broken, gradients will be broken. Don't waste compute.
     if (!is_robust_finite(total_step_loss)) {
-        std::cerr << "⚠️  Loss Explosion/NaN detected (Loss: " << total_step_loss << "). Skipping Step." << std::endl;
+        LOG_UI("⚠️  Loss Explosion/NaN detected (Loss: " + std::to_string(total_step_loss) + "). Skipping Step.");
         MemoryManager::instance().clear_persistent();
         MemoryManager::instance().reset_arena();
-        return total_step_loss;
+        return 100.0f; // Return high penalty
     }
     
     // 4. Backward Pass (Full Batch)
@@ -92,10 +95,8 @@ float Trainer::train_step(const TrainingBatch& batch) {
     
     // Safety Check: Detect NaN/Inf in gradients (Bitwise)
     // std::isnan often fails with -ffast-math, so we use robust check.
-    if (!is_robust_finite(grad_norm)) {
-        std::cerr << "⚠️  Gradient Explosion/NaN detected (Norm: " << grad_norm << "). Skipping parameter update." << std::endl;
-        
-        // Clean up memory before returning
+    if (!is_robust_finite(grad_norm) || grad_norm > 1000.0f) {
+        LOG_UI("⚠️  Gradient Explosion/NaN detected (Norm: " + std::to_string(grad_norm) + "). Skipping parameter update.");
         MemoryManager::instance().clear_persistent();
         MemoryManager::instance().reset_arena();
         return total_step_loss; // Return loss but do not update
