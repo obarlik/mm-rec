@@ -129,6 +129,23 @@ private:
     std::atomic<size_t> read_idx_;
 };
 
+// Forward declare Manager
+class MetricsManager;
+
+/**
+ * Scoped Timer for Tree-Like Tracing (RAII)
+ */
+class ScopedMetric {
+public:
+    inline ScopedMetric(MetricType type, const char* label = "");
+    inline ~ScopedMetric();
+
+private:
+    MetricType type_;
+    std::chrono::time_point<std::chrono::high_resolution_clock> start_time_;
+    char label_[8];
+};
+
 /**
  * Global Metrics Manager
  */
@@ -320,12 +337,34 @@ private:
     std::vector<MetricsBuffer*> buffers_;
 };
 
+// Implement ScopedMetric inline (now that MetricsManager::record is visible)
+inline ScopedMetric::ScopedMetric(MetricType type, const char* label) 
+    : type_(type), start_time_(std::chrono::high_resolution_clock::now()) {
+    int i = 0;
+    while (i < 7 && label[i] != '\0') {
+        label_[i] = label[i];
+        ++i;
+    }
+    label_[i] = '\0';
+}
+
+inline ScopedMetric::~ScopedMetric() {
+    auto end_time = std::chrono::high_resolution_clock::now();
+    float duration_ms = std::chrono::duration<float, std::milli>(end_time - start_time_).count();
+    
+    // We record duration as value1
+    MetricsManager::record(type_, duration_ms, 0.0f, 0, label_);
+}
+
 // Convenience macros
 #define METRIC_RECORD(type, v1, v2, extra, label) \
     mm_rec::MetricsManager::record(mm_rec::MetricType::type, v1, v2, extra, label)
 
 #define METRIC_TRAINING_STEP(loss, lr) \
     METRIC_RECORD(TRAINING_STEP, loss, lr, 0, "")
+
+#define METRIC_SCOPE(type, label) \
+    mm_rec::ScopedMetric _scoped_metric_##__LINE__(mm_rec::MetricType::type, label)
 
 #define METRIC_INFERENCE(latency_ms, tokens) \
     METRIC_RECORD(INFERENCE_STEP, latency_ms, tokens, 0, "")

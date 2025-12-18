@@ -117,7 +117,11 @@ float Trainer::train_step(const TrainingBatch& batch) {
     
     // 2. Forward Pass (Full Batch)
     ForwardCache cache;
-    Tensor logits = model_.forward(batch.input_ids, &cache);
+    Tensor logits;
+    {
+        METRIC_SCOPE(FORWARD_PASS, "fwd");
+        logits = model_.forward(batch.input_ids, &cache);
+    }
     
     // 3. Loss Calculation (Full Batch)
     Tensor loss_tensor = compute_uboo_loss(logits, batch.targets, batch.loss_mask);
@@ -138,7 +142,11 @@ float Trainer::train_step(const TrainingBatch& batch) {
     }
     
     // 4. Backward Pass (Full Batch)
-    ModelGradients grads = model_.backward(batch.targets, cache);
+    ModelGradients grads;
+    {
+        METRIC_SCOPE(BACKWARD_PASS, "bwd");
+        grads = model_.backward(batch.targets, cache);
+    }
     
     // 5. Gradient Clipping
     float grad_norm = clip_gradients_by_norm(grads, config_.grad_clip_norm);
@@ -155,7 +163,11 @@ float Trainer::train_step(const TrainingBatch& batch) {
     // 6. Update Parameters
     float current_lr = scheduler_->get_lr(step_);
     optimizer_->set_lr(current_lr);
-    model_.update_parameters(*optimizer_, grads);
+    
+    {
+        METRIC_SCOPE(OPTIMIZER_STEP, "optim");
+        model_.update_parameters(*optimizer_, grads);
+    }
     
     step_++;
     
