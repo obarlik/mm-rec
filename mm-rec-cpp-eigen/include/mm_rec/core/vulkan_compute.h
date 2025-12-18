@@ -231,6 +231,17 @@ public:
         vk.vkDestroyDescriptorSetLayout(vk.device, descriptorLayout, nullptr);
         vk.vkDestroyShaderModule(vk.device, shaderModule, nullptr);
 
+        // Cleanup Buffers & Memory
+        vk.vkDestroyCommandPool(vk.device, commandPool, nullptr);
+        
+        vk.vkDestroyBuffer(vk.device, bufA, nullptr);
+        vk.vkDestroyBuffer(vk.device, bufB, nullptr);
+        vk.vkDestroyBuffer(vk.device, bufC, nullptr);
+        
+        vk.vkFreeMemory(vk.device, memA, nullptr);
+        vk.vkFreeMemory(vk.device, memB, nullptr);
+        vk.vkFreeMemory(vk.device, memC, nullptr);
+
         return true; 
     }
     
