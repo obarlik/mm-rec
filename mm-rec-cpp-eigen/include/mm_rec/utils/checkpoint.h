@@ -13,6 +13,7 @@ namespace mm_rec {
 
 struct CheckpointMetadata {
     int epoch = 0;
+    int64_t batch_idx = 0; // Steps within epoch
     float loss = 0.0f;
     float learning_rate = 0.0f;
 };

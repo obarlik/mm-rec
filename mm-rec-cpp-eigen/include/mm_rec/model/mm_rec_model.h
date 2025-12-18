@@ -18,11 +18,11 @@
 namespace mm_rec {
 
 struct MMRecModelConfig {
-    int64_t vocab_size;
-    int64_t hidden_dim;
-    int64_t mem_dim;
-    int64_t ffn_dim;
-    int64_t num_layers;
+    int64_t vocab_size = 100;
+    int64_t hidden_dim = 128;
+    int64_t mem_dim = 128;
+    int64_t ffn_dim = 256;
+    int64_t num_layers = 4;
     int64_t num_experts = 4; // Models default to MoE now
     int64_t top_k = 2;
     float uboo_weight = 0.5f;

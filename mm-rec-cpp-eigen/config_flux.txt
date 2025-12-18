@@ -1,0 +1,8 @@
+# Flux Optimizer Test Config
+optimizer_type=flux
+learning_rate=0.01
+batch_size=8
+max_seq_len=64
+hard_threshold=200.0
+easy_threshold=2.0
+max_iterations=5
