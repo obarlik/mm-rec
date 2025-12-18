@@ -53,16 +53,18 @@ public:
         return slab_ptr;
     }
     
+    // IMMORTAL: Intentionally leak slabs to prevent use-after-free during static destruction.
+    // 
+    // RATIONALE:
+    // - C++ static destruction order is undefined
+    // - Leaked threads may still hold pointers to slab memory
+    // - OS reclaims ALL process memory on exit anyway (zero cost)
+    // - This prevents crashes from destroyed allocator accessed by running threads
+    // 
+    // SAFETY: This is the recommended practice for global allocators that may be
+    // accessed during static destruction (see Google's tcmalloc, jemalloc, etc.)
     ~GlobalSlabRegistry() {
-        SlabNode* current = head_;
-        while (current) {
-            SlabNode* next = current->next;
-            // Free the slab char array (it was alloc'd via posix_memalign, so use free)
-            std::free(current->slab_ptr);
-            // Free the node
-            std::free(current);
-            current = next;
-        }
+        // Intentionally empty - leak slabs for safety
     }
 
 private:

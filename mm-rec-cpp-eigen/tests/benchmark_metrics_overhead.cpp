@@ -31,6 +31,5 @@ int main() {
     std::cout << "Overhead: " << (dt_enabled - dt_baseline) << " ms" << std::endl;
     std::cout << "Per-event cost: " << (dt_enabled - dt_baseline) * 1000.0 / N << " ns" << std::endl;
     
-    // Use _Exit to avoid static destruction order issues
-    _Exit(0);
+    return 0;  // Normal exit - GlobalSlabRegistry is immortal!
 }

@@ -26,7 +26,5 @@ int main() {
     MetricsManager::instance().stop_writer();
     
     std::cout << "Binary test complete. Check test_binary.bin" << std::endl;
-    
-    // Use _Exit to avoid static destruction order issues with singleton
-    _Exit(0);
+    return 0;  // Normal exit - GlobalSlabRegistry is immortal, no crash!
 }
