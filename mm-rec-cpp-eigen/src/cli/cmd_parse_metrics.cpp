@@ -43,17 +43,63 @@ struct MetricStats {
     }
 };
 
+// Chrome Tracing JSON Writer
+void export_trace_json(const std::vector<MetricEvent>& events, const std::string& out_path) {
+    std::ofstream ofs(out_path);
+    if (!ofs) {
+        ui::error("Failed to create trace file: " + out_path);
+        return;
+    }
+    
+    ofs << "[\n";
+    
+    bool first = true;
+    const char* type_names[] = {
+        "TRAIN", "INFER", "FORWARD", "BACKWARD", 
+        "OPTIM", "CKPT", "MEMORY", "BRAKE", "CUSTOM"
+    };
+
+    for (const auto& e : events) {
+        if (!first) ofs << ",\n";
+        first = false;
+        
+        int type_idx = static_cast<int>(e.type);
+        std::string name = (type_idx >= 0 && type_idx < 9) ? type_names[type_idx] : "UNKNOWN";
+        
+        // Manual JSON construction for speed (no dependency)
+        // ts: timestamp in microseconds
+        // dur: duration in microseconds (value1 is ms, so * 1000)
+        // ph: "X" (Complete Event) for duration, "i" (Instant) for point events
+        
+        ofs << "  {";
+        ofs << "\"name\": \"" << name << "\", ";
+        ofs << "\"cat\": \"mm_rec\", ";
+        ofs << "\"ph\": \"X\", "; // Assume all are timed events for now
+        ofs << "\"ts\": " << e.timestamp_us << ", ";
+        ofs << "\"dur\": " << (e.value1 * 1000.0) << ", "; // value1 is ms
+        ofs << "\"pid\": 1, ";
+        ofs << "\"tid\": 1, ";
+        ofs << "\"args\": { \"label\": \"" << e.label << "\", \"val2\": " << e.value2 << " }";
+        ofs << "}";
+    }
+    
+    ofs << "\n]\n";
+    ui::success("Trace exported to: " + out_path);
+    ui::info("Open in browser: https://ui.perfetto.dev/ or chrome://tracing");
+}
+
 int cmd_parse_metrics(int argc, char* argv[]) {
     if (argc < 2) {
-        ui::error("Usage: mm_rec parse-metrics <metrics_file.bin>");
+        ui::error("Usage: mm_rec parse-metrics <metrics_file.bin> [--export-trace <out.json>]");
         return 1;
     }
     
-    // Logger init (console output mainly for this tool)
-    Logger::instance().start_writer("metrics_parser.log", LogLevel::INFO);
-    ui::print_header("Metrics Parser");
-
     std::string metrics_path = argv[1];
+    std::string trace_out_path = "";
+    
+    if (argc >= 4 && std::string(argv[2]) == "--export-trace") {
+        trace_out_path = argv[3];
+    }
     
     // Open binary file
     std::ifstream ifs(metrics_path, std::ios::binary);
@@ -126,6 +172,13 @@ int cmd_parse_metrics(int argc, char* argv[]) {
         });
     }
     table.finish();
+    
+    table.finish();
+    
+    if (!trace_out_path.empty()) {
+        ui::print_header("Trace Export");
+        export_trace_json(events, trace_out_path);
+    }
     
     Logger::instance().stop_writer();
     return 0;
