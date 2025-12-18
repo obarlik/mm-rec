@@ -10,8 +10,10 @@ using namespace mm_rec;
 void print_usage(const char* prog_name) {
     std::cerr << "Usage: " << prog_name << " <command> [args...]" << std::endl;
     std::cerr << "Commands:" << std::endl;
-    std::cerr << "  prepare    Convert JSONL to binary training data" << std::endl;
-    std::cerr << "  train      Start adaptive curriculum training" << std::endl;
+    std::cerr << "  prepare        Convert JSONL to binary training data" << std::endl;
+    std::cerr << "  train          Start adaptive curriculum training" << std::endl;
+    std::cerr << "  infer          Run inference with trained model" << std::endl;
+    std::cerr << "  parse-metrics  Convert binary metrics to readable format" << std::endl;
 }
 
 int main(int argc, char* argv[]) {
@@ -42,6 +44,8 @@ int main(int argc, char* argv[]) {
         return cmd_train(argc - 1, &argv[1]);
     } else if (command == "infer") {
         return cmd_infer(argc - 1, &argv[1]);
+    } else if (command == "parse-metrics") {
+        return cmd_parse_metrics(argc - 1, &argv[1]);
     } else {
         std::cerr << "Unknown command: " << command << std::endl;
         print_usage(argv[0]);
