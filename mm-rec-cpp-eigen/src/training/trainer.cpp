@@ -76,6 +76,7 @@ Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
     
     // API: Stats
     dashboard_server_->register_handler("/api/stats", [this](const std::string&) -> std::string {
+        std::lock_guard<std::mutex> lock(this->stats_mutex_);
         std::stringstream json;
         json << "{";
         json << "\"epoch\": " << (this->step_ / 1000) << ", "; // Approximate
@@ -250,6 +251,7 @@ float Trainer::get_current_lr() const {
 }
 
 void Trainer::update_stats(float loss, float speed) {
+    std::lock_guard<std::mutex> lock(stats_mutex_);
     if (loss_history_.size() >= 100) loss_history_.pop_front();
     loss_history_.push_back(loss);
     if (speed > 0) current_speed_ = speed;

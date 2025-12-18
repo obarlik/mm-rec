@@ -13,6 +13,7 @@
 #include <memory>
 #include <deque>
 #include <atomic>
+#include <mutex>
 #include "mm_rec/utils/http_server.h"
 
 namespace mm_rec {
@@ -110,7 +111,8 @@ private:
     std::unique_ptr<net::HttpServer> dashboard_server_;
     std::atomic<bool> stop_requested_{false};
     
-    // Stats for API
+    // Stats for API (Protected by mutex)
+    mutable std::mutex stats_mutex_;
     std::deque<float> loss_history_; // Keep last 100 points
     float current_speed_ = 0.0f;
 };
