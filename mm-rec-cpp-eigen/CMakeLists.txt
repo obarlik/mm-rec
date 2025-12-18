@@ -222,6 +222,10 @@ add_test(NAME test_opengl_probe COMMAND test_opengl_probe)
 add_executable(benchmark_final_suite tests/benchmark_final_suite.cpp)
 target_link_libraries(benchmark_final_suite mm_rec_eigen ${CMAKE_DL_LIBS})
 add_test(NAME benchmark_final_suite COMMAND benchmark_final_suite)
+
+add_executable(test_vulkan_memory tests/test_vulkan_memory.cpp)
+target_link_libraries(test_vulkan_memory ${CMAKE_DL_LIBS})
+add_test(NAME test_vulkan_memory COMMAND test_vulkan_memory)
 add_executable(inference_demo src/inference_demo.cpp)
 target_link_libraries(inference_demo mm_rec_eigen)
 
