@@ -22,10 +22,7 @@
 
 namespace mm_rec {
 
-// Compile-time flag (set via CMake or -DENABLE_METRICS)
-#ifndef ENABLE_METRICS
-#define ENABLE_METRICS 1  // Default: enabled for development
-#endif
+// Metrics are always compiled and controlled at runtime via start_writer()
 
 /**
  * Sampling configuration for production
@@ -97,7 +94,6 @@ public:
     
     // Fast path: push event (lock-free if single producer)
     bool push(const MetricEvent& event) {
-#if ENABLE_METRICS
         size_t current = write_idx_.load(std::memory_order_relaxed);
         size_t next = (current + 1) % BUFFER_SIZE;
         
@@ -109,9 +105,6 @@ public:
         buffer_[current] = event;
         write_idx_.store(next, std::memory_order_release);
         return true;
-#else
-        return true;  // No-op if metrics disabled
-#endif
     }
     
     // Slow path: consume events (called by background thread)
@@ -163,8 +156,12 @@ public:
     static inline void record(MetricType type, float v1 = 0.0f, 
                               float v2 = 0.0f, uint32_t ex = 0, 
                               const char* lbl = "") {
-#if ENABLE_METRICS
         auto& mgr = instance();
+        
+        // Skip if writer not running (zero overhead when disabled)
+        if (!mgr.writer_running_.load(std::memory_order_relaxed)) {
+            return;
+        }
         
         // Sampling logic (production mode)
         if (mgr.sampling_config_.enabled) {
@@ -181,27 +178,23 @@ public:
         
         MetricEvent event(type, v1, v2, ex, lbl);
         get_local_buffer().push(event);
-#endif
     }
     
     // Start background writer (binary format only)
     void start_writer(const std::string& output_path, 
                      const MetricsSamplingConfig& sampling = MetricsSamplingConfig()) {
-#if ENABLE_METRICS
-        if (writer_running_) return;
+        if (writer_running_.load(std::memory_order_acquire)) return;
         
         output_path_ = output_path;
         sampling_config_ = sampling;
         event_counter_ = 0;
         
-        writer_running_ = true;
+        writer_running_.store(true, std::memory_order_release);
         writer_thread_ = new std::thread(&MetricsManager::writer_loop, this);
-#endif
     }
     
     // Stop background writer
     void stop_writer() {
-#if ENABLE_METRICS
         if (!writer_running_.exchange(false)) return;  // Atomic swap
         
         // Wait for writer thread to finish
@@ -213,7 +206,6 @@ public:
         
         // Now safe to flush (writer thread is stopped)
         flush_all();
-#endif
     }
     
     // Minimal destructor - just signal stop, don't touch anything
