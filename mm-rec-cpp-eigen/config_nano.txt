@@ -16,7 +16,7 @@ max_seq_len=32
 learning_rate=0.0005
 optimizer_type=flux
 weight_decay=0.00
-max_iterations=50 # epochs
+max_iterations=100 # epochs
 
 # Adaptive (Flux) - relaxed for nano
 hard_threshold=300.0

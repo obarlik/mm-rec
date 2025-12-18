@@ -14,6 +14,7 @@
 #include "mm_rec/model/mm_rec_model.h"
 #include "mm_rec/config/model_config.h"
 #include "mm_rec/training/trainer.h"
+#include "mm_rec/training/gradient_utils.h"
 #include "mm_rec/training/sample_tracker.h"
 #include "mm_rec/utils/checkpoint.h"
 #include "mm_rec/utils/checkpoint.h"
@@ -394,7 +395,7 @@ int cmd_train(int argc, char* argv[]) {
             float loss = trainer.train_step(final_batch);
             
             // Check for NaN
-            if (std::isnan(loss) || std::isinf(loss)) {
+            if (!is_robust_finite(loss)) {
                 std::cerr << "⚠️  NAN LOSS DETECTED at Batch " << batch_idx << "!" << std::endl << std::flush;
                 continue; 
             }

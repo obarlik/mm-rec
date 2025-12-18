@@ -76,16 +76,18 @@ bool DataLoader::next(TrainingBatch& batch) {
 void DataLoader::worker_loop() {
     while (!stop_flag_) {
         // 1. Reserve a slice index
-        int64_t idx = current_idx_.fetch_add(batch_size_ * seq_len_);
+        // FIX: For Strided Sampling (where each row acts as an independent worker on a chunk),
+        // we only advance by seq_len_ per step, not the full batch size.
+        // If we advanced by (batch * seq), we would skip huge chunks of data between steps for each row.
+        int64_t idx = current_idx_.fetch_add(seq_len_);
         
-        // Check bounds
-        if (idx + batch_size_ * seq_len_ + 1 > total_tokens_) {
-            // End of epoch
-            // For now, just wrap around or stop?
-            // Let's assume infinite stream for now (wrap around)
+        // Check bounds (Per Chunk!)
+        // Since we are striding, 'idx' only traverses one chunk_size.
+        int64_t chunk_size = total_tokens_ / batch_size_;
+        if (idx + seq_len_ + 1 > chunk_size) {
+            // End of epoch (for this stride)
             current_idx_ = 0; 
-            idx = current_idx_.fetch_add(batch_size_ * seq_len_);
-            // TODO: Proper epoch handling
+            idx = current_idx_.fetch_add(seq_len_);
         }
         
         // 2. Prepare Batch Data
@@ -111,7 +113,7 @@ void DataLoader::worker_loop() {
         // row[b] starts at b * stride + current_seq_ptr
         
         // Let's implement Strided Streaming (decorrelates batch rows).
-        int64_t chunk_size = total_tokens_ / batch_size_;
+        // chunk_size is already defined above
         
         // We use 'idx' as the 'step' index (0, 1, 2...)
         // Actually current_idx_ logic above was for continuous.

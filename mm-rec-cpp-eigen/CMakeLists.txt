@@ -242,6 +242,9 @@ target_link_libraries(demo_training_cpp mm_rec_eigen)
 add_executable(train_kernel src/train_kernel.cpp)
 target_link_libraries(train_kernel mm_rec_eigen)
 
+add_executable(test_hybrid_stability tests/test_hybrid_stability.cpp)
+target_link_libraries(test_hybrid_stability mm_rec_eigen)
+
 # Config/Info
 message(STATUS "========================================")
 message(STATUS "MM-Rec Eigen (Combined CLI)")

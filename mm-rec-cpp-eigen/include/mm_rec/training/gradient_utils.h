@@ -7,8 +7,21 @@
 
 #include "mm_rec/training/gradients.h"
 #include <cmath>
+#include <cstring>
+#include <cstdint>
 
 namespace mm_rec {
+
+/**
+ * Robust Finite Check (Bypasses -ffast-math)
+ * IEEE 754: Exponent bits (23-30) all 1s means Inf or NaN.
+ * Mask: 0x7F800000
+ */
+inline bool is_robust_finite(float f) {
+    uint32_t u;
+    std::memcpy(&u, &f, sizeof(float));
+    return (u & 0x7F800000) != 0x7F800000;
+}
 
 /**
  * Clip gradients by global norm
