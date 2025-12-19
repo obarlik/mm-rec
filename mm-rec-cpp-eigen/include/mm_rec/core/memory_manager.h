@@ -184,10 +184,11 @@ public:
         try {
             MemoryBlock* block = new MemoryBlock(size);
             size_t prev = allocated_bytes_.fetch_add(size, std::memory_order_relaxed);
-            // Log only initially or large increments
-             if ((prev / (256*1024*1024)) != ((prev + size) / (256*1024*1024))) {
-                 std::cout << "[MemoryManager] Total Allocated: " << ((prev + size) / 1024 / 1024) << " MB" << std::endl;
-            }
+            // Debug logging disabled for performance
+            // if ((prev / (256*1024*1024)) != ((prev + size) / (256*1024*1024))) {
+            //     std::cout << "[MemoryManager] Total Allocated: " << ((prev + size) / 1024 / 1024) << " MB" << std::endl;
+            // }
+            (void)prev;  // Suppress unused warning
             return block;
         } catch (...) { throw; }
     }

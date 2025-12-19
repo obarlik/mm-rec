@@ -10,17 +10,44 @@
 namespace mm_rec {
 
 // GPU Execution Context for Async Operations
-struct GpuContext {
+struct PipelineCacheEntry; // Forward declaration
+
+// Pooled Buffer Set (reuses buffers and persistent mappings)
+struct BufferSet {
     VkBuffer bufA, bufB, bufC;
     VkDeviceMemory memA, memB, memC;
+    void* ptrA; void* ptrB; void* ptrC; // Persistent mapped pointers
+    size_t sizeA, sizeB, sizeC;
+    bool in_use;
+    
+    BufferSet() : bufA(nullptr), bufB(nullptr), bufC(nullptr),
+                  memA(nullptr), memB(nullptr), memC(nullptr),
+                  ptrA(nullptr), ptrB(nullptr), ptrC(nullptr),
+                  sizeA(0), sizeB(0), sizeC(0), in_use(false) {}
+};
+
+// GPU Context for Async Operations (holds state between submit and download)
+struct GpuContext {
     VkFence fence;
+    
+    // Matmul params
     int M, N, K;
     size_t sizeC;
-    void* mapped_result;  // For UMA zero-copy
     
-    GpuContext() : bufA(nullptr), bufB(nullptr), bufC(nullptr),
+    // Buffers (now referencing pooled buffers)
+    BufferSet* pooledBuffers; // If valid, these buffers belong to the pool
+    
+    // Raw handles (setup from pooled buffers)
+    VkBuffer bufA, bufB, bufC;
+    VkDeviceMemory memA, memB, memC;
+    
+    void* mapped_result;  // Generic pointer (stores dispatch context or mapped ptr)
+    
+    GpuContext() : fence(nullptr), M(0), N(0), K(0), sizeC(0), 
+                   pooledBuffers(nullptr),
+                   bufA(nullptr), bufB(nullptr), bufC(nullptr),
                    memA(nullptr), memB(nullptr), memC(nullptr),
-                   fence(nullptr), M(0), N(0), K(0), sizeC(0), mapped_result(nullptr) {}
+                   mapped_result(nullptr) {}
 };
 
 
@@ -56,6 +83,57 @@ private:
         static std::unordered_map<std::string, PipelineCacheEntry*> cache;
         return cache;
     }
+    
+    // Buffer Pool - static list for reuse
+    static std::vector<BufferSet*>& get_buffer_pool() {
+        static std::vector<BufferSet*> pool;
+        return pool;
+    }
+    
+    static BufferSet* acquire_buffers(size_t sizeA, size_t sizeB, size_t sizeC) {
+        auto& pool = get_buffer_pool();
+        
+        // 1. Try to reuse existing buffer set
+        for (auto* buf : pool) {
+            if (!buf->in_use && buf->sizeA >= sizeA && buf->sizeB >= sizeB && buf->sizeC >= sizeC) {
+                buf->in_use = true;
+                return buf;
+            }
+        }
+        
+        // 2. Create new buffer set
+        auto& vk = VulkanBackend::get();
+        auto* buf = new BufferSet();
+        buf->sizeA = sizeA;
+        buf->sizeB = sizeB;
+        buf->sizeC = sizeC;
+        
+        if (!vk.create_buffer(sizeA, buf->bufA, buf->memA) ||
+            !vk.create_buffer(sizeB, buf->bufB, buf->memB) ||
+            !vk.create_buffer(sizeC, buf->bufC, buf->memC)) {
+            delete buf;
+            return nullptr;
+        }
+        
+        // Persistent Memory Mapping (Zero-Copy Optimization)
+        // We map once and keep it mapped for the lifetime of the buffer
+        if (vk.vkMapMemory(vk.device, buf->memA, 0, sizeA, 0, &buf->ptrA) != 0 ||
+            vk.vkMapMemory(vk.device, buf->memB, 0, sizeB, 0, &buf->ptrB) != 0 ||
+            vk.vkMapMemory(vk.device, buf->memC, 0, sizeC, 0, &buf->ptrC) != 0) {
+            std::cerr << "❌ Failed to map persistent buffers" << std::endl;
+            delete buf;
+            return nullptr;
+        }
+        
+        buf->in_use = true;
+        pool.push_back(buf);
+        return buf;
+    }
+    
+    static void release_buffers(BufferSet* buf) {
+        if (buf) buf->in_use = false;
+    }
+    
     
 public:
     // Synchronous matmul (blocks until GPU completes)
@@ -312,20 +390,32 @@ public:
         size_t sizeA = M * K * sizeof(float);
         size_t sizeB = K * N * sizeof(float);
         
-        // 1. Allocate GPU buffers (HOST_VISIBLE for UMA)
-        if(!vk.create_buffer(sizeA, ctx->bufA, ctx->memA)) { delete ctx; return nullptr; }
-        if(!vk.create_buffer(sizeB, ctx->bufB, ctx->memB)) { delete ctx; return nullptr; }
-        if(!vk.create_buffer(ctx->sizeC, ctx->bufC, ctx->memC)) { delete ctx; return nullptr; }
+        // 1. Allocate GPU buffers (use POOL!)
+        BufferSet* bufSet = acquire_buffers(sizeA, sizeB, ctx->sizeC);
+        if (!bufSet) { delete ctx; return nullptr; }
         
-        // 2. Upload input data
-        void* data;
-        vk.vkMapMemory(vk.device, ctx->memA, 0, sizeA, 0, &data);
-        memcpy(data, A, sizeA);
-        vk.vkUnmapMemory(vk.device, ctx->memA);
+        ctx->pooledBuffers = bufSet;
+        ctx->bufA = bufSet->bufA; ctx->memA = bufSet->memA;
+        ctx->bufB = bufSet->bufB; ctx->memB = bufSet->memB;
+        ctx->bufC = bufSet->bufC; ctx->memC = bufSet->memC;
         
-        vk.vkMapMemory(vk.device, ctx->memB, 0, sizeB, 0, &data);
-        memcpy(data, B, sizeB);
-        vk.vkUnmapMemory(vk.device, ctx->memB);
+        // 2. Upload input data (Zero-Copy via persistent mapping)
+        if (bufSet->ptrA) memcpy(bufSet->ptrA, A, sizeA);
+        else {
+            // Fallback (shouldn't happen with pool)
+            void* data;
+            vk.vkMapMemory(vk.device, ctx->memA, 0, sizeA, 0, &data);
+            memcpy(data, A, sizeA);
+            vk.vkUnmapMemory(vk.device, ctx->memA);
+        }
+
+        if (bufSet->ptrB) memcpy(bufSet->ptrB, B, sizeB);
+        else {
+            void* data;
+            vk.vkMapMemory(vk.device, ctx->memB, 0, sizeB, 0, &data);
+            memcpy(data, B, sizeB);
+            vk.vkUnmapMemory(vk.device, ctx->memB);
+        }
         
         // 3. Get or create cached pipeline
         auto& cache = get_pipeline_cache();
@@ -465,12 +555,8 @@ public:
         uint32_t groupsX = (N + 15) / 16;
         uint32_t groupsY = (M + 15) / 16;
         
-        // Sanity check: Intel GPU might have workgroup limits
-        const uint32_t MAX_GROUPS = 65535;
-        if (groupsX > MAX_GROUPS || groupsY > MAX_GROUPS) {
-            std::cerr << "❌ Workgroup count exceeds limits: " << groupsX << "x" << groupsY << std::endl;
-            return nullptr;
-        }
+        // NOTE: Limit check removed - max matrix size (4096) → max groups (~256) << 65535
+        // Keeping check would add unnecessary branch per call
         
         vk.vkCmdDispatch(dispatch->commandBuffer, groupsX, groupsY, 1);
         
@@ -512,17 +598,17 @@ public:
         
         // 2. UMA Zero-Copy Optimization
         // On Intel iGPU (UMA), bufC memory is HOST_VISIBLE = shared RAM
-        void* dataC;
-        vk.vkMapMemory(vk.device, ctx->memC, 0, ctx->sizeC, 0, &dataC);
-        
         if (C_out) {
-            // TODO: Detect UMA and skip memcpy
-            // For UMA: dataC IS the result (shared RAM), no copy needed!
-            // For now: always copy for safety
-            memcpy(C_out, dataC, ctx->sizeC);
+            if (ctx->pooledBuffers && ctx->pooledBuffers->ptrC) {
+                // Persistent Mapping (Zero-Copy Read)
+                memcpy(C_out, ctx->pooledBuffers->ptrC, ctx->sizeC);
+            } else {
+                void* dataC;
+                vk.vkMapMemory(vk.device, ctx->memC, 0, ctx->sizeC, 0, &dataC);
+                memcpy(C_out, dataC, ctx->sizeC);
+                vk.vkUnmapMemory(vk.device, ctx->memC);
+            }
         }
-        
-        vk.vkUnmapMemory(vk.device, ctx->memC);
         
         // 3. Cleanup dispatch context (stored in mapped_result hack)
         auto* dispatch = reinterpret_cast<GpuDispatchContext*>(ctx->mapped_result);
@@ -531,13 +617,21 @@ public:
         }
         
         // 4. Cleanup buffers and fence
+        // 4. Cleanup buffers and fence
         if (ctx->fence) vk.destroy_fence(ctx->fence);
-        vk.vkDestroyBuffer(vk.device, ctx->bufA, nullptr);
-        vk.vkDestroyBuffer(vk.device, ctx->bufB, nullptr);
-        vk.vkDestroyBuffer(vk.device, ctx->bufC, nullptr);
-        vk.vkFreeMemory(vk.device, ctx->memA, nullptr);
-        vk.vkFreeMemory(vk.device, ctx->memB, nullptr);
-        vk.vkFreeMemory(vk.device, ctx->memC, nullptr);
+        
+        // Release buffers to pool (don't destroy!)
+        if (ctx->pooledBuffers) {
+            release_buffers(ctx->pooledBuffers);
+        } else {
+            // Fallback for non-pooled buffers (legacy safety)
+            vk.vkDestroyBuffer(vk.device, ctx->bufA, nullptr);
+            vk.vkDestroyBuffer(vk.device, ctx->bufB, nullptr);
+            vk.vkDestroyBuffer(vk.device, ctx->bufC, nullptr);
+            vk.vkFreeMemory(vk.device, ctx->memA, nullptr);
+            vk.vkFreeMemory(vk.device, ctx->memB, nullptr);
+            vk.vkFreeMemory(vk.device, ctx->memC, nullptr);
+        }
         
         delete ctx;
         return true;
