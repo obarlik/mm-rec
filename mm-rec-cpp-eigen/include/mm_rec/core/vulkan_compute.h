@@ -544,6 +544,9 @@ private:
     
     // Create dispatch context (pipeline, descriptors, etc.)
     static GpuDispatchContext* create_dispatch_context(const std::string& shaderPath, int M, int N, int K) {
+        // Suppress unused warnings - M, N, K are for future per-size optimization
+        (void)M; (void)N; (void)K;
+        
         auto& vk = VulkanBackend::get();
         if (!vk.is_ready()) return nullptr;
         
