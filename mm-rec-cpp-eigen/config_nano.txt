@@ -13,7 +13,7 @@ top_k=1
 # Training
 batch_size=8
 max_seq_len=32
-learning_rate=0.00005  # Reduced from 0.0005 to prevent anti-learning
+learning_rate=0.00001  # Reduced to 1e-5 (Flux Base) to fix divergence (PPL 75)
 # optimizer_type=sgd
 optimizer_type=flux
 weight_decay=0.01     # Added weight decay

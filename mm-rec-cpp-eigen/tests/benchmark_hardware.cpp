@@ -33,6 +33,10 @@ void benchmark_cpu(int M, int N, int K) {
     std::cout << "   [CPU] Time: " << std::fixed << std::setprecision(4) << diff.count() << "s | Throughput: " << get_gflops(M, N, K, diff.count()) << " GFLOPS" << std::endl;
 }
 
+#include <future>
+
+// ...
+
 void benchmark_gpu(int M, int N, int K) {
     if (!VulkanCompute::is_ready()) {
         std::cout << "   [GPU] ❌ Vulkan not ready." << std::endl;
@@ -43,25 +47,73 @@ void benchmark_gpu(int M, int N, int K) {
     std::vector<float> B(K*N, 1.0f);
     std::vector<float> C(M*N, 0.0f);
 
-    // Warmup (Driver Initialization overhead)
-    // Shader is deployed to src/shaders/matmul.spv in build dir
-    VulkanCompute::matmul(A.data(), B.data(), C.data(), 64, 64, 64);
+    // Warmup & Use best shader
+    std::string best_shader = "matmul_4x4.spv";
+    VulkanCompute::matmul(A.data(), B.data(), C.data(), 64, 64, 64, best_shader);
 
-    std::cout << "   [GPU] Running..." << std::flush;
+    std::cout << "   [GPU] Running (Best Shader)..." << std::flush;
     auto start = std::chrono::high_resolution_clock::now();
     
-    bool result = VulkanCompute::matmul(A.data(), B.data(), C.data(), M, N, K);
+    bool result = VulkanCompute::matmul(A.data(), B.data(), C.data(), M, N, K, best_shader);
     
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end - start;
 
     if (result) {
-        // Note: This currently measures Upload + Compute + Download
-        // Ideally we only measure Compute for peak throughput, but this is "Real World" throughput.
         std::cout << " Done." << std::endl;
         std::cout << "   [GPU] Time: " << std::fixed << std::setprecision(4) << diff.count() << "s | Throughput: " << get_gflops(M, N, K, diff.count()) << " GFLOPS" << std::endl;
     } else {
         std::cout << " ❌ Failed." << std::endl;
+    }
+}
+
+void benchmark_hybrid(int M, int N, int K) {
+    std::cout << "   [HYBRID] Initializing (CPU + GPU Parallel)..." << std::endl;
+    // Split: CPU (25%), GPU (75%) based on ~110 vs ~330 GFLOPS capacity
+    int M_cpu = M / 4;
+    int M_gpu = M - M_cpu;
+    
+    // CPU Data
+    Eigen::MatrixXf A_cpu = Eigen::MatrixXf::Random(M_cpu, K);
+    Eigen::MatrixXf B_cpu = Eigen::MatrixXf::Random(K, N); 
+    Eigen::MatrixXf C_cpu(M_cpu, N);
+    
+    // GPU Data
+    std::vector<float> A_gpu(M_gpu * K, 1.0f);
+    std::vector<float> B_gpu(K * N, 1.0f);
+    std::vector<float> C_gpu(M_gpu * N, 0.0f);
+    
+    // Warmup GPU
+    VulkanCompute::matmul(A_gpu.data(), B_gpu.data(), C_gpu.data(), 64, 64, 64, "matmul_4x4.spv");
+    
+    std::cout << "   [HYBRID] Dispatched..." << std::flush;
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    // 1. Launch GPU (Async Thread)
+    auto gpu_future = std::async(std::launch::async, [&]() {
+        return VulkanCompute::matmul(A_gpu.data(), B_gpu.data(), C_gpu.data(), M_gpu, N, K, "matmul_4x4.spv");
+    });
+    
+    // 2. Run CPU (Main Thread)
+    C_cpu.noalias() = A_cpu * B_cpu;
+    
+    // 3. Sync
+    bool gpu_success = gpu_future.get();
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    
+    if (gpu_success) {
+        double ops_cpu = 2.0 * (double)M_cpu * N * K;
+        double ops_gpu = 2.0 * (double)M_gpu * N * K;
+        double total_ops = ops_cpu + ops_gpu;
+        double gflops = (total_ops / diff.count()) / 1e9;
+        
+        std::cout << " Done." << std::endl;
+        // std::cout << "   [DEBUG] Time: " << diff.count() << "s | Total Ops: " << total_ops << std::endl;
+        std::cout << "   [HYBRID] Throughput: " << gflops << " GFLOPS" << std::endl;
+    } else {
+        std::cout << " ❌ Hybrid Failed." << std::endl;
     }
 }
 
@@ -72,9 +124,9 @@ int main() {
     SystemOptimizer::optimize_runtime();
     VulkanBackend::get().init();
     
-    int M = 2048;
-    int N = 2048;
-    int K = 2048;
+    int M = 4096; // Increase size for better hybrid parallelism
+    int N = 4096;
+    int K = 4096;
     
     std::cout << "\nTest Size: " << M << "x" << N << "x" << K << std::endl;
     std::cout << "-----------------------------------" << std::endl;
@@ -84,6 +136,9 @@ int main() {
     
     // 3. GPU
     benchmark_gpu(M, N, K);
+    
+    // 4. Hybrid
+    benchmark_hybrid(M, N, K);
     
     std::cout << "-----------------------------------" << std::endl;
     return 0;

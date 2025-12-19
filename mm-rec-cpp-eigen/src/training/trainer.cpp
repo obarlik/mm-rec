@@ -13,6 +13,7 @@
 #include "mm_rec/utils/metrics.h"
 #include "mm_rec/utils/logger.h"
 #include "mm_rec/utils/dashboard_html.h"
+#include "mm_rec/core/vulkan_backend.h"
 #include <iostream>
 #include <cstring>  // memcpy
 #include <cmath>
@@ -107,6 +108,66 @@ void Trainer::setup_dashboard_handlers() {
         LOG_UI("🛑 Stop requested via Dashboard!");
         return net::HttpServer::build_response(200, "application/json", "{\"status\": \"stopping\"}");
     });
+    // API: Hardware Info
+    dashboard_server_->register_handler("/api/hardware", [](const std::string&) -> std::string {
+        std::stringstream json;
+        json << "{";
+        
+        // 1. CPU Model
+        std::string cpu_model = "Unknown";
+        std::ifstream cpuinfo("/proc/cpuinfo");
+        if (cpuinfo.is_open()) {
+            std::string line;
+            while(std::getline(cpuinfo, line)) {
+                if (line.find("model name") != std::string::npos) {
+                     size_t pos = line.find(":");
+                     if (pos != std::string::npos) cpu_model = line.substr(pos + 2);
+                     break; 
+                }
+            }
+        }
+        json << "\"cpu_model\": \"" << cpu_model << "\", ";
+        
+        // 2. Cores
+        json << "\"cores_logical\": " << std::thread::hardware_concurrency() << ", ";
+        
+        // 3. RAM
+        long mem_total_kb = 0;
+        std::ifstream meminfo("/proc/meminfo");
+         if (meminfo.is_open()) {
+            std::string line;
+            while(std::getline(meminfo, line)) {
+                if (line.find("MemTotal") != std::string::npos) {
+                     sscanf(line.c_str(), "MemTotal: %ld kB", &mem_total_kb);
+                     break; 
+                }
+            }
+        }
+        json << "\"mem_total_mb\": " << (mem_total_kb / 1024) << ", ";
+        
+        // 4. SIMD & Arch
+        std::string simd = "Basic";
+        #ifdef __AVX512F__
+            simd = "AVX-512";
+        #elif defined(__AVX2__)
+            simd = "AVX2";
+        #elif defined(__AVX__)
+            simd = "AVX";
+        #endif
+        json << "\"simd\": \"" << simd << "\", ";
+        json << "\"arch\": \"x86_64\", "; // Assuming x86_64 for Linux env
+        
+        // 5. GPU/Compute
+        bool vk_ready = VulkanBackend::get().is_ready();
+        if (vk_ready) {
+             json << "\"compute_device\": \"Hybrid (CPU + Vulkan iGPU)\"";
+        } else {
+             json << "\"compute_device\": \"CPU Only (AVX-" << simd << ")\"";
+        }
+        
+        json << "}";
+        return net::HttpServer::build_response(200, "application/json", json.str());
+    });
     
     // API: Stats
     dashboard_server_->register_handler("/api/stats", [this](const std::string&) -> std::string {
@@ -115,8 +176,10 @@ void Trainer::setup_dashboard_handlers() {
         json << "{";
         json << "\"epoch\": " << (this->step_ / 1000) << ", "; // Approximate
         json << "\"step\": " << this->step_ << ", ";
+        json << "\"total_steps\": " << this->config_.total_steps << ", "; 
         json << "\"lr\": " << this->get_current_lr() << ", ";
         json << "\"speed\": " << this->current_speed_ << ", ";
+        json << "\"mem\": " << (this->mem_history_.empty() ? 0.0f : this->mem_history_.back()) << ", ";
         json << "\"loss\": " << (this->loss_history_.empty() ? 0.0f : this->loss_history_.back()) << ", ";
         
         json << "\"history\": [";
@@ -145,9 +208,22 @@ void Trainer::setup_dashboard_handlers() {
             json << this->lr_history_[i];
             if (i < this->lr_history_.size() - 1) json << ",";
         }
-        json << "]";
-        
-        json << "}";
+        json << "], ";
+
+        json << "\"data_stall_history\": [";
+        for (size_t i = 0; i < this->data_stall_history_.size(); ++i) {
+            json << this->data_stall_history_[i];
+            if (i < this->data_stall_history_.size() - 1) json << ",";
+        }
+        json << "], ";
+
+        json << "\"moe_loss_history\": [";
+        for (size_t i = 0; i < this->moe_loss_history_.size(); ++i) {
+            json << this->moe_loss_history_[i];
+            if (i < this->moe_loss_history_.size() - 1) json << ",";
+        }
+        json << "]"; // End of metrics
+        json << "}"; // End of object
         return net::HttpServer::build_response(200, "application/json", json.str());
     });
 }
@@ -159,7 +235,7 @@ Trainer::~Trainer() {
 }
 
 // Vectorized training step (Full Batch GPU Offload)
-float Trainer::train_step(const TrainingBatch& batch) {
+float Trainer::train_step(const TrainingBatch& batch, float data_stall_ms, float speed_tps, float mem_mb) {
     // 1. Mark persistent memory start
     // We want gradients to survive until update_parameters
     MemoryManager::instance().mark_persistent();
@@ -241,7 +317,8 @@ float Trainer::train_step(const TrainingBatch& batch) {
     step_++;
     
     // Update dashboard stats
-    update_stats(total_step_loss, 0.0f, grad_norm, current_lr); // Speed is updated by caller, but we send health metrics here
+    // Update dashboard stats
+    update_stats(total_step_loss, speed_tps, grad_norm, current_lr, data_stall_ms, 0.0f, mem_mb); // Speed/Mem passed from CLI
     
     // 7. Cleanup
     MemoryManager::instance().clear_persistent();
@@ -331,7 +408,7 @@ float Trainer::get_current_lr() const {
     return scheduler_->get_lr(step_);
 }
 
-void Trainer::update_stats(float loss, float speed, float grad_norm, float lr) {
+void Trainer::update_stats(float loss, float speed, float grad_norm, float lr, float data_stall_ms, float moe_loss, float mem_mb) {
     std::lock_guard<std::mutex> lock(stats_mutex_);
     
     // Raw Loss (Increased history for full graph visualization)
@@ -345,6 +422,18 @@ void Trainer::update_stats(float loss, float speed, float grad_norm, float lr) {
     // LR
     if (lr_history_.size() >= 10000) lr_history_.pop_front();
     lr_history_.push_back(lr);
+
+    // Data Stall
+    if (data_stall_history_.size() >= 10000) data_stall_history_.pop_front();
+    data_stall_history_.push_back(data_stall_ms);
+
+    // MoE Loss
+    if (moe_loss_history_.size() >= 10000) moe_loss_history_.pop_front();
+    moe_loss_history_.push_back(moe_loss);
+
+    // Memory
+    if (mem_history_.size() >= 10000) mem_history_.pop_front();
+    mem_history_.push_back(mem_mb);
     
     // Speed
     if (speed > 0) current_speed_ = speed;

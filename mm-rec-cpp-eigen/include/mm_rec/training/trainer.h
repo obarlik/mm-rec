@@ -58,9 +58,13 @@ public:
     
     /**
      * Train for one batch
-     * Returns loss value
+     * Returns average loss for the batch
      */
-    float train_step(const TrainingBatch& batch);
+    /**
+     * Train for one batch
+     * Returns average loss for the batch
+     */
+    float train_step(const TrainingBatch& batch, float data_stall_ms = 0.0f, float speed_tps = 0.0f, float mem_mb = 0.0f);
     
     /**
      * Forward pass only (no backward, for difficulty assessment)
@@ -102,7 +106,7 @@ public:
     
     // Dashboard control
     bool should_stop() const { return stop_requested_; }
-    void update_stats(float loss, float speed, float grad_norm, float lr);
+    void update_stats(float loss, float speed, float grad_norm, float lr, float data_stall_ms, float moe_loss, float mem_mb);
     
 private:
     MMRecModel& model_;
@@ -121,6 +125,9 @@ private:
     std::deque<float> avg_loss_history_; // EMA History
     std::deque<float> grad_norm_history_;
     std::deque<float> lr_history_;
+    std::deque<float> data_stall_history_;
+    std::deque<float> moe_loss_history_;
+    std::deque<float> mem_history_;
     
     float current_speed_ = 0.0f;
     float current_ema_ = 0.0f; // Helper for calculation

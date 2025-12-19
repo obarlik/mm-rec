@@ -25,6 +25,7 @@
 #else
 #ifdef __linux__
 #include <sys/mman.h>
+#include <unistd.h>
 #endif
 #endif
 
@@ -326,6 +327,19 @@ public:
     }
     
     static size_t get_global_memory_usage() {
+        #ifdef __linux__
+        // Read RSS from /proc/self/statm (more accurate system view)
+        FILE* fp = fopen("/proc/self/statm", "r");
+        if (fp) {
+            long rss = 0;
+            if (fscanf(fp, "%*s%ld", &rss) == 1) { // 2nd field is RSS (pages)
+                fclose(fp);
+                return rss * sysconf(_SC_PAGESIZE);
+            }
+            fclose(fp);
+        }
+        #endif
+        // Fallback to pool usage
         return GlobalBlockPool::instance().get_current_usage();
     }
     
