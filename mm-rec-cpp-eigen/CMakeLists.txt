@@ -62,6 +62,27 @@ set(MKL_LIBS
     ${MKL_DIR}/libmkl_core.a
 )
 
+# Helper to embed binary resources (e.g. SPIR-V shaders) directly into the binary
+function(embed_resource target input_file)
+    get_filename_component(input_name ${input_file} NAME)
+    get_filename_component(input_dir ${input_file} DIRECTORY)
+    
+    # Target object file
+    set(output_file "${CMAKE_CURRENT_BINARY_DIR}/${input_name}.o")
+    
+    # Run ld in the input directory so symbols don't include the full path
+    # Symbol will be: _binary_matmul_spv_start (dots become underscores)
+    add_custom_command(
+        OUTPUT ${output_file}
+        COMMAND ld -r -b binary -o ${output_file} ${input_name}
+        DEPENDS ${input_file}
+        WORKING_DIRECTORY ${input_dir}
+        COMMENT "Embedding Resource: ${input_name} -> Object"
+    )
+    
+    target_sources(${target} PRIVATE ${output_file})
+endfunction()
+
 # Check if they exist (sanity check)
 if(EXISTS "${MKL_DIR}/libmkl_core.a")
     message(STATUS "🚀 MKL Static Libraries FOUND at ${MKL_DIR}")
@@ -141,6 +162,12 @@ add_library(mm_rec_eigen STATIC
 target_link_libraries(mm_rec_eigen
     Eigen3::Eigen
 )
+
+# Embed Shaders
+file(GLOB SHADER_SOURCES "src/shaders/*.spv")
+foreach(shader ${SHADER_SOURCES})
+    embed_resource(mm_rec_eigen ${shader})
+endforeach()
 
 if(MKL_LINK_FLAGS)
     target_link_libraries(mm_rec_eigen ${MKL_LINK_FLAGS})
