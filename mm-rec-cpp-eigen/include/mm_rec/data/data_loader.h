@@ -43,7 +43,8 @@ private:
     bool shuffle_;
     
     // Cursor handling
-    std::atomic<int64_t> current_idx_;
+    std::atomic<int64_t> current_batch_idx_;
+    std::vector<int64_t> indices_;
     int64_t total_tokens_;
     
     // Threading

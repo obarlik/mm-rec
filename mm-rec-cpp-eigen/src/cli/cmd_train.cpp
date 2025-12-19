@@ -22,6 +22,7 @@
 #include "mm_rec/utils/ui.h"            // [NEW] UI library
 #include "mm_rec/core/vulkan_backend.h"
 #include "mm_rec/utils/metrics.h"
+#include "mm_rec/utils/system_optimizer.h"
 
 #include <iostream>
 #include <iomanip>
@@ -118,12 +119,14 @@ int cmd_train(int argc, char* argv[]) {
     float learning_rate = 0.01f;
     std::string optimizer_type = "sgd";
     float weight_decay = 0.01f;
+    float grad_clip_norm = 1.0f; // Default clip
     int batch_size = 8;
     int max_seq_len = 128; // Restored
     // Adaptive params (defaults)
     float easy_threshold = 50.0f;
     float hard_threshold = 500.0f;
     int max_iterations = 15;
+    int warmup_steps = 100; // Default warmup
     
     std::ifstream cfg_file(config_path);
     std::string line;
@@ -159,7 +162,9 @@ int cmd_train(int argc, char* argv[]) {
         // Adaptive params
         else if (key == "easy_threshold") easy_threshold = std::stof(val);
         else if (key == "hard_threshold") hard_threshold = std::stof(val);
+        else if (key == "grad_clip_norm") grad_clip_norm = std::stof(val);
         else if (key == "max_iterations") max_iterations = std::stoi(val);
+        else if (key == "warmup_steps") warmup_steps = std::stoi(val);
         
         if (key == "uboo_weight") config.uboo_weight = std::stof(val);
         else if (key == "max_memory_mb") {
@@ -188,6 +193,10 @@ int cmd_train(int argc, char* argv[]) {
     train_config.batch_size = batch_size;
     train_config.optimizer_type = optimizer_type;
     train_config.weight_decay = weight_decay;
+    train_config.warmup_steps = warmup_steps;
+    train_config.grad_clip_norm = grad_clip_norm;
+    train_config.easy_threshold = easy_threshold;
+    train_config.hard_threshold = hard_threshold;
     Trainer trainer(model, train_config);
     
     // CRITICAL: Mark model weights as persistent so they aren't wiped by reset_arena()
@@ -272,6 +281,8 @@ int cmd_train(int argc, char* argv[]) {
         float epoch_loss = 0.0f;
         int epoch_steps = 0;
         auto epoch_start_time = std::chrono::steady_clock::now();
+        // Timer for Data Stall metric
+        auto step_end_time = std::chrono::high_resolution_clock::now();
         
         for (int64_t batch_idx = 0; batch_idx < num_batches; ++batch_idx) {
             // 1. PROBE (Vectorized Full Batch Check)
@@ -429,7 +440,24 @@ int cmd_train(int argc, char* argv[]) {
                 break;
             }
 
-            float loss = trainer.train_step(final_batch);
+            // Calculate Data Stall (Time spent since last step ended)
+            auto step_start_time = std::chrono::high_resolution_clock::now();
+            double stall_ms = std::chrono::duration<double, std::milli>(step_start_time - step_end_time).count();
+            // First step might be huge, but that's accurate (setup time)
+
+            // Calculate memory usage (Cheap)
+            size_t mem_bytes = MemoryManager::get_global_memory_usage();
+            double mem_mb = mem_bytes / (1024.0 * 1024.0);
+
+            // Calculate Speed (Tokens per second, persistent)
+            auto step_end = std::chrono::steady_clock::now();
+            double step_dur = std::chrono::duration<double>(step_end - epoch_start_time).count();
+            double speed_tps = (epoch_steps * filtered_size * seq_len) / (step_dur + 1e-9);
+
+            float loss = trainer.train_step(final_batch, (float)stall_ms, (float)speed_tps, (float)mem_mb);
+            
+            // Mark end of step for next stall calculation
+            step_end_time = std::chrono::high_resolution_clock::now();
             
             // Check for NaN - Auto-Rollback Mechanism
             // Check for NaN - Auto-Rollback Mechanism
@@ -480,10 +508,6 @@ int cmd_train(int argc, char* argv[]) {
             
             // 👇 EXPENSIVE: Console output only every 100 steps (or first 20)
             if (epoch_steps < 20 || total_steps % 100 == 0) {
-                 auto step_end = std::chrono::steady_clock::now();
-                 double step_dur = std::chrono::duration<double>(step_end - epoch_start_time).count();
-                 double speed_tps = (epoch_steps * filtered_size * seq_len) / (step_dur + 1e-9);
-                 
                  // formatted output using stringstream
                  std::stringstream ss;
                  ss << "\r -> Step " << total_steps 
@@ -495,6 +519,7 @@ int cmd_train(int argc, char* argv[]) {
                  }
                  
                  ss << " | " << (int)speed_tps << " tok/s    ";
+                 ss << " | Mem: " << (int)mem_mb << "MB";
                  
                  std::cout << color::GREEN << ss.str() << color::RESET << std::flush;
                  if (total_steps % 1000 == 0) LOG_INFO(ss.str().c_str());

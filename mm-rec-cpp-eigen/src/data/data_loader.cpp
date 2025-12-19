@@ -14,10 +14,21 @@ DataLoader::DataLoader(std::shared_ptr<Dataset> dataset,
       batch_size_(batch_size), 
       seq_len_(seq_len), 
       shuffle_(shuffle),
-      current_idx_(0),
+      current_batch_idx_(0),
       stop_flag_(false) {
     
     total_tokens_ = dataset_->size();
+    
+    // Calculate total possible sequences (non-overlapping for simplicity)
+    int64_t num_sequences = total_tokens_ / seq_len_;
+    
+    // Populate indices
+    indices_.resize(num_sequences);
+    for (int64_t i = 0; i < num_sequences; ++i) {
+        indices_[i] = i * seq_len_;
+    }
+    
+    reset(); // Initial shuffle
     
     // Start worker threads
     for (int i = 0; i < num_workers; ++i) {
@@ -35,16 +46,19 @@ DataLoader::~DataLoader() {
 }
 
 void DataLoader::reset() {
-    current_idx_ = 0;
-    // Clear buffer? Or just let it be.
+    current_batch_idx_ = 0;
+    
+    if (shuffle_) {
+        std::random_device rd;
+        std::mt19937 g(rd());
+        std::shuffle(indices_.begin(), indices_.end(), g);
+        std::cout << "[DataLoader] Shuffled " << indices_.size() << " sequences." << std::endl;
+    }
 }
 
 int64_t DataLoader::total_batches() const {
-    // Total tokens / (batch * seq)
-    // Actually we need (seq + 1) for [input, target] sliding window usually?
-    // Or we do input[0..N-1] -> target[1..N].
-    // Let's assume non-overlapping sequences for now for simplicity, or just contiguous.
-    return total_tokens_ / (batch_size_ * seq_len_);
+    // Total sequences / batch_size
+    return indices_.size() / batch_size_;
 }
 
 bool DataLoader::next(TrainingBatch& batch) {
@@ -75,68 +89,41 @@ bool DataLoader::next(TrainingBatch& batch) {
 
 void DataLoader::worker_loop() {
     while (!stop_flag_) {
-        // 1. Reserve a slice index
-        // FIX: For Strided Sampling (where each row acts as an independent worker on a chunk),
-        // we only advance by seq_len_ per step, not the full batch size.
-        // If we advanced by (batch * seq), we would skip huge chunks of data between steps for each row.
-        int64_t idx = current_idx_.fetch_add(seq_len_);
+        // 1. Reserve a Batch Index (which points to 'batch_size' sequences)
+        int64_t batch_idx = current_batch_idx_.fetch_add(1);
         
-        // Check bounds (Per Chunk!)
-        // Since we are striding, 'idx' only traverses one chunk_size.
-        int64_t chunk_size = total_tokens_ / batch_size_;
-        if (idx + seq_len_ + 1 > chunk_size) {
-            // End of epoch (for this stride)
-            current_idx_ = 0; 
-            idx = current_idx_.fetch_add(seq_len_);
+        // Check bounds
+        int64_t total_batches = (int64_t)indices_.size() / batch_size_;
+        if (batch_idx >= total_batches) {
+            // End of epoch
+            // We need to wait for reset or just stop?
+            // For now, let's wrap around or wait.
+            // Simplified: Just stop submitting.
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue; 
         }
         
         // 2. Prepare Batch Data
         Tensor input = Tensor::zeros({batch_size_, seq_len_});
         Tensor target = Tensor::zeros({batch_size_, seq_len_});
         
-        // Read from dataset (Thread safe? Yes, mmap read is safe)
-        // If shuffle is true, we need random indices. 
-        // For streaming, "shuffle" usually means shuffling buffers, not random access seek.
-        // Let's implement sequential reading for high perf first.
-        
-        // Input: [batch, seq]
-        // We treat the dataset as one long stream, and chop it into batches.
-        // Or we can say each row in batch comes from different part of file (better for diversity).
-        // For simplest implementation: Continuous chunk.
-        // Row 0: [idx ... idx+seq]
-        // Row 1: [idx+seq ... idx+2seq] ...
-        
-        // Wait, "Streaming" usually implies Row 0 is at offset X, Row 1 is at offset Y.
-        // If we just take one contiguous block, the batch is highly correlated.
-        // Better: Stride through file.
-        // stride = total_tokens / batch_size;
-        // row[b] starts at b * stride + current_seq_ptr
-        
-        // Let's implement Strided Streaming (decorrelates batch rows).
-        // chunk_size is already defined above
-        
-        // We use 'idx' as the 'step' index (0, 1, 2...)
-        // Actually current_idx_ logic above was for continuous.
-        // Let's change idx to mean "current sequence step".
-        // fetch_add(seq_len_)
-        
-        // Re-calibrating logic:
-        // idx is the offset for the *first* row.
-        // We need to fetch 'seq_len' tokens.
-        
+        // Fetch 'batch_size' sequences from the indices pool
         for (int64_t b = 0; b < batch_size_; ++b) {
-            int64_t row_start = b * chunk_size + idx; // Strided access
+            int64_t seq_idx = batch_idx * batch_size_ + b;
+            if (seq_idx >= (int64_t)indices_.size()) break; // Safety
             
-            // Safety check
-            if (row_start + seq_len_ + 1 >= total_tokens_) {
-                 // Wrap around for this row
-                 row_start = (row_start) % (total_tokens_ - seq_len_ - 1);
-            }
+            int64_t start_token = indices_[seq_idx];
             
+            // Safety check against file end
+            // (indices were created safely, but just in case)
+             if (start_token + seq_len_ + 1 >= total_tokens_) {
+                 start_token = 0; // Fallback
+             }
+
             for (int64_t s = 0; s < seq_len_; ++s) {
                 // causal prediction: input=t, target=t+1
-                input.data()[b * seq_len_ + s] = (float)(*dataset_)[row_start + s];
-                target.data()[b * seq_len_ + s] = (float)(*dataset_)[row_start + s + 1];
+                input.data()[b * seq_len_ + s] = (float)(*dataset_)[start_token + s];
+                target.data()[b * seq_len_ + s] = (float)(*dataset_)[start_token + s + 1];
             }
         }
         

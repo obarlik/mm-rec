@@ -124,6 +124,27 @@ void Trainer::setup_dashboard_handlers() {
             json << this->loss_history_[i];
             if (i < this->loss_history_.size() - 1) json << ",";
         }
+        json << "], ";
+        
+        json << "\"avg_history\": [";
+        for (size_t i = 0; i < this->avg_loss_history_.size(); ++i) {
+            json << this->avg_loss_history_[i];
+            if (i < this->avg_loss_history_.size() - 1) json << ",";
+        }
+        json << "], ";
+
+        json << "\"grad_norm_history\": [";
+        for (size_t i = 0; i < this->grad_norm_history_.size(); ++i) {
+            json << this->grad_norm_history_[i];
+            if (i < this->grad_norm_history_.size() - 1) json << ",";
+        }
+        json << "], ";
+
+        json << "\"lr_history\": [";
+        for (size_t i = 0; i < this->lr_history_.size(); ++i) {
+            json << this->lr_history_[i];
+            if (i < this->lr_history_.size() - 1) json << ",";
+        }
         json << "]";
         
         json << "}";
@@ -161,13 +182,33 @@ float Trainer::train_step(const TrainingBatch& batch) {
     float total_step_loss = loss + cache.total_aux_loss * 0.01f;
     
     // Safety Check: Detect NaN in Loss (Pre-Backward)
-    // If loss is broken, gradients will be broken. Don't waste compute.
     if (!is_robust_finite(total_step_loss)) {
         LOG_UI("⚠️  Loss Explosion/NaN detected (Loss: " + std::to_string(total_step_loss) + "). Skipping Step.");
         MemoryManager::instance().clear_persistent();
         MemoryManager::instance().reset_arena();
         return 100.0f; // Return high penalty
     }
+
+    // --- ACTIVE LEARNING: CURRICULUM FILTER ---
+    // 1. Skip Easy Samples (Save Compute)
+    if (total_step_loss < config_.easy_threshold) {
+        // Just update stats, don't train
+        // Maybe we want to train rarely on easy to prevent forgetting?
+        // For now: Hard Skip.
+        // LOG_INFO("Skipping Easy Sample (Loss: " + std::to_string(total_step_loss) + ")");
+        MemoryManager::instance().clear_persistent();
+        MemoryManager::instance().reset_arena();
+        return total_step_loss;
+    }
+    
+    // 2. Skip Hard Samples (Prevent Destabilization)
+    if (total_step_loss > config_.hard_threshold) {
+        LOG_UI("🛡️ Skipping Too Hard Sample (Loss: " + std::to_string(total_step_loss) + ")");
+        MemoryManager::instance().clear_persistent();
+        MemoryManager::instance().reset_arena();
+        return total_step_loss;
+    }
+    // ------------------------------------------
     
     // 4. Backward Pass (Full Batch)
     ModelGradients grads;
@@ -200,7 +241,7 @@ float Trainer::train_step(const TrainingBatch& batch) {
     step_++;
     
     // Update dashboard stats
-    update_stats(total_step_loss, 0.0f); // Speed updated by caller mostly, but we track loss here
+    update_stats(total_step_loss, 0.0f, grad_norm, current_lr); // Speed is updated by caller, but we send health metrics here
     
     // 7. Cleanup
     MemoryManager::instance().clear_persistent();
@@ -290,11 +331,30 @@ float Trainer::get_current_lr() const {
     return scheduler_->get_lr(step_);
 }
 
-void Trainer::update_stats(float loss, float speed) {
+void Trainer::update_stats(float loss, float speed, float grad_norm, float lr) {
     std::lock_guard<std::mutex> lock(stats_mutex_);
-    if (loss_history_.size() >= 100) loss_history_.pop_front();
+    
+    // Raw Loss (Increased history for full graph visualization)
+    if (loss_history_.size() >= 10000) loss_history_.pop_front();
     loss_history_.push_back(loss);
+    
+    // Grad Norm
+    if (grad_norm_history_.size() >= 10000) grad_norm_history_.pop_front();
+    grad_norm_history_.push_back(grad_norm);
+    
+    // LR
+    if (lr_history_.size() >= 10000) lr_history_.pop_front();
+    lr_history_.push_back(lr);
+    
+    // Speed
     if (speed > 0) current_speed_ = speed;
+    
+    // EMA Calculation & History
+    if (current_ema_ == 0.0f) current_ema_ = loss;
+    else current_ema_ = current_ema_ * 0.95f + loss * 0.05f;
+    
+    if (avg_loss_history_.size() >= 10000) avg_loss_history_.pop_front();
+    avg_loss_history_.push_back(current_ema_);
 }
 
 } // namespace mm_rec

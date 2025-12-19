@@ -42,6 +42,10 @@ struct TrainingConfig {
     int total_steps = 10000;
     std::string optimizer_type = "sgd"; // sgd, adam, adamw
     float weight_decay = 0.01f;
+    
+    // Adaptive Flux
+    float easy_threshold = 1.0f;
+    float hard_threshold = 100.0f;
 };
 
 /**
@@ -98,7 +102,7 @@ public:
     
     // Dashboard control
     bool should_stop() const { return stop_requested_; }
-    void update_stats(float loss, float speed);
+    void update_stats(float loss, float speed, float grad_norm, float lr);
     
 private:
     MMRecModel& model_;
@@ -107,15 +111,19 @@ private:
     std::unique_ptr<Optimizer> optimizer_;
     int step_;
     
-    // Dashboard Components
     std::unique_ptr<net::HttpServer> dashboard_server_;
     std::atomic<bool> stop_requested_{false};
     void setup_dashboard_handlers();
     
     // Stats for API (Protected by mutex)
     mutable std::mutex stats_mutex_;
-    std::deque<float> loss_history_; // Keep last 100 points
+    std::deque<float> loss_history_;
+    std::deque<float> avg_loss_history_; // EMA History
+    std::deque<float> grad_norm_history_;
+    std::deque<float> lr_history_;
+    
     float current_speed_ = 0.0f;
+    float current_ema_ = 0.0f; // Helper for calculation
 };
 
 } // namespace mm_rec
