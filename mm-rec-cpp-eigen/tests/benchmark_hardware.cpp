@@ -69,8 +69,8 @@ void benchmark_gpu(int M, int N, int K) {
 
 void benchmark_hybrid(int M, int N, int K) {
     std::cout << "   [HYBRID] Initializing (CPU + GPU Parallel)..." << std::endl;
-    // Split: CPU (12.5%), GPU (87.5%) to reduce memory bus contention
-    // Previous 25% CPU saturation caused total throughput drop.
+    // Split: CPU (12.5%), GPU (87.5%)
+    // Tuned for minimum memory bus contention.
     int M_cpu = M / 8;
     int M_gpu = M - M_cpu;
     
@@ -85,14 +85,16 @@ void benchmark_hybrid(int M, int N, int K) {
     std::vector<float> C_gpu(M_gpu * N, 0.0f);
     
     // Warmup GPU
-    VulkanCompute::matmul(A_gpu.data(), B_gpu.data(), C_gpu.data(), 64, 64, 64, "matmul_4x4.spv");
+    // Experiment: 4x4 shader is best.
+    std::string hyb_shader = "matmul_4x4.spv";
+    VulkanCompute::matmul(A_gpu.data(), B_gpu.data(), C_gpu.data(), 64, 64, 64, hyb_shader);
     
-    std::cout << "   [HYBRID] Dispatched..." << std::flush;
+    std::cout << "   [HYBRID] Dispatched (Monolithic GPU + CPU)..." << std::flush;
     auto start = std::chrono::high_resolution_clock::now();
     
-    // 1. Launch GPU (Async Thread)
+    // 1. Launch GPU (Async Thread) - Monolithic is faster (less overhead)
     auto gpu_future = std::async(std::launch::async, [&]() {
-        return VulkanCompute::matmul(A_gpu.data(), B_gpu.data(), C_gpu.data(), M_gpu, N, K, "matmul_4x4.spv");
+        return VulkanCompute::matmul(A_gpu.data(), B_gpu.data(), C_gpu.data(), M_gpu, N, K, hyb_shader);
     });
     
     // 2. Run CPU (Main Thread)
