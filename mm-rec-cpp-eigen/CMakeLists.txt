@@ -116,6 +116,7 @@ set(CORE_SOURCES
     src/core/linear.cpp
     src/core/gated_memory.cpp
     src/core/normalization.cpp
+    src/core/auto_tuner.cpp
 )
 
 set(MODEL_SOURCES

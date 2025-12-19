@@ -13,7 +13,9 @@
 #include "mm_rec/training/trainer.h"
 #include "mm_rec/data/data_loader.h"
 #include "mm_rec/data/tokenizer.h"
+#include "mm_rec/data/tokenizer.h"
 #include "mm_rec/core/vulkan_backend.h"
+#include "mm_rec/core/auto_tuner.h"
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -52,6 +54,12 @@ int main() {
     } else {
         std::cout << "⚠️ Vulkan Backend Initialization Failed (Falling back to CPU)" << std::endl;
     }
+    
+    // 0.5 Auto-Tune Hardware
+    // This will find the optimal Shader and CPU/GPU ratio for the current machine
+    std::cout << "\n🛡️  Auto-Tuning Hardware..." << std::endl;
+    mm_rec::TuningResult tuning = mm_rec::AutoTuner::tune_system(4096, true);
+    std::cout << "✅ Hardware Optimized: " << tuning.peak_gflops << " GFLOPS (Ratio: " << tuning.best_cpu_ratio << ")" << std::endl;
     
     // 1. Setup Data
     // 1. Setup Data
