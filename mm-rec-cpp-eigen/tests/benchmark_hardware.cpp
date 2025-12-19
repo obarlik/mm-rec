@@ -69,8 +69,9 @@ void benchmark_gpu(int M, int N, int K) {
 
 void benchmark_hybrid(int M, int N, int K) {
     std::cout << "   [HYBRID] Initializing (CPU + GPU Parallel)..." << std::endl;
-    // Split: CPU (25%), GPU (75%) based on ~110 vs ~330 GFLOPS capacity
-    int M_cpu = M / 4;
+    // Split: CPU (12.5%), GPU (87.5%) to reduce memory bus contention
+    // Previous 25% CPU saturation caused total throughput drop.
+    int M_cpu = M / 8;
     int M_gpu = M - M_cpu;
     
     // CPU Data
@@ -117,6 +118,49 @@ void benchmark_hybrid(int M, int N, int K) {
     }
 }
 
+void benchmark_gpu_tiled(int M, int N, int K) {
+    if (!VulkanCompute::is_ready()) return;
+
+    std::cout << "   [GPU TILED] Running (M-Dimension Tiling)..." << std::flush;
+    
+    // Split M into tiles of size 2048 (which we know is fast ~334 GFLOPS)
+    int tile_M = 2048;
+    int num_tiles = (M + tile_M - 1) / tile_M;
+    
+    // Allocate full buffers (simulating real usage)
+    std::vector<float> A(M*K, 1.0f);
+    std::vector<float> B(K*N, 1.0f);
+    std::vector<float> C(M*N, 0.0f);
+    
+    // Warmup
+    VulkanCompute::matmul(A.data(), B.data(), C.data(), 64, 64, 64, "matmul_4x4.spv");
+    
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    // Execute tiles sequentially
+    for(int t=0; t<num_tiles; ++t) {
+        int current_M = std::min(tile_M, M - t*tile_M);
+        int offset_A = t * tile_M * K; // Row-major: skip rows
+        int offset_C = t * tile_M * N;
+        
+        // Pointer arithmetic for sub-matrices
+        VulkanCompute::matmul(
+            A.data() + offset_A, 
+            B.data(), 
+            C.data() + offset_C, 
+            current_M, N, K, 
+            "matmul_4x4.spv"
+        );
+    }
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    
+    double gflops = get_gflops(M, N, K, diff.count());
+    std::cout << " Done." << std::endl;
+    std::cout << "   [GPU TILED] Time: " << diff.count() << "s | Throughput: " << gflops << " GFLOPS" << std::endl;
+}
+
 int main() {
     std::cout << "=== Hardware Throughput Benchmark ===" << std::endl;
     
@@ -124,7 +168,7 @@ int main() {
     SystemOptimizer::optimize_runtime();
     VulkanBackend::get().init();
     
-    int M = 4096; // Increase size for better hybrid parallelism
+    int M = 4096; 
     int N = 4096;
     int K = 4096;
     
@@ -134,10 +178,13 @@ int main() {
     // 2. CPU
     benchmark_cpu(M, N, K);
     
-    // 3. GPU
+    // 3. GPU (Naive)
     benchmark_gpu(M, N, K);
     
-    // 4. Hybrid
+    // 4. GPU (Tiled - Host Side Blocking)
+    benchmark_gpu_tiled(M, N, K);
+    
+    // 5. Hybrid
     benchmark_hybrid(M, N, K);
     
     std::cout << "-----------------------------------" << std::endl;
