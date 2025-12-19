@@ -44,6 +44,7 @@ void benchmark_gpu(int M, int N, int K) {
     std::vector<float> C(M*N, 0.0f);
 
     // Warmup (Driver Initialization overhead)
+    // Shader is deployed to src/shaders/matmul.spv in build dir
     VulkanCompute::matmul(A.data(), B.data(), C.data(), 64, 64, 64);
 
     std::cout << "   [GPU] Running..." << std::flush;

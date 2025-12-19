@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mm_rec/core/vulkan_backend.h"
+#include "mm_rec/core/embedded_shaders.h"  // Static shaders
 #include <vector>
 #include <iostream>
 #include <fstream>
@@ -249,8 +250,18 @@ public:
     static bool is_ready() { return VulkanBackend::get().device != nullptr; }
     
     static std::vector<char> read_shader(const std::string& filename) {
+        // 1. Try Embedded Storage first (Static Linking)
+        auto embedded = EmbeddedShaders::get(filename);
+        if (embedded.data != nullptr) {
+            // Found in memory!
+            return std::vector<char>(embedded.data, embedded.data + embedded.length);
+        }
+
+        // 2. Fallback to Disk (Development / Custom Shader)
         std::ifstream file(filename, std::ios::ate | std::ios::binary);
         if (!file.is_open()) {
+            // Try relative to build dir fallback if not found
+            std::cerr << "⚠️ Shader not found in memory or disk: " << filename << std::endl;
             throw std::runtime_error("Failed to open shader file: " + filename);
         }
         size_t fileSize = (size_t)file.tellg();

@@ -198,6 +198,14 @@ add_test(NAME test_pool_benchmark COMMAND test_pool_benchmark)
 
 add_executable(test_system_optimizer tests/test_system_optimizer.cpp)
 target_link_libraries(test_system_optimizer mm_rec_eigen)
+
+# Hardware Benchmark
+add_executable(benchmark_hardware tests/benchmark_hardware.cpp)
+target_link_libraries(benchmark_hardware mm_rec_eigen)
+
+add_executable(benchmark_shader_opt tests/benchmark_shader_opt.cpp)
+target_link_libraries(benchmark_shader_opt mm_rec_eigen)
+
 add_test(NAME test_system_optimizer COMMAND test_system_optimizer)
 
 add_executable(test_optimizer_benchmark tests/test_optimizer_benchmark.cpp)
@@ -277,6 +285,20 @@ target_link_libraries(demo_ui mm_rec_eigen)
 
 
 
+
+# ==========================================
+# SHADER DEPLOYMENT
+# ==========================================
+# Copy shaders to the build directory structure expected by the app (src/shaders/*.spv)
+# This ensures ./benchmark_hardware can find "src/shaders/matmul.spv" relative to CWD if run from build root,
+# or we can adjust CWD.
+# ACTUALLY: Let's copy to ${CMAKE_BINARY_DIR}/src/shaders so existing relative paths work.
+
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/src/shaders)
+file(GLOB SHADER_FILES "${CMAKE_SOURCE_DIR}/src/shaders/*.spv")
+file(COPY ${SHADER_FILES} DESTINATION ${CMAKE_BINARY_DIR}/src/shaders)
+
+message(STATUS "✅ Deployed ${SHADER_FILES} to build dir.")
 
 # Config/Info
 message(STATUS "========================================")
