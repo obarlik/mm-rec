@@ -7,6 +7,15 @@
 #include <fstream>
 #include <unordered_map>  // For pipeline cache
 
+// Branch Prediction Hints for Hot Paths
+#ifdef __GNUC__
+  #define LIKELY(x)       __builtin_expect(!!(x), 1)
+  #define UNLIKELY(x)     __builtin_expect(!!(x), 0)
+#else
+  #define LIKELY(x)       (x)
+  #define UNLIKELY(x)     (x)
+#endif
+
 namespace mm_rec {
 
 // GPU Execution Context for Async Operations
@@ -89,6 +98,33 @@ private:
         static std::vector<BufferSet*> pool;
         return pool;
     }
+
+    // Context Pool - static list for reuse (Avoids 'new GpuContext' overhead)
+    static std::vector<GpuContext*>& get_context_pool() {
+        static std::vector<GpuContext*> pool;
+        return pool;
+    }
+
+    static GpuContext* acquire_gpu_context() {
+        auto& pool = get_context_pool();
+        if (!pool.empty()) {
+            GpuContext* ctx = pool.back();
+            pool.pop_back();
+            // Reset state that might affect logic (buffers are reset by caller)
+            ctx->fence = nullptr; 
+            ctx->pooledBuffers = nullptr;
+            ctx->mapped_result = nullptr;
+            return ctx;
+        }
+        return new GpuContext();
+    }
+
+    static void release_gpu_context(GpuContext* ctx) {
+        if (LIKELY(ctx)) {
+            get_context_pool().push_back(ctx);
+        }
+    }
+
     
     static BufferSet* acquire_buffers(size_t sizeA, size_t sizeB, size_t sizeC) {
         auto& pool = get_buffer_pool();
@@ -149,7 +185,10 @@ public:
     // Submit GPU work (non-blocking) - returns context for later download  
     static GpuContext* matmul_submit_async(const float* A, const float* B, int M, int N, int K, const std::string& shaderPath = "src/shaders/matmul.spv") {
         auto& vk = VulkanBackend::get();
-        // ...
+        if (UNLIKELY(!vk.is_ready())) return nullptr;
+        
+        // Context Pool Reuse (Zero Allocation)
+        auto* ctx = acquire_gpu_context();
         ctx->M = M;
         ctx->N = N; 
         ctx->K = K;
@@ -160,7 +199,10 @@ public:
         
         // 1. Allocate GPU buffers (use POOL!)
         BufferSet* bufSet = acquire_buffers(sizeA, sizeB, ctx->sizeC);
-        if (!bufSet) { delete ctx; return nullptr; }
+        if (UNLIKELY(!bufSet)) { 
+            release_gpu_context(ctx); 
+            return nullptr; 
+        }
         
         ctx->pooledBuffers = bufSet;
         ctx->bufA = bufSet->bufA; ctx->memA = bufSet->memA;
@@ -168,7 +210,7 @@ public:
         ctx->bufC = bufSet->bufC; ctx->memC = bufSet->memC;
         
         // 2. Upload input data (Zero-Copy via persistent mapping)
-        if (bufSet->ptrA) memcpy(bufSet->ptrA, A, sizeA);
+        if (LIKELY(bufSet->ptrA)) memcpy(bufSet->ptrA, A, sizeA);
         else {
             // Fallback (shouldn't happen with pool)
             void* data;
@@ -177,7 +219,7 @@ public:
             vk.vkUnmapMemory(vk.device, ctx->memA);
         }
 
-        if (bufSet->ptrB) memcpy(bufSet->ptrB, B, sizeB);
+        if (LIKELY(bufSet->ptrB)) memcpy(bufSet->ptrB, B, sizeB);
         else {
             void* data;
             vk.vkMapMemory(vk.device, ctx->memB, 0, sizeB, 0, &data);
@@ -190,7 +232,7 @@ public:
         PipelineCacheEntry* pipeline = nullptr;
         
         auto it = cache.find(shaderPath);
-        if (it != cache.end()) {
+        if (LIKELY(it != cache.end())) {
             pipeline = it->second;  // Cache HIT!
         } else {
             pipeline = create_pipeline_cache(shaderPath);  // Cache MISS - create & store
@@ -199,16 +241,11 @@ public:
             }
         }
         
-        if (!pipeline) {
+        if (UNLIKELY(!pipeline)) {
             std::cerr << "❌ Failed to get/create pipeline" << std::endl;
             // Cleanup and fail
-            vk.vkDestroyBuffer(vk.device, ctx->bufA, nullptr);
-            vk.vkDestroyBuffer(vk.device, ctx->bufB, nullptr);
-            vk.vkDestroyBuffer(vk.device, ctx->bufC, nullptr);
-            vk.vkFreeMemory(vk.device, ctx->memA, nullptr);
-            vk.vkFreeMemory(vk.device, ctx->memB, nullptr);
-            vk.vkFreeMemory(vk.device, ctx->memC, nullptr);
-            delete ctx;
+            release_buffers(bufSet);
+            release_gpu_context(ctx);
             return nullptr;
         }
         
@@ -355,19 +392,19 @@ public:
     
     // Download GPU results - waits for GPU, retrieves data, cleans up
     static bool matmul_download(GpuContext* ctx, float* C_out) {
-        if (!ctx) return false;
+        if (UNLIKELY(!ctx)) return false;
         
         auto& vk = VulkanBackend::get();
         
         // 1. Wait for GPU
-        if (ctx->fence) {
+        if (LIKELY(ctx->fence)) {
             vk.wait_fence(ctx->fence);
         }
         
         // 2. UMA Zero-Copy Optimization
         // On Intel iGPU (UMA), bufC memory is HOST_VISIBLE = shared RAM
         if (C_out) {
-            if (ctx->pooledBuffers && ctx->pooledBuffers->ptrC) {
+            if (LIKELY(ctx->pooledBuffers && ctx->pooledBuffers->ptrC)) {
                 // Persistent Mapping (Zero-Copy Read)
                 memcpy(C_out, ctx->pooledBuffers->ptrC, ctx->sizeC);
             } else {
@@ -386,10 +423,10 @@ public:
         
         // 4. Cleanup buffers and fence
         // 4. Cleanup buffers and fence
-        if (ctx->fence) vk.destroy_fence(ctx->fence);
+        if (LIKELY(ctx->fence)) vk.destroy_fence(ctx->fence);
         
         // Release buffers to pool (don't destroy!)
-        if (ctx->pooledBuffers) {
+        if (LIKELY(ctx->pooledBuffers)) {
             release_buffers(ctx->pooledBuffers);
         } else {
             // Fallback for non-pooled buffers (legacy safety)
@@ -401,7 +438,7 @@ public:
             vk.vkFreeMemory(vk.device, ctx->memC, nullptr);
         }
         
-        delete ctx;
+        release_gpu_context(ctx);
         return true;
     }
     
