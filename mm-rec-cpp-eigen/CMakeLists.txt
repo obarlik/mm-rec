@@ -32,7 +32,7 @@ if(OpenCL_FOUND)
     add_definitions(-DUSE_OPENCL)
     include_directories(${OpenCL_INCLUDE_DIRS})
 else()
-    message(STATUS "⚠️  OpenCL not found. iGPU offloading disabled.")
+    message(STATUS "ℹ️  OpenCL not found. (Optional: Vulkan is used for main engine)")
 endif()
 
 # ==========================================
@@ -164,10 +164,57 @@ target_link_libraries(mm_rec_eigen
     Eigen3::Eigen
 )
 
-# Embed Shaders
-file(GLOB SHADER_SOURCES "src/shaders/*.spv")
-foreach(shader ${SHADER_SOURCES})
-    embed_resource(mm_rec_eigen ${shader})
+# ------------------------------------------
+# AUTOMATIC SHADER COMPILATION & EMBEDDING
+# ------------------------------------------
+# 1. Find the glslc compiler (from Vulkan SDK)
+find_program(GLSLC_EXECUTABLE NAMES glslc HINTS $ENV{VULKAN_SDK}/bin)
+
+if(GLSLC_EXECUTABLE)
+    message(STATUS "✅ Found glslc: ${GLSLC_EXECUTABLE}")
+else()
+    message(WARNING "⚠️  glslc not found! Shaders will not be recompiled. Expecting existing .spv files.")
+endif()
+
+# 2. Find all source .comp shaders
+file(GLOB RAW_SHADERS "${CMAKE_SOURCE_DIR}/src/shaders/*.comp")
+set(COMPILED_SHADERS "")
+
+# Create output directory
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/src/shaders)
+
+foreach(shader_src ${RAW_SHADERS})
+    get_filename_component(shader_name ${shader_src} NAME_WE)
+    set(shader_spv "${CMAKE_BINARY_DIR}/src/shaders/${shader_name}.spv")
+    
+    # If glslc is present, compile .comp -> .spv
+    if(GLSLC_EXECUTABLE)
+        add_custom_command(
+            OUTPUT ${shader_spv}
+            COMMAND ${GLSLC_EXECUTABLE} -O ${shader_src} -o ${shader_spv}
+            DEPENDS ${shader_src}
+            COMMENT "Compiling Shader: ${shader_name}.comp -> .spv"
+        )
+    endif()
+    
+    # 3. Add to list for embedding
+    # Note: If glslc missing, we assume .spv might already exist in source or we fail later
+    if(GLSLC_EXECUTABLE OR EXISTS ${shader_spv})
+        list(APPEND COMPILED_SHADERS ${shader_spv})
+    else()
+        # Fallback: Check if .spv exists in source tree
+        set(source_spv "${CMAKE_SOURCE_DIR}/src/shaders/${shader_name}.spv")
+        if(EXISTS ${source_spv})
+             file(COPY ${source_spv} DESTINATION ${CMAKE_BINARY_DIR}/src/shaders)
+             list(APPEND COMPILED_SHADERS "${CMAKE_BINARY_DIR}/src/shaders/${shader_name}.spv")
+        endif()
+    endif()
+
+endforeach()
+
+# 4. Embed Every Shader found/compiled
+foreach(shader_spv ${COMPILED_SHADERS})
+    embed_resource(mm_rec_eigen ${shader_spv})
 endforeach()
 
 if(MKL_LINK_FLAGS)

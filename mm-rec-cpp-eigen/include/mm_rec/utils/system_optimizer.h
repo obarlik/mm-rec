@@ -22,37 +22,54 @@ namespace mm_rec {
 
 class SystemOptimizer {
 public:
-    static void optimize_runtime() {
+    static void optimize_runtime(bool include_ecores = false) {
         std::cout << "🚀 SystemOptimizer: Analyzing CPU Topology..." << std::endl;
         
-        std::vector<int> p_cores = detect_p_cores();
+        std::vector<int> target_cores = detect_cores(include_ecores);
         
-        if (p_cores.empty()) {
-            std::cout << "⚠️  SystemOptimizer: Could not detect P-Cores. Using default scheduler." << std::endl;
+        if (target_cores.empty()) {
+            std::cout << "⚠️  SystemOptimizer: Could not detect cores. Using default scheduler." << std::endl;
             return;
         }
 
-        std::cout << "✅ SystemOptimizer: Detected " << p_cores.size() << " Performance Cores (High Freq)." << std::endl;
+        // Print CPU Model Name
+        std::ifstream cpuinfo("/proc/cpuinfo");
+        std::string line, model_name = "Unknown CPU";
+        int total_logical = 0;
+        
+        while(std::getline(cpuinfo, line)) {
+            if (line.find("model name") != std::string::npos && model_name == "Unknown CPU") {
+                size_t pos = line.find(":");
+                if (pos != std::string::npos) {
+                    model_name = line.substr(pos + 2); 
+                }
+            }
+            if (line.find("processor") == 0) total_logical++;
+        }
+
+        std::cout << "   CPU: " << model_name << " (Total Cores: " << total_logical << ")" << std::endl;
+        
+        if (include_ecores) {
+             std::cout << "✅ SystemOptimizer: Utilizing ALL " << target_cores.size() << " Cores (P+E) as requested." << std::endl;
+        } else {
+             std::cout << "✅ SystemOptimizer: Selected " << target_cores.size() << " Performance Cores for Compute." << std::endl;
+        }
+
         std::cout << "   Targeting Cores: ";
-        for(int c : p_cores) std::cout << c << " ";
+        for(int c : target_cores) std::cout << c << " ";
         std::cout << std::endl;
 
-        // 1. Set OpenMP Num Threads matches P-Core count
-        omp_set_num_threads(p_cores.size());
+        // 1. Set OpenMP Num Threads matches Core count
+        omp_set_num_threads(target_cores.size());
         
         // 2. Pin Threads (Processor Affinity)
-        // This is tricky with OpenMP internal pool, but we can try setting the process mask
-        // or using KMP_AFFINITY env logic programmatically.
-        // A simpler way for a single process is sched_setaffinity.
-        
         cpu_set_t cpuset;
         CPU_ZERO(&cpuset);
-        for(int c : p_cores) CPU_SET(c, &cpuset);
+        for(int c : target_cores) CPU_SET(c, &cpuset);
 
         int result = sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
         if (result == 0) {
-            std::cout << "🔒 SystemOptimizer: Process PINNED to P-Cores only!" << std::endl;
-            std::cout << "   E-Cores (Background noise) are ignored." << std::endl;
+            std::cout << "🔒 SystemOptimizer: Process PINNED to Selected Cores." << std::endl;
         } else {
             std::cout << "⚠️  SystemOptimizer: Failed to set affinity: " << std::strerror(errno) << std::endl;
         }
@@ -64,7 +81,7 @@ private:
         int max_freq;
     };
 
-    static std::vector<int> detect_p_cores() {
+    static std::vector<int> detect_cores(bool include_ecores) {
         std::vector<CpuInfo> cpus;
         
         // Scan up to 128 cores
@@ -80,11 +97,17 @@ private:
         
         if (cpus.empty()) return {};
         
-        // Find max frequency
+        if (include_ecores) {
+            // Return ALL detected cores
+            std::vector<int> all_cores;
+            for(auto& c : cpus) all_cores.push_back(c.id);
+            return all_cores;
+        }
+
+        // P-Core Logic (High Freq Only)
         int global_max = 0;
         for(auto& c : cpus) global_max = std::max(global_max, c.max_freq);
         
-        // Filter cores that are within 10% of max freq (P-Cores)
         std::vector<int> p_cores;
         int threshold = global_max * 0.9;
         

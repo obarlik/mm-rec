@@ -12,12 +12,18 @@
 #include <dlfcn.h>
 #include <stdexcept>
 #include <cstring>
+#include <iostream>
+#include <vector>
+#include <dlfcn.h>
+#include <stdexcept>
+#include <cstring>
 #include <cstring>
 #include <cstdint>
 #include <vector>
 #include <iostream>
 #include <dlfcn.h>
 #include <stdexcept>
+#include <iomanip> // For VRAM formatting
 
 // --- Vulkan Types (Minimal) ---
 #define VK_MAKE_VERSION(major, minor, patch) \
@@ -153,6 +159,136 @@ typedef struct VkPushConstantRange {
     uint32_t   offset;
     uint32_t   size;
 } VkPushConstantRange;
+
+// Properties
+typedef struct VkPhysicalDeviceLimits {
+    uint32_t maxImageDimension1D;
+    uint32_t maxImageDimension2D;
+    uint32_t maxImageDimension3D;
+    uint32_t maxImageDimensionCube;
+    uint32_t maxImageArrayLayers;
+    uint32_t maxTexelBufferElements;
+    uint32_t maxUniformBufferRange;
+    uint32_t maxStorageBufferRange;
+    uint32_t maxPushConstantsSize;
+    uint32_t maxMemoryAllocationCount;
+    uint32_t maxSamplerAllocationCount;
+    VkDeviceSize bufferImageGranularity;
+    VkDeviceSize sparseAddressSpaceSize;
+    uint32_t maxBoundDescriptorSets;
+    uint32_t maxPerStageDescriptorSamplers;
+    uint32_t maxPerStageDescriptorUniformBuffers;
+    uint32_t maxPerStageDescriptorStorageBuffers;
+    uint32_t maxPerStageDescriptorSampledImages;
+    uint32_t maxPerStageDescriptorStorageImages;
+    uint32_t maxPerStageDescriptorInputAttachments;
+    uint32_t maxPerStageResources;
+    uint32_t maxDescriptorSetSamplers;
+    uint32_t maxDescriptorSetUniformBuffers;
+    uint32_t maxDescriptorSetUniformBuffersDynamic;
+    uint32_t maxDescriptorSetStorageBuffers;
+    uint32_t maxDescriptorSetStorageBuffersDynamic;
+    uint32_t maxDescriptorSetSampledImages;
+    uint32_t maxDescriptorSetStorageImages;
+    uint32_t maxDescriptorSetInputAttachments;
+    uint32_t maxVertexInputAttributes;
+    uint32_t maxVertexInputBindings;
+    uint32_t maxVertexInputAttributeOffset;
+    uint32_t maxVertexInputBindingStride;
+    uint32_t maxVertexOutputComponents;
+    uint32_t maxTessellationGenerationLevel;
+    uint32_t maxTessellationPatchSize;
+    uint32_t maxTessellationControlPerVertexInputComponents;
+    uint32_t maxTessellationControlPerVertexOutputComponents;
+    uint32_t maxTessellationControlPerPatchOutputComponents;
+    uint32_t maxTessellationControlTotalOutputComponents;
+    uint32_t maxTessellationEvaluationInputComponents;
+    uint32_t maxTessellationEvaluationOutputComponents;
+    uint32_t maxGeometryShaderInvocations;
+    uint32_t maxGeometryInputComponents;
+    uint32_t maxGeometryOutputComponents;
+    uint32_t maxGeometryOutputVertices;
+    uint32_t maxGeometryTotalOutputComponents;
+    uint32_t maxFragmentInputComponents;
+    uint32_t maxFragmentOutputAttachments;
+    uint32_t maxFragmentDualSrcAttachments;
+    uint32_t maxFragmentCombinedOutputResources;
+    uint32_t maxComputeSharedMemorySize;
+    uint32_t maxComputeWorkGroupCount[3];
+    uint32_t maxComputeWorkGroupInvocations;
+    uint32_t maxComputeWorkGroupSize[3];
+    uint32_t subPixelPrecisionBits;
+    uint32_t subTexelPrecisionBits;
+    uint32_t mipmapPrecisionBits;
+    uint32_t maxDrawIndexedIndexValue;
+    uint32_t maxDrawIndirectCount;
+    float    maxSamplerLodBias;
+    float    maxSamplerAnisotropy;
+    uint32_t maxViewports;
+    uint32_t maxViewportDimensions[2];
+    float    viewportBoundsRange[2];
+    uint32_t viewportSubPixelBits;
+    size_t   minMemoryMapAlignment;
+    VkDeviceSize minTexelBufferOffsetAlignment;
+    VkDeviceSize minUniformBufferOffsetAlignment;
+    VkDeviceSize minStorageBufferOffsetAlignment;
+    int32_t  minTexelOffset;
+    uint32_t maxTexelOffset;
+    int32_t  minTexelGatherOffset;
+    uint32_t maxTexelGatherOffset;
+    float    minInterpolationOffset;
+    float    maxInterpolationOffset;
+    uint32_t subPixelInterpolationOffsetBits;
+    uint32_t maxFramebufferWidth;
+    uint32_t maxFramebufferHeight;
+    uint32_t maxFramebufferLayers;
+    VkFlags  framebufferColorSampleCounts;
+    VkFlags  framebufferDepthSampleCounts;
+    VkFlags  framebufferStencilSampleCounts;
+    VkFlags  framebufferNoAttachmentsSampleCounts;
+    uint32_t maxColorAttachments;
+    VkFlags  sampledImageColorSampleCounts;
+    VkFlags  sampledImageIntegerSampleCounts;
+    VkFlags  sampledImageDepthSampleCounts;
+    VkFlags  sampledImageStencilSampleCounts;
+    VkFlags  storageImageSampleCounts;
+    uint32_t maxSampleMaskWords;
+    uint32_t timestampComputeAndGraphics;
+    float    timestampPeriod;
+    uint32_t maxClipDistances;
+    uint32_t maxCullDistances;
+    uint32_t maxCombinedClipAndCullDistances;
+    uint32_t discreteQueuePriorities;
+    float    pointSizeRange[2];
+    float    lineWidthRange[2];
+    float    pointSizeGranularity;
+    float    lineWidthGranularity;
+    uint32_t strictLines;
+    uint32_t standardSampleLocations;
+    VkDeviceSize optimalBufferCopyOffsetAlignment;
+    VkDeviceSize optimalBufferCopyRowPitchAlignment;
+    VkDeviceSize nonCoherentAtomSize;
+} VkPhysicalDeviceLimits;
+
+typedef struct VkPhysicalDeviceSparseProperties {
+    uint32_t residencyStandard2DBlockShape;
+    uint32_t residencyStandard2DMultisampleBlockShape;
+    uint32_t residencyStandard3DBlockShape;
+    uint32_t residencyAlignedMipSize;
+    uint32_t residencyNonResidentStrict;
+} VkPhysicalDeviceSparseProperties;
+
+typedef struct VkPhysicalDeviceProperties {
+    uint32_t apiVersion;
+    uint32_t driverVersion;
+    uint32_t vendorID;
+    uint32_t deviceID;
+    uint32_t deviceType;
+    char deviceName[256];
+    uint8_t pipelineCacheUUID[16];
+    VkPhysicalDeviceLimits limits;
+    VkPhysicalDeviceSparseProperties sparseProperties;
+} VkPhysicalDeviceProperties;
 
 // --- Extended Structs for Compute ---
 
@@ -329,6 +465,7 @@ private:
     VkResult (*vkEnumeratePhysicalDevices)(VkInstance, uint32_t*, VkPhysicalDevice*) = nullptr;
     void (*vkGetPhysicalDeviceQueueFamilyProperties)(VkPhysicalDevice, uint32_t*, VkQueueFamilyProperties*) = nullptr;
     void (*vkGetPhysicalDeviceMemoryProperties)(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*) = nullptr;
+    void (*vkGetPhysicalDeviceProperties)(VkPhysicalDevice, VkPhysicalDeviceProperties*) = nullptr;
     VkResult (*vkCreateDevice)(VkPhysicalDevice, const VkDeviceCreateInfo*, const void*, VkDevice*) = nullptr;
     void (*vkDestroyDevice)(VkDevice, const void*) = nullptr;
     void (*vkGetDeviceQueue)(VkDevice, uint32_t, uint32_t, VkQueue*) = nullptr;
@@ -441,6 +578,7 @@ public:
         *(void**)(&vkEnumeratePhysicalDevices) = dlsym(lib_handle, "vkEnumeratePhysicalDevices");
         *(void**)(&vkGetPhysicalDeviceQueueFamilyProperties) = dlsym(lib_handle, "vkGetPhysicalDeviceQueueFamilyProperties");
         *(void**)(&vkGetPhysicalDeviceMemoryProperties) = dlsym(lib_handle, "vkGetPhysicalDeviceMemoryProperties");
+        *(void**)(&vkGetPhysicalDeviceProperties) = dlsym(lib_handle, "vkGetPhysicalDeviceProperties");
 
         // ... Load Device pointers using separate specific resolver usually, but here globally for simplicity
         *(void**)(&vkCreateDevice) = dlsym(lib_handle, "vkCreateDevice");
@@ -536,6 +674,24 @@ public:
         }
 
         std::cout << "🚀 Vulkan: Initialized! Logical Device Ready." << std::endl;
+        
+        // Print GPU Info
+        if (vkGetPhysicalDeviceProperties) {
+            VkPhysicalDeviceProperties props;
+            vkGetPhysicalDeviceProperties(physical_device, &props);
+            
+            // Calculate Total VRAM (Heap with DEVICE_LOCAL bit)
+            VkDeviceSize total_vram = 0;
+             for (uint32_t i = 0; i < memory_properties.memoryHeapCount; i++) {
+                if (memory_properties.memoryHeaps[i].flags & 1) { // VK_MEMORY_HEAP_DEVICE_LOCAL_BIT = 1
+                    total_vram += memory_properties.memoryHeaps[i].size;
+                }
+            }
+            
+            std::cout << "   GPU: " << props.deviceName << " | VRAM: " 
+                      << std::fixed << std::setprecision(1) << (total_vram / (1024.0*1024.0*1024.0)) << " GB" << std::endl;
+            std::cout << "   GPU Threads: " << props.limits.maxComputeWorkGroupInvocations << " (Max Concurrency per Block)" << std::endl;
+        }
         
         // Get Queue
         vkGetDeviceQueue(device, 0, 0, &compute_queue);

@@ -86,8 +86,7 @@ Tensor Linear::forward(const Tensor& input) {
         Tensor result_gpu = Tensor::zeros({gpu_batch, out_features_});
         Tensor W_T = weight_.transpose();
         
-        // --- Intelligent Kernel Selection (Auto-Tuner) ---
-        // Runs once per process to adapt to hardware
+        // --- Use Shader Selected by Global AutoTuner ---
         static std::string shaderPath = []() -> std::string {
             // 1. Check User Override
             if(const char* env_kernel = std::getenv("MM_REC_GPU_KERNEL")) {
@@ -97,46 +96,16 @@ Tensor Linear::forward(const Tensor& input) {
                 if (mode == "4x4")   return "src/shaders/matmul_4x4.spv";
                 if (mode == "2x2")   return "src/shaders/matmul_2x2.spv";
                 if (mode == "fp16")  return "src/shaders/matmul_fp16.spv";
-                return "src/shaders/matmul_4x4.spv"; // Fallback
+                return mode; // Return as-is if it's a full path
             }
             
-            // 2. Auto-Tune (Micro-Benchmark)
-            std::cout << "🤖 Vulkan: Auto-Tuning Kernels for this Hardware...\n";
-            int B = 512; // Small enough to be fast (50ms), large enough to show throughput
-            Tensor A = Tensor::randn({B, B});
-            Tensor B_mat = Tensor::randn({B, B});
-            Tensor C = Tensor::zeros({B, B});
-            
-            struct Candidate { std::string name; std::string path; double time_ms; };
-            std::vector<Candidate> candidates = {
-                {"16x16 (Standard)", "src/shaders/matmul_16x16.spv", 0.0},
-                {"8x8   (Small)",    "src/shaders/matmul_8x8.spv", 0.0},
-                {"4x4   (Micro)",    "src/shaders/matmul_4x4.spv", 0.0}
-            };
-            
-            // Warmup
-            VulkanCompute::matmul(A.data(), B_mat.data(), C.data(), B, B, B, candidates[0].path);
-
-            std::string bestPath = candidates[0].path;
-            double bestTime = 1e9;
-            
-            for (auto& cand : candidates) {
-                auto t0 = std::chrono::high_resolution_clock::now();
-                // Run 3 iterations for stability
-                for(int i=0; i<3; ++i) {
-                     VulkanCompute::matmul(A.data(), B_mat.data(), C.data(), B, B, B, cand.path);
-                }
-                auto t1 = std::chrono::high_resolution_clock::now();
-                cand.time_ms = std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count() / 1000.0 / 3.0;
-                
-                std::cout << "  - " << cand.name << ": " << cand.time_ms << " ms\n";
-                if (cand.time_ms < bestTime) {
-                    bestTime = cand.time_ms;
-                    bestPath = cand.path;
-                }
+            // 2. Use AutoTuner's Selection (set during calibration)
+            if(const char* tuned = std::getenv("MM_REC_TUNED_SHADER")) {
+                return std::string(tuned);
             }
-            std::cout << "✅ Auto-Tune: Selected " << bestPath << " (" << bestTime << " ms)\n";
-            return bestPath;
+            
+            // 3. Fallback (if AutoTuner didn't run for some reason)
+            return "src/shaders/matmul_4x4.spv";
         }();
 
         // Use stateless, robust dispatch (Allocates per frame, but stable 148 GFLOPS)
