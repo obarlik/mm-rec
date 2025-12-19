@@ -26,7 +26,7 @@ public:
 private:
     static std::string find_best_shader(int M, int N, int K);
     static float find_optimal_ratio(int M, int N, int K, const std::string& shader, bool precision);
-    static bool find_optimal_cpu_strategy(int M, int N, int K); // Returns true if All-Cores is faster
+    static std::pair<bool, double> find_optimal_cpu_strategy(int M, int N, int K); // Returns <use_all_cores, winner_gflops>
     static double measure_throughput(int M, int N, int K, const std::string& shader, float cpu_ratio);
 
     // Helpers moved from SystemOptimizer

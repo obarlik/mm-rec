@@ -429,6 +429,8 @@ typedef struct VkCommandPoolCreateInfo {
 // CONSTANTS
 const uint32_t VK_DESCRIPTOR_TYPE_STORAGE_BUFFER = 7;
 const uint32_t VK_SHADER_STAGE_COMPUTE_BIT = 0x00000020;
+const uint32_t VK_PIPELINE_BIND_POINT_COMPUTE = 1;  // FIXED: Was 0, should be 1!
+const uint32_t VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO = 18;
 const uint32_t VK_COMMAND_BUFFER_LEVEL_PRIMARY = 0;
 const uint32_t VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT = 0x00000001;
 const VkStructureType VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO = (VkStructureType)16;
@@ -508,6 +510,12 @@ private:
     void (*vkCmdBindPipeline)(VkCommandBuffer, int, VkPipeline) = nullptr;
     void (*vkCmdBindDescriptorSets)(VkCommandBuffer, int, VkPipelineLayout, uint32_t, uint32_t, const VkDescriptorSet*, uint32_t, const uint32_t*) = nullptr;
     void (*vkCmdPushConstants)(VkCommandBuffer, VkPipelineLayout, uint32_t, uint32_t, uint32_t, const void*) = nullptr;
+    
+    // Fence functions for async operations
+    VkResult (*vkCreateFence)(VkDevice, const void*, const void*, VkFence*) = nullptr;
+    void (*vkDestroyFence)(VkDevice, VkFence, const void*) = nullptr;
+    VkResult (*vkWaitForFences)(VkDevice, uint32_t, const VkFence*, uint32_t, uint64_t) = nullptr;
+    VkResult (*vkResetFences)(VkDevice, uint32_t, const VkFence*) = nullptr;
 
 public:
     inline bool is_ready() const { return device != nullptr; }
@@ -515,6 +523,41 @@ public:
     static VulkanBackend& get() {
         static VulkanBackend backend;
         return backend;
+    }
+    
+    // Fence management for async GPU operations
+    VkFence create_fence() {
+        if (!device || !vkCreateFence) return nullptr;
+        
+        struct VkFenceCreateInfo {
+            uint32_t sType = 39; // VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
+            const void* pNext = nullptr;
+            uint32_t flags = 0;
+        } createInfo;
+        
+        VkFence fence;
+        if (vkCreateFence(device, &createInfo, nullptr, &fence) != 0) {
+            return nullptr;
+        }
+        return fence;
+    }
+    
+    void wait_fence(VkFence fence, uint64_t timeout = UINT64_MAX) {
+        if (fence && vkWaitForFences) {
+            vkWaitForFences(device, 1, &fence, 1, timeout);
+        }
+    }
+    
+    void reset_fence(VkFence fence) {
+        if (fence && vkResetFences) {
+            vkResetFences(device, 1, &fence);
+        }
+    }
+    
+    void destroy_fence(VkFence fence) {
+        if (fence && vkDestroyFence) {
+            vkDestroyFence(device, fence, nullptr);
+        }
     }
 
     ~VulkanBackend() {
@@ -619,6 +662,12 @@ public:
         *(void**)(&vkCmdBindPipeline) = dlsym(lib_handle, "vkCmdBindPipeline");
         *(void**)(&vkCmdBindDescriptorSets) = dlsym(lib_handle, "vkCmdBindDescriptorSets");
         *(void**)(&vkCmdPushConstants) = dlsym(lib_handle, "vkCmdPushConstants");
+        
+        // Load fence functions
+        *(void**)(&vkCreateFence) = dlsym(lib_handle, "vkCreateFence");
+        *(void**)(&vkDestroyFence) = dlsym(lib_handle, "vkDestroyFence");
+        *(void**)(&vkWaitForFences) = dlsym(lib_handle, "vkWaitForFences");
+        *(void**)(&vkResetFences) = dlsym(lib_handle, "vkResetFences");
 
         if (!vkCreateInstance || !vkEnumeratePhysicalDevices) {
              std::cerr << "❌ Vulkan: Symbols missing." << std::endl;

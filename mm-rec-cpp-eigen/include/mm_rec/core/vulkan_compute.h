@@ -8,8 +8,41 @@
 
 namespace mm_rec {
 
+// GPU Execution Context for Async Operations
+struct GpuContext {
+    VkBuffer bufA, bufB, bufC;
+    VkDeviceMemory memA, memB, memC;
+    VkFence fence;
+    int M, N, K;
+    size_t sizeC;
+    void* mapped_result;  // For UMA zero-copy
+    
+    GpuContext() : bufA(nullptr), bufB(nullptr), bufC(nullptr),
+                   memA(nullptr), memB(nullptr), memC(nullptr),
+                   fence(nullptr), M(0), N(0), K(0), sizeC(0), mapped_result(nullptr) {}
+};
+
+// GPU Dispatch Context (Pipeline, Descriptors, Command Buffers)
+// Separate from data buffers for reusability
+struct GpuDispatchContext {
+    VkShaderModule shaderModule;
+    VkDescriptorSetLayout descriptorSetLayout;
+    VkDescriptorPool descriptorPool;
+    VkDescriptorSet descriptorSet;
+    VkPipelineLayout pipelineLayout;
+    VkPipeline pipeline;
+    VkCommandPool commandPool;
+    VkCommandBuffer commandBuffer;
+    
+    GpuDispatchContext() : shaderModule(nullptr), descriptorSetLayout(nullptr),
+                           descriptorPool(nullptr), descriptorSet(nullptr),
+                           pipelineLayout(nullptr), pipeline(nullptr),
+                           commandPool(nullptr), commandBuffer(nullptr) {}
+};
+
 class VulkanCompute {
 public:
+    // Synchronous matmul (blocks until GPU completes)
     static bool matmul(const float* A, const float* B, float* C, int M, int N, int K, const std::string& shaderPath = "src/shaders/matmul.spv") {
         auto& vk = VulkanBackend::get();
         if (!vk.is_ready()) {
@@ -216,7 +249,8 @@ public:
             return false;
         }
 
-        vk.vkQueueWaitIdle(vk.compute_queue); // SYNC WAIT
+        // Wait for GPU to finish (sync mode only for now)
+        vk.vkQueueWaitIdle(vk.compute_queue);
         
         // 10. Download Results (Map C)
         void* dataC;
@@ -246,6 +280,239 @@ public:
         return true; 
     }
     
+    // === ASYNC GPU API (True Parallelism + UMA Zero-Copy) ===
+    
+    // Submit GPU work (non-blocking) - returns context for later download  
+    static GpuContext* matmul_submit_async(const float* A, const float* B, int M, int N, int K, const std::string& shaderPath = "src/shaders/matmul.spv") {
+        auto& vk = VulkanBackend::get();
+        if (!vk.is_ready()) return nullptr;
+        
+        auto* ctx = new GpuContext();
+        ctx->M = M;
+        ctx->N = N; 
+        ctx->K = K;
+        ctx->sizeC = M * N * sizeof(float);
+        
+        size_t sizeA = M * K * sizeof(float);
+        size_t sizeB = K * N * sizeof(float);
+        
+        // 1. Allocate GPU buffers (HOST_VISIBLE for UMA)
+        if(!vk.create_buffer(sizeA, ctx->bufA, ctx->memA)) { delete ctx; return nullptr; }
+        if(!vk.create_buffer(sizeB, ctx->bufB, ctx->memB)) { delete ctx; return nullptr; }
+        if(!vk.create_buffer(ctx->sizeC, ctx->bufC, ctx->memC)) { delete ctx; return nullptr; }
+        
+        // 2. Upload input data
+        void* data;
+        vk.vkMapMemory(vk.device, ctx->memA, 0, sizeA, 0, &data);
+        memcpy(data, A, sizeA);
+        vk.vkUnmapMemory(vk.device, ctx->memA);
+        
+        vk.vkMapMemory(vk.device, ctx->memB, 0, sizeB, 0, &data);
+        memcpy(data, B, sizeB);
+        vk.vkUnmapMemory(vk.device, ctx->memB);
+        
+        // 3. Create dispatch context (pipeline, descriptors, etc.)
+        auto* dispatch = create_dispatch_context(shaderPath, M, N, K);
+        if (!dispatch) {
+            std::cerr << "❌ Failed to create dispatch context" << std::endl;
+            // Cleanup and fail
+            vk.vkDestroyBuffer(vk.device, ctx->bufA, nullptr);
+            vk.vkDestroyBuffer(vk.device, ctx->bufB, nullptr);
+            vk.vkDestroyBuffer(vk.device, ctx->bufC, nullptr);
+            vk.vkFreeMemory(vk.device, ctx->memA, nullptr);
+            vk.vkFreeMemory(vk.device, ctx->memB, nullptr);
+            vk.vkFreeMemory(vk.device, ctx->memC, nullptr);
+            delete ctx;
+            return nullptr;
+        }
+        
+        // 4. Allocate descriptor pool and set
+        VkDescriptorPoolSize poolSize = {};
+        poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        poolSize.descriptorCount = 3;
+        
+        VkDescriptorPoolCreateInfo poolInfo = {};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = 1;
+        poolInfo.pPoolSizes = &poolSize;
+        poolInfo.maxSets = 1;
+        
+        if (vk.vkCreateDescriptorPool(vk.device, &poolInfo, nullptr, &dispatch->descriptorPool) != 0) {
+            std::cerr << "❌ Failed to create descriptor pool" << std::endl;
+            destroy_dispatch_context(dispatch);
+            // cleanup ctx buffers
+            vk.vkDestroyBuffer(vk.device, ctx->bufA, nullptr);
+            vk.vkDestroyBuffer(vk.device, ctx->bufB, nullptr);
+            vk.vkDestroyBuffer(vk.device, ctx->bufC, nullptr);
+            vk.vkFreeMemory(vk.device, ctx->memA, nullptr);
+            vk.vkFreeMemory(vk.device, ctx->memB, nullptr);
+            vk.vkFreeMemory(vk.device, ctx->memC, nullptr);
+            delete ctx;
+            return nullptr;
+        }
+        
+        VkDescriptorSetAllocateInfo allocInfo = {};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = dispatch->descriptorPool;
+        allocInfo.descriptorSetCount = 1;
+        allocInfo.pSetLayouts = &dispatch->descriptorSetLayout;
+        
+        std::cout << "[DEBUG] Allocating descriptor set..." << std::endl;
+        VkResult result = vk.vkAllocateDescriptorSets(vk.device, &allocInfo, &dispatch->descriptorSet);
+        if (result != 0) {
+            std::cerr << "❌ Failed to allocate descriptor set, error: " << result << std::endl;
+            destroy_dispatch_context(dispatch);
+            vk.vkDestroyBuffer(vk.device, ctx->bufA, nullptr);
+            vk.vkDestroyBuffer(vk.device, ctx->bufB, nullptr);
+            vk.vkDestroyBuffer(vk.device, ctx->bufC, nullptr);
+            vk.vkFreeMemory(vk.device, ctx->memA, nullptr);
+            vk.vkFreeMemory(vk.device, ctx->memB, nullptr);
+            vk.vkFreeMemory(vk.device, ctx->memC, nullptr);
+            delete ctx;
+            return nullptr;
+        }
+        std::cout << "[DEBUG] Descriptor set allocated: " << dispatch->descriptorSet << std::endl;
+        
+        // 5. Bind buffers to descriptor set
+        std::cout << "[DEBUG] Binding buffers to descriptor set..." << std::endl;
+        std::cout << "[DEBUG] bufA=" << ctx->bufA << " bufB=" << ctx->bufB << " bufC=" << ctx->bufC << std::endl;
+        
+        if (!ctx->bufA || !ctx->bufB || !ctx->bufC) {
+            std::cerr << "❌ Invalid buffer handles!" << std::endl;
+            return nullptr;
+        }
+        
+        VkDescriptorBufferInfo bufferInfos[3] = {
+            {ctx->bufA, 0, VK_WHOLE_SIZE},
+            {ctx->bufB, 0, VK_WHOLE_SIZE},
+            {ctx->bufC, 0, VK_WHOLE_SIZE}
+        };
+        
+        VkWriteDescriptorSet descriptorWrites[3];
+        for(int i=0; i<3; i++) {
+            descriptorWrites[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[i].pNext = nullptr;
+            descriptorWrites[i].dstSet = dispatch->descriptorSet;
+            descriptorWrites[i].dstBinding = i;
+            descriptorWrites[i].dstArrayElement = 0;
+            descriptorWrites[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            descriptorWrites[i].descriptorCount = 1;
+            descriptorWrites[i].pBufferInfo = &bufferInfos[i];
+        }
+        vk.vkUpdateDescriptorSets(vk.device, 3, descriptorWrites, 0, nullptr);
+        
+        // 6. Record command buffer
+        std::cout << "[DEBUG] Recording command buffer..." << std::endl;
+        VkCommandBufferBeginInfo beginInfo = {};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        
+        if (vk.vkBeginCommandBuffer(dispatch->commandBuffer, &beginInfo) != 0) {
+            std::cerr << "❌ vkBeginCommandBuffer failed" << std::endl;
+            return nullptr;
+        }
+        std::cout << "[DEBUG] Command buffer began successfully" << std::endl;
+        
+        std::cout << "[DEBUG] Binding pipeline..." << std::endl;
+        vk.vkCmdBindPipeline(dispatch->commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, dispatch->pipeline);
+        
+        std::cout << "[DEBUG] Binding descriptor sets..." << std::endl;
+        vk.vkCmdBindDescriptorSets(dispatch->commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                    dispatch->pipelineLayout, 0, 1, &dispatch->descriptorSet, 0, nullptr);
+        
+        // Push constants (M, N, K)
+        std::cout << "[DEBUG] Pushing constants M=" << M << " N=" << N << " K=" << K << std::endl;
+        struct PushConsts { int M; int N; int K; } pushConsts = {M, N, K};
+        vk.vkCmdPushConstants(dispatch->commandBuffer, dispatch->pipelineLayout,
+                              VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConsts), &pushConsts);
+        
+        // Dispatch workgroups (match sync matmul convention: X=N, Y=M)
+        uint32_t groupsX = (N + 15) / 16;
+        uint32_t groupsY = (M + 15) / 16;
+        
+        // Sanity check: Intel GPU might have workgroup limits
+        const uint32_t MAX_GROUPS = 65535;
+        if (groupsX > MAX_GROUPS || groupsY > MAX_GROUPS) {
+            std::cerr << "❌ Workgroup count exceeds limits: " << groupsX << "x" << groupsY << std::endl;
+            return nullptr;
+        }
+        
+        std::cout << "[DEBUG] Dispatching groups: " << groupsX << "x" << groupsY << " (X=N, Y=M)" << std::endl;
+        std::cout << "[DEBUG] About to call vkCmdDispatch..." << std::endl;
+        vk.vkCmdDispatch(dispatch->commandBuffer, groupsX, groupsY, 1);
+        std::cout << "[DEBUG] vkCmdDispatch completed" << std::endl;
+        
+        std::cout << "[DEBUG] Ending command buffer..." << std::endl;
+        VkResult endResult = vk.vkEndCommandBuffer(dispatch->commandBuffer);
+        if (endResult != 0) {
+            std::cerr << "❌ vkEndCommandBuffer failed with error: " << endResult << std::endl;
+            // Don't return here - let's see what happens with submit
+        } else {
+            std::cout << "[DEBUG] Command buffer ended successfully" << std::endl;
+        }
+        
+        // 7. Create fence for async signaling
+        ctx->fence = vk.create_fence();
+        
+        // 8. Submit to GPU (NON-BLOCKING!)
+        VkSubmitInfo submitInfo = {};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &dispatch->commandBuffer;
+        
+        vk.vkQueueSubmit(vk.compute_queue, 1, &submitInfo, ctx->fence);
+        
+        // 9. Store dispatch context in GpuContext for cleanup later  
+        // Note: We need to keep dispatch alive until download
+        // For now, we'll clean it up in download. In production, embed it in GpuContext.
+        ctx->mapped_result = dispatch; // HACK: reuse this field to store dispatch*
+        
+        return ctx;
+    }
+    
+    // Download GPU results - waits for GPU, retrieves data, cleans up
+    static bool matmul_download(GpuContext* ctx, float* C_out) {
+        if (!ctx) return false;
+        
+        auto& vk = VulkanBackend::get();
+        
+        // 1. Wait for GPU
+        if (ctx->fence) {
+            vk.wait_fence(ctx->fence);
+        }
+        
+        // 2. UMA Zero-Copy Optimization
+        // On Intel iGPU (UMA), bufC memory is HOST_VISIBLE = shared RAM
+        void* dataC;
+        vk.vkMapMemory(vk.device, ctx->memC, 0, ctx->sizeC, 0, &dataC);
+        
+        if (C_out) {
+            // TODO: Detect UMA and skip memcpy
+            // For UMA: dataC IS the result (shared RAM), no copy needed!
+            // For now: always copy for safety
+            memcpy(C_out, dataC, ctx->sizeC);
+        }
+        
+        vk.vkUnmapMemory(vk.device, ctx->memC);
+        
+        // 3. Cleanup dispatch context (stored in mapped_result hack)
+        auto* dispatch = reinterpret_cast<GpuDispatchContext*>(ctx->mapped_result);
+        if (dispatch) {
+            destroy_dispatch_context(dispatch);
+        }
+        
+        // 4. Cleanup buffers and fence
+        if (ctx->fence) vk.destroy_fence(ctx->fence);
+        vk.vkDestroyBuffer(vk.device, ctx->bufA, nullptr);
+        vk.vkDestroyBuffer(vk.device, ctx->bufB, nullptr);
+        vk.vkDestroyBuffer(vk.device, ctx->bufC, nullptr);
+        vk.vkFreeMemory(vk.device, ctx->memA, nullptr);
+        vk.vkFreeMemory(vk.device, ctx->memB, nullptr);
+        vk.vkFreeMemory(vk.device, ctx->memC, nullptr);
+        
+        delete ctx;
+        return true;
+    }
+    
     // Check helper
     static bool is_ready() { return VulkanBackend::get().device != nullptr; }
     
@@ -270,6 +537,125 @@ public:
         file.read(buffer.data(), fileSize);
         file.close();
         return buffer;
+    }
+    
+private:
+    // === GPU Dispatch Helpers (Phase 1: Extraction) ===
+    
+    // Create dispatch context (pipeline, descriptors, etc.)
+    static GpuDispatchContext* create_dispatch_context(const std::string& shaderPath, int M, int N, int K) {
+        auto& vk = VulkanBackend::get();
+        if (!vk.is_ready()) return nullptr;
+        
+        auto* ctx = new GpuDispatchContext();
+        
+        // 1. Load and create shader module
+        auto code = read_shader(shaderPath);
+        if (code.empty()) {
+            delete ctx;
+            return nullptr;
+        }
+        
+        VkShaderModuleCreateInfo shaderInfo = {};
+        shaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        shaderInfo.codeSize = code.size();
+        shaderInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+        
+        if (vk.vkCreateShaderModule(vk.device, &shaderInfo, nullptr, &ctx->shaderModule) != 0) {
+            delete ctx;
+            return nullptr;
+        }
+        
+        // 2. Create descriptor set layout (3 storage buffers)
+        VkDescriptorSetLayoutBinding bindings[3];
+        for(int i=0; i<3; i++) {
+            bindings[i].binding = i;
+            bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            bindings[i].descriptorCount = 1;
+            bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+            bindings[i].pImmutableSamplers = nullptr;
+        }
+        
+        VkDescriptorSetLayoutCreateInfo layoutInfo = {};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 3;
+        layoutInfo.pBindings = bindings;
+        
+        // Create layout directly in dispatch context (not local variable!)
+        vk.vkCreateDescriptorSetLayout(vk.device, &layoutInfo, nullptr, &ctx->descriptorSetLayout);
+        
+        // 3. Create pipeline layout with push constants
+        VkPushConstantRange pushRange = {};
+        pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        pushRange.offset = 0;
+        pushRange.size = sizeof(int) * 3; // M, N, K
+        
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
+        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 1;
+        pipelineLayoutInfo.pSetLayouts = &ctx->descriptorSetLayout;  // Use dispatch context layout!
+        pipelineLayoutInfo.pushConstantRangeCount = 1;
+        pipelineLayoutInfo.pPushConstantRanges = &pushRange;
+        
+        vk.vkCreatePipelineLayout(vk.device, &pipelineLayoutInfo, nullptr, &ctx->pipelineLayout);
+        
+        // 4. Create compute pipeline
+        VkPipelineShaderStageCreateInfo shaderStage = {};
+        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        shaderStage.module = ctx->shaderModule;
+        shaderStage.pName = "main";
+        
+        VkComputePipelineCreateInfo pipelineInfo = {};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipelineInfo.stage = shaderStage;
+        pipelineInfo.layout = ctx->pipelineLayout;
+        
+        std::cout << "[DEBUG] Creating compute pipeline..." << std::endl;
+        VkResult pipelineResult = vk.vkCreateComputePipelines(vk.device, nullptr, 1, &pipelineInfo, nullptr, &ctx->pipeline);
+        if (pipelineResult != 0) {
+            std::cerr << "❌ Failed to create compute pipeline, error: " << pipelineResult << std::endl;
+            destroy_dispatch_context(ctx);
+            return nullptr;
+        }
+        std::cout << "[DEBUG] Compute pipeline created: " << ctx->pipeline << std::endl;
+        
+        // 5. Create command pool and buffer
+        VkCommandPoolCreateInfo poolInfo = {};
+        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        poolInfo.queueFamilyIndex = 0; // Assuming compute queue family index 0
+        
+        if (vk.vkCreateCommandPool(vk.device, &poolInfo, nullptr, &ctx->commandPool) != 0) {
+            std::cerr << "❌ Failed to create command pool" << std::endl;
+            destroy_dispatch_context(ctx);
+            return nullptr;
+        }
+        
+        VkCommandBufferAllocateInfo allocInfo = {};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool = ctx->commandPool;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
+        
+        vk.vkAllocateCommandBuffers(vk.device, &allocInfo, &ctx->commandBuffer);
+        
+        return ctx;
+    }
+    
+    // Cleanup dispatch context
+    static void destroy_dispatch_context(GpuDispatchContext* ctx) {
+        if (!ctx) return;
+        
+        auto& vk = VulkanBackend::get();
+        
+        if (ctx->commandPool) vk.vkDestroyCommandPool(vk.device, ctx->commandPool, nullptr);
+        if (ctx->pipeline) vk.vkDestroyPipeline(vk.device, ctx->pipeline, nullptr);
+        if (ctx->pipelineLayout) vk.vkDestroyPipelineLayout(vk.device, ctx->pipelineLayout, nullptr);
+        if (ctx->descriptorSetLayout) vk.vkDestroyDescriptorSetLayout(vk.device, ctx->descriptorSetLayout, nullptr);
+        if (ctx->descriptorPool) vk.vkDestroyDescriptorPool(vk.device, ctx->descriptorPool, nullptr);
+        if (ctx->shaderModule) vk.vkDestroyShaderModule(vk.device, ctx->shaderModule, nullptr);
+        
+        delete ctx;
     }
 };
 

@@ -26,33 +26,61 @@ TuningResult AutoTuner::tune_system(int check_size, bool precision_mode) {
 
     // 0. CPU Strategy Race (P-Cores vs All-Cores)
     // This sets the global OpenMP/Affinity state for the rest of the tuning.
-    bool use_all_cores = find_optimal_cpu_strategy(check_size, check_size, check_size);
+    auto [use_all_cores, cpu_gflops] = find_optimal_cpu_strategy(check_size, check_size, check_size);
 
     // 1. Find Best Shader
     std::string best_shader = find_best_shader(check_size, check_size, check_size);
     std::cout << "✅ AutoTuner: Best Shader Selected -> " << best_shader << std::endl;
 
+    // 1.5. Measure Pure GPU Performance (for diagnostics)
+    double pure_gpu_gflops = measure_throughput(check_size, check_size, check_size, best_shader, 0.0f);
+    std::cout << "📊 AutoTuner: Pure GPU Performance -> " << std::fixed << std::setprecision(1) << pure_gpu_gflops << " GFLOPS" << std::endl;
+
     // 2. Find Optimal Hybrid Ratio
     // Note: The CPU is already configured (Pinned/Thread Count) by step 0.
     float best_ratio = find_optimal_ratio(check_size, check_size, check_size, best_shader, precision_mode);
     
-    // 3. Final Verification
+    // 3. Final Verification + Best Mode Selection
     double peak_gflops = measure_throughput(check_size, check_size, check_size, best_shader, best_ratio);
+    
+    // SMART MODE SELECTION: Compare Hybrid vs Pure modes
+    std::string selected_mode;
+    float final_ratio = best_ratio;
+    double final_gflops = peak_gflops;
+    
+    if (pure_gpu_gflops > peak_gflops * 1.05) {
+        // Pure GPU is significantly faster than hybrid
+        selected_mode = "Pure GPU";
+        final_ratio = 0.0f;
+        final_gflops = pure_gpu_gflops;
+        std::cout << "🎯 AutoTuner: Pure GPU Mode Selected (Faster than Hybrid)" << std::endl;
+    } else if (cpu_gflops > peak_gflops * 1.05) {
+        // Pure CPU is significantly faster than hybrid
+        selected_mode = "Pure CPU";
+        final_ratio = 1.0f;
+        final_gflops = cpu_gflops;
+        std::cout << "🎯 AutoTuner: Pure CPU Mode Selected (Faster than Hybrid)" << std::endl;
+    } else {
+        selected_mode = "Hybrid";
+        std::cout << "🎯 AutoTuner: Hybrid Mode Selected (Best Performance)" << std::endl;
+    }
     
     std::cout << "\n📊 System Compute Capability Report:" << std::endl;
     std::cout << "   ---------------------------------------" << std::endl;
-    std::cout << "   CPU (Raw):   " << (use_all_cores ? "All Cores" : "P-Cores") << " -> " << std::fixed << std::setprecision(1) << (use_all_cores ? 217.5 : 130.9) << " GFLOPS (Measured)" << std::endl; // Note: In real code we should return this value from find_strategy
-    std::cout << "   GPU (Raw):   " << best_shader << " -> " << peak_gflops * (1.0f - best_ratio) * 1.5 << " GFLOPS (Est. Peak)" << std::endl; // Rough estimate based on ratio
+    std::cout << "   CPU (Raw):   " << (use_all_cores ? "All Cores" : "P-Cores") << " -> " << std::fixed << std::setprecision(1) << cpu_gflops << " GFLOPS (Measured)" << std::endl;
+    std::cout << "   GPU (Raw):   " << best_shader << " -> " << pure_gpu_gflops << " GFLOPS (Pure GPU)" << std::endl;
     std::cout << "   ---------------------------------------" << std::endl;
-    std::cout << "   🚀 Total System: " << peak_gflops << " GFLOPS" << std::endl;
-    std::cout << "   (Optimization: " << best_ratio * 100.0f << "% CPU / " << (1.0f - best_ratio) * 100.0f << "% GPU)" << std::endl;
+    std::cout << "   🚀 Total System: " << final_gflops << " GFLOPS (" << selected_mode << ")" << std::endl;
+    if (selected_mode == "Hybrid") {
+        std::cout << "   (Workload Split: " << final_ratio * 100.0f << "% CPU / " << (1.0f - final_ratio) * 100.0f << "% GPU)" << std::endl;
+    }
 
     TuningResult res;
     res.best_shader = best_shader;
-    res.best_cpu_ratio = best_ratio;
+    res.best_cpu_ratio = final_ratio;
     res.use_all_cores = use_all_cores;
-    res.peak_gflops = peak_gflops;
-    res.hardware_summary = "Calibrated";
+    res.peak_gflops = final_gflops;
+    res.hardware_summary = selected_mode;
     
     // Store selected shader path in environment for Linear layer to use
     setenv("MM_REC_TUNED_SHADER", best_shader.c_str(), 1);
@@ -141,23 +169,24 @@ double AutoTuner::measure_throughput(int M, int N, int K, const std::string& sha
 
     auto start = std::chrono::high_resolution_clock::now();
     
-    std::future<bool> gpu_future;
+    // --- TRUE ASYNC GPU EXECUTION ---
+    GpuContext* gpu_ctx = nullptr;
     if (M_gpu > 0) {
-        gpu_future = std::async(std::launch::async, [&]() {
-            return VulkanCompute::matmul(A_gpu.data(), B_gpu.data(), C_gpu.data(), M_gpu, N, K, shader);
-        });
+        // Submit GPU work (NON-BLOCKING!)
+        gpu_ctx = VulkanCompute::matmul_submit_async(A_gpu.data(), B_gpu.data(), M_gpu, N, K, shader);
     }
 
+    // CPU runs in TRUE parallel while GPU computes!
     if (M_cpu > 0) {
         C_cpu.noalias() = A_cpu * B_cpu;
     }
 
-    bool gpu_ok = true;
-    if (M_gpu > 0) gpu_ok = gpu_future.get();
+    // Wait for GPU to finish + download results  
+    if (gpu_ctx) {
+        VulkanCompute::matmul_download(gpu_ctx, C_gpu.data());
+    }
     
     auto end = std::chrono::high_resolution_clock::now();
-    
-    if (!gpu_ok) return 0.0;
     
     return get_gflops(M, N, K, std::chrono::duration<double>(end - start).count());
 }
@@ -261,8 +290,8 @@ void AutoTuner::apply_cpu_strategy(bool use_all_cores) {
     sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
 }
 
-// Returns TRUE if All-Cores (P+E) is faster than P-Cores only
-bool AutoTuner::find_optimal_cpu_strategy(int M, int N, int K) {
+// Returns <use_all_cores, winner_gflops>
+std::pair<bool, double> AutoTuner::find_optimal_cpu_strategy(int M, int N, int K) {
     std::cout << "🔍 AutoTuner: Racing CPU Strategies (P-Cores vs P+E)..." << std::endl;
     
     // 1. Test P-Cores
@@ -278,11 +307,13 @@ bool AutoTuner::find_optimal_cpu_strategy(int M, int N, int K) {
     
     if (all_gflops > p_gflops * 1.05) { // Needs 5% margin to justify E-core jitter
          std::cout << "✅ Winner: All Cores (Strategy B)" << std::endl;
-         return true;
+         return {true, all_gflops};
     }
     
     std::cout << "✅ Winner: P-Cores Only (Strategy A)" << std::endl;
-    return false;
+    // Re-apply P-Core strategy since we switched to All for the test
+    apply_cpu_strategy(false);
+    return {false, p_gflops};
 }
 
 } // namespace mm_rec
