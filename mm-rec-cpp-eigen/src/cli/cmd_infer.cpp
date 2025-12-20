@@ -1,5 +1,6 @@
 /**
  * Inference Command - Generate text from trained model
+ * Consolidated for single binary.
  */
 
 #include "mm_rec/model/mm_rec_model.h"

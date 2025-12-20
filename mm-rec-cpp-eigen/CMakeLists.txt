@@ -143,6 +143,7 @@ set(CONFIG_SOURCES
 set(UTILS_SOURCES
     src/utils/session.cpp
     src/utils/checkpoint.cpp
+    src/utils/dashboard_manager.cpp
 )
 
 set(DATA_SOURCES
@@ -312,52 +313,9 @@ add_test(NAME benchmark_final_suite COMMAND benchmark_final_suite)
 # add_executable(test_vulkan_memory tests/test_vulkan_memory.cpp)
 # target_link_libraries(test_vulkan_memory ${CMAKE_DL_LIBS})
 # add_test(NAME test_vulkan_memory COMMAND test_vulkan_memory)
-add_executable(inference_demo src/inference_demo.cpp)
-target_link_libraries(inference_demo mm_rec_eigen)
+# Legacy targets removed (mm_rec_train, demo_training_cpp, inference_demo)
+# Consolidated into mm_rec CLI
 
-add_executable(test_tokenizer tests/test_tokenizer.cpp)
-target_link_libraries(test_tokenizer mm_rec_eigen)
-add_test(NAME test_tokenizer COMMAND test_tokenizer)
-
-add_executable(benchmark_tokenizer tests/benchmark_tokenizer.cpp)
-target_link_libraries(benchmark_tokenizer mm_rec_eigen)
-
-add_executable(demo_training_cpp src/demo_training_cpp.cpp)
-target_link_libraries(demo_training_cpp mm_rec_eigen)
-
-add_executable(train_kernel src/train_kernel.cpp)
-target_link_libraries(train_kernel mm_rec_eigen)
-
-add_executable(test_hybrid_stability tests/test_hybrid_stability.cpp)
-target_link_libraries(test_hybrid_stability mm_rec_eigen)
-
-add_executable(debug_dataloader tests/debug_dataloader.cpp)
-target_link_libraries(debug_dataloader mm_rec_eigen)
-
-add_executable(debug_overfit tests/debug_overfit.cpp)
-target_link_libraries(debug_overfit mm_rec_eigen)
-
-# Metrics Tests
-add_executable(benchmark_metrics_overhead tests/benchmark_metrics_overhead.cpp)
-target_link_libraries(benchmark_metrics_overhead mm_rec_eigen)
-add_test(NAME benchmark_metrics_overhead COMMAND benchmark_metrics_overhead)
-
-add_executable(test_binary_metrics test_binary_metrics.cpp)
-target_link_libraries(test_binary_metrics mm_rec_eigen)
-add_test(NAME test_binary_metrics COMMAND test_binary_metrics)
-
-# Logger Tests
-add_executable(benchmark_logger_overhead tests/benchmark_logger_overhead.cpp)
-target_link_libraries(benchmark_logger_overhead mm_rec_eigen)
-add_test(NAME benchmark_logger_overhead COMMAND benchmark_logger_overhead)
-
-add_executable(test_logger tests/test_logger.cpp)
-target_link_libraries(test_logger mm_rec_eigen)
-add_test(NAME test_logger COMMAND test_logger)
-
-# UI Demo
-add_executable(demo_ui tests/demo_ui.cpp)
-target_link_libraries(demo_ui mm_rec_eigen)
 
 
 

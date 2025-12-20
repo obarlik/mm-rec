@@ -7,6 +7,7 @@
 #include "mm_rec/utils/ui.h"
 #include "cli/commands.h"
 #include "mm_rec/utils/system_optimizer.h"
+#include "mm_rec/utils/dashboard_manager.h" // [NEW]
 
 using namespace mm_rec;
 using namespace mm_rec::ui;
@@ -31,6 +32,9 @@ int main(int argc, char* argv[]) {
     // If the user wants stability/efficiency (0.8 GFLOPS but low heat), they can enable P-Core pinning.
     // For now, we disable it by default based on benchmark results.
     // SystemOptimizer::optimize_runtime();
+
+    // Start Global Dashboard (Production Mode)
+    DashboardManager::instance().start(8085);
     
     // Check for explicit flag (simple check)
     for(int i=1; i<argc; ++i) {

@@ -14,6 +14,7 @@
 #include "mm_rec/core/vulkan_op.h"
 #include "mm_rec/core/dynamic_balancer.h"
 #include <chrono>
+#include <thread>
 
 namespace mm_rec {
 
@@ -119,21 +120,28 @@ Tensor Linear::forward(const Tensor& input) {
         }();
 
         // Use stateless, robust dispatch (Allocates per frame, but stable 148 GFLOPS)
-        // Wait, 'matmul_submit_async' logic handles blocking already?
-        // VulkanCompute::matmul is blocking call (internally wait fence).
-        // Since we are inside async lambda, blocking here is fine (it blocks the async thread, not main thread).
+        // Retry Loop for transient GPU OOM (Error -2)
+        bool ok = false;
+        // Increase patience: 10 retries * 50ms = 500ms max wait
+        for(int retries=0; retries<10; ++retries) {
+             ok = VulkanCompute::matmul(
+                input_gpu.data(), 
+                W_T.data(), 
+                result_gpu.data(), 
+                gpu_batch, 
+                out_features_, 
+                in_features_, 
+                shaderPath
+            );
+            
+            if(ok) break;
+            
+            // Wait 50ms and retry (Drain queue)
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            if(retries > 0) std::cout << "⚠️ GPU Busy (Retry " << retries << "/10)..." << std::endl;
+        }
         
-        bool ok = VulkanCompute::matmul(
-            input_gpu.data(), 
-            W_T.data(), 
-            result_gpu.data(), 
-            gpu_batch, 
-            out_features_, 
-            in_features_, 
-            shaderPath
-        );
-        
-        if (!ok) throw std::runtime_error("GPU Dispatch Failed");
+        if (!ok) throw std::runtime_error("GPU Dispatch Failed (After 10 Retries - System Overloaded)");
         
         // Add bias (CPU) - doing it here allows parallel bias add
         float* out_data = result_gpu.data();
