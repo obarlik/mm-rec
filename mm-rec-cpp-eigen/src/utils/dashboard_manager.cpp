@@ -50,7 +50,7 @@ bool DashboardManager::start(int base_port) {
     }
 
     if (!success) {
-        LOG_INFO("ERROR: Failed to start Global Dashboard on any port " + 
+        LOG_ERROR("Failed to start Global Dashboard on any port " + 
                  std::to_string(base_port) + "-" + std::to_string(base_port + max_retries - 1));
     }
     return success;

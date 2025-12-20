@@ -19,8 +19,10 @@
 #include <mutex>
 #include <condition_variable>
 #include <memory>
+#include <filesystem>
 
 namespace mm_rec {
+    namespace fs = std::filesystem;
 
 // Metrics are always compiled and controlled at runtime via start_writer()
 
@@ -92,6 +94,9 @@ public:
         buffer_.resize(BUFFER_SIZE);
     }
     
+    // Destructor declared here, defined after MetricsManager
+    ~MetricsBuffer();
+
     // Fast path: push event (lock-free if single producer)
     bool push(const MetricEvent& event) {
         size_t current = write_idx_.load(std::memory_order_relaxed);
@@ -150,6 +155,7 @@ private:
  * Global Metrics Manager
  */
 class MetricsManager {
+    friend class MetricsBuffer;
 public:
     static MetricsManager& instance() {
         static MetricsManager inst;
@@ -206,6 +212,32 @@ public:
         sampling_config_ = sampling;
         event_counter_ = 0;
         
+        // Inline rotation logic (to avoid circular dependency with logger.h if I tried to share)
+        // Or simply duplicate the simple logic.
+        {
+            try {
+                fs::path path(output_path);
+                // Max 50MB for binaries, Keep 2 backups (they are large)
+                size_t max_bytes = 50 * 1024 * 1024; 
+                int max_backups = 2;
+                
+                if (fs::exists(path) && fs::file_size(path) >= max_bytes) {
+                    fs::path oldest = path.parent_path() / (path.stem().string() + "." + std::to_string(max_backups) + path.extension().string());
+                    if (fs::exists(oldest)) fs::remove(oldest);
+                    
+                    for (int i = max_backups - 1; i >= 1; --i) {
+                        fs::path src = path.parent_path() / (path.stem().string() + "." + std::to_string(i) + path.extension().string());
+                        fs::path dst = path.parent_path() / (path.stem().string() + "." + std::to_string(i + 1) + path.extension().string());
+                        if (fs::exists(src)) fs::rename(src, dst);
+                    }
+                    fs::path first = path.parent_path() / (path.stem().string() + ".1" + path.extension().string());
+                    fs::rename(path, first);
+                }
+            } catch (...) {
+                // Ignore FS errors, don't crash metrics
+            }
+        }
+        
         writer_running_.store(true, std::memory_order_release);
         writer_thread_ = new std::thread(&MetricsManager::writer_loop, this);
     }
@@ -239,18 +271,35 @@ private:
         std::lock_guard<std::mutex> lock(registry_mutex_);
         buffers_.push_back(buf);
     }
+
+    // Called by MetricsBuffer destructor
+    void unregister_buffer(MetricsBuffer* buf) {
+        std::lock_guard<std::mutex> lock(registry_mutex_);
+        for (auto it = buffers_.begin(); it != buffers_.end(); ++it) {
+            if (*it == buf) {
+                // We erase it from the vector so the writer thread won't access it anymore.
+                // Since writer thread also locks registry_mutex_, this is safe.
+                buffers_.erase(it);
+                return;
+            }
+        }
+    }
     
     void writer_loop() {
-        std::ofstream ofs(output_path_, std::ios::binary | std::ios::out);
+        // App mode to avoid data loss on restart
+        std::ofstream ofs(output_path_, std::ios::binary | std::ios::out | std::ios::app);
         if (!ofs) return;
         
-        // Write binary header: [MAGIC:4][VERSION:4][RESERVED:4]
-        const char magic[4] = {'M', 'M', 'R', 'C'};
-        const uint32_t version = 1;
-        const uint32_t reserved = 0;
-        ofs.write(magic, 4);
-        ofs.write(reinterpret_cast<const char*>(&version), 4);
-        ofs.write(reinterpret_cast<const char*>(&reserved), 4);
+        // Write binary header only if file is new (size 0)
+        ofs.seekp(0, std::ios::end);
+        if (ofs.tellp() == 0) {
+            const char magic[4] = {'M', 'M', 'R', 'C'};
+            const uint32_t version = 1;
+            const uint32_t reserved = 0;
+            ofs.write(magic, 4);
+            ofs.write(reinterpret_cast<const char*>(&version), 4);
+            ofs.write(reinterpret_cast<const char*>(&reserved), 4);
+        }
         
         std::vector<MetricEvent> batch;
         batch.reserve(1024);
@@ -354,6 +403,13 @@ inline ScopedMetric::~ScopedMetric() {
     
     // We record duration as value1
     MetricsManager::record(type_, duration_ms, 0.0f, 0, label_);
+}
+
+// Implement MetricsBuffer destructor inline
+inline MetricsBuffer::~MetricsBuffer() {
+    // Only call unregister if we are sure manager is alive.
+    // Static instance() will act like a singleton.
+    MetricsManager::instance().unregister_buffer(this);
 }
 
 // Convenience macros

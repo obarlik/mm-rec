@@ -9,8 +9,39 @@
 #include <thread>
 #include <mutex>
 #include <cstring>
+#include <filesystem>
+#include <iomanip>
 
 namespace mm_rec {
+
+namespace fs = std::filesystem;
+
+/**
+ * Simple file rotation helper
+ */
+inline void rotate_file_if_needed(const std::string& path_str, size_t max_bytes, int max_backups) {
+    fs::path path(path_str);
+    if (!fs::exists(path)) return;
+    
+    // Check size
+    if (fs::file_size(path) < max_bytes) return;
+    
+    // Rotate: file.log -> file.1.log -> ...
+    // Delete oldest
+    fs::path oldest = path.parent_path() / (path.stem().string() + "." + std::to_string(max_backups) + path.extension().string());
+    if (fs::exists(oldest)) fs::remove(oldest);
+    
+    // Shift others
+    for (int i = max_backups - 1; i >= 1; --i) {
+        fs::path src = path.parent_path() / (path.stem().string() + "." + std::to_string(i) + path.extension().string());
+        fs::path dst = path.parent_path() / (path.stem().string() + "." + std::to_string(i + 1) + path.extension().string());
+        if (fs::exists(src)) fs::rename(src, dst);
+    }
+    
+    // Rename current to .1
+    fs::path first_backup = path.parent_path() / (path.stem().string() + ".1" + path.extension().string());
+    fs::rename(path, first_backup);
+}
 
 /**
  * Zero-Overhead Logging System v2
@@ -28,8 +59,10 @@ namespace mm_rec {
  */
 enum class LogLevel : uint8_t {
     UI = 0,      // User-facing (always shown on stdout)
-    INFO = 1,    // System status (configurable)
-    DEBUG = 2    // Debug details (disabled by default)
+    INFO = 1,    // System status
+    WARNING = 2, // Potential issues
+    ERROR = 3,   // Critical failures
+    DEBUG = 4    // Debug details (disabled by default)
 };
 
 /**
@@ -163,6 +196,8 @@ public:
     
     static void ui(const std::string& msg)    { log(LogLevel::UI, msg); }
     static void info(const std::string& msg)  { log(LogLevel::INFO, msg); }
+    static void warning(const std::string& msg) { log(LogLevel::WARNING, msg); }
+    static void error(const std::string& msg)   { log(LogLevel::ERROR, msg); }
     static void debug(const std::string& msg) { log(LogLevel::DEBUG, msg); }
     
     // Start background writer
@@ -172,6 +207,9 @@ public:
         
         log_file_path_ = log_file;
         max_level_ = max_level;
+        
+        // Retention Policy: Max 10MB, Keep 3 backups
+        rotate_file_if_needed(log_file, 10 * 1024 * 1024, 3);
         
         writer_running_.store(true, std::memory_order_release);
         writer_thread_ = new std::thread(&Logger::writer_loop, this);
@@ -246,6 +284,8 @@ private:
         // Format: [TIMESTAMP] [LEVEL] Message
         const char* level_str = "UI";
         if (event.level == LogLevel::INFO) level_str = "INFO";
+        else if (event.level == LogLevel::WARNING) level_str = "WARN";
+        else if (event.level == LogLevel::ERROR) level_str = "ERROR";
         else if (event.level == LogLevel::DEBUG) level_str = "DEBUG";
         
         // Convert microseconds to readable time
@@ -296,6 +336,8 @@ private:
 // Convenience macros
 #define LOG_UI(msg)    mm_rec::Logger::ui(msg)
 #define LOG_INFO(msg)  mm_rec::Logger::info(msg)
+#define LOG_WARN(msg)  mm_rec::Logger::warning(msg)
+#define LOG_ERROR(msg) mm_rec::Logger::error(msg)
 #define LOG_DEBUG(msg) mm_rec::Logger::debug(msg)
 
 } // namespace mm_rec
