@@ -30,6 +30,10 @@ compile_commands.json
 *.json
 *.jsonl
 !dummy_data.json
+!package-lock.json
+!package.json
+!yarn.lock
+!yarnrc
 
 # Logs
 *.log
