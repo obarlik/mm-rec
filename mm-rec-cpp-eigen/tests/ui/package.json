@@ -1,0 +1,13 @@
+{
+    "name": "mm-rec-ui-tests",
+    "version": "1.0.0",
+    "description": "Selenium E2E tests for MM-Rec Dashboard",
+    "scripts": {
+        "test": "mocha test_dashboard_e2e.js --timeout 60000"
+    },
+    "dependencies": {
+        "selenium-webdriver": "^4.20.0",
+        "mocha": "^10.4.0",
+        "chai": "^5.1.1"
+    }
+}

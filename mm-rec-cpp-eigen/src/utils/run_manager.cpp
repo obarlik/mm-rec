@@ -25,7 +25,10 @@ bool RunManager::start_job(const TrainingJobConfig& config_in) {
     if (isolated_config.run_name.empty()) {
         isolated_config.run_name = "run_" + std::to_string(std::time(nullptr));
     }
-    create_run(isolated_config.run_name);
+    if (!create_run(isolated_config.run_name)) {
+        ui::error("Failed to create run directory: " + isolated_config.run_name);
+        return false;
+    }
     std::string run_dir = get_run_dir(isolated_config.run_name);
 
     // 2. Copy Config File
@@ -34,13 +37,13 @@ bool RunManager::start_job(const TrainingJobConfig& config_in) {
         try {
             fs::copy_file(config_in.config_path, dest_config, fs::copy_options::overwrite_existing);
             isolated_config.config_path = dest_config; // Point to isolated copy
-        } catch (...) {
-            ui::error("Failed to copy config to run dir");
+        } catch (const std::exception& e) {
+            ui::error(std::string("Failed to copy config to run dir: ") + e.what());
             return false;
         }
     }
 
-    // 3. Symlink Dataset (Access from own folder)
+    // 3. Copy Dataset (STRICT ISOLATION - Physical Copy)
     if (fs::exists(config_in.data_path)) {
         std::string data_filename = fs::path(config_in.data_path).filename().string();
         std::string dest_data = run_dir + "/" + data_filename;
@@ -48,14 +51,13 @@ bool RunManager::start_job(const TrainingJobConfig& config_in) {
             // Remove if exists
             if (fs::exists(dest_data)) fs::remove(dest_data);
             
-            // Create symlink (Absolute path required for target)
-            fs::path target = fs::absolute(config_in.data_path);
-            fs::create_symlink(target, dest_data);
+            // Physical Copy
+            fs::copy_file(config_in.data_path, dest_data, fs::copy_options::overwrite_existing);
             
-            isolated_config.data_path = dest_data; // Point to local symlink
+            isolated_config.data_path = dest_data; // Point to local copy
         } catch (const std::exception& e) {
-             // Fallback: Use absolute original path if symlink fails
-             ui::warning(std::string("Symlink failed: ") + e.what() + ". Using original path.");
+             // Fallback: Use absolute original path if copy fails
+             ui::warning(std::string("Dataset copy failed: ") + e.what() + ". Using original path.");
              isolated_config.data_path = fs::absolute(config_in.data_path).string();
         }
     }
@@ -88,7 +90,7 @@ bool RunManager::create_run(const std::string& run_name) {
     std::string run_dir = get_run_dir(run_name);
     
     if (fs::exists(run_dir)) {
-        return false; // Already exists
+        return true; // Already exists (Idempotent success)
     }
     
     try {

@@ -41,6 +41,7 @@ compile_commands.json
 !config*.txt
 !CMakeLists.txt
 !server_config.txt
+!requirements.txt
 
 # IDE
 .vscode/

@@ -299,24 +299,11 @@ void DashboardManager::register_routes() {
         }
         std::filesystem::create_directories(run_dir);
 
-        // 2. Prepare Config
-        std::string target_config = run_dir + "/config.ini";
-        if (std::filesystem::exists(config_file)) {
-            std::filesystem::copy_file(config_file, target_config);
-        } else {
-             // Try searching in current dir
-             if (std::filesystem::exists("./" + config_file)) {
-                 std::filesystem::copy_file("./" + config_file, target_config);
-             } else {
-                 return mm_rec::net::HttpServer::build_response(404, "application/json", "{\"error\": \"Config file not found\"}");
-             }
-        }
-
-        // 3. Prepare config object
+        // 2. Prepare config object
         TrainingJobConfig job_config;
         job_config.run_name = name;
-        job_config.config_path = target_config; 
-        job_config.data_path = data_file; // Pass original data path, RunManager might handle absolute/relative
+        job_config.config_path = config_file; // Pass source, RunManager will isolate
+        job_config.data_path = data_file;     // Pass source, RunManager will isolate
 
         // 4. Start
         if (RunManager::start_job(job_config)) {
