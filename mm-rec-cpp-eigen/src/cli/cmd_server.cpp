@@ -14,6 +14,7 @@
 #include "mm_rec/core/vulkan_backend.h"
 
 #include <iostream>
+#include <iostream>
 #include <string>
 #include <vector>
 #include <sstream>
@@ -21,6 +22,7 @@
 #include <thread>
 #include <fstream>
 #include <filesystem>
+#include <csignal>
 
 // Unix daemon headers
 #ifndef _WIN32
@@ -38,6 +40,22 @@ using namespace mm_rec::ui;
 
 // Global job instance
 static std::unique_ptr<JobTraining> current_job;
+
+// Signal Handling
+static std::atomic<bool> g_shutdown_requested(false);
+
+void handle_sigint(int sig) {
+    if (g_shutdown_requested.exchange(true)) {
+        // Force exit on second signal
+        std::cerr << "\nForced shutdown.\n";
+        std::exit(1);
+    }
+    std::cout << "\nSignal received (" << sig << "). Shutting down gracefully...\n";
+    // Using simple flag, main loop will catch it. 
+    // For blocking I/O, we might need more aggressive unblocking, 
+    // but HttpServer usually has timeouts or we can close socket.
+    DashboardManager::instance().stop(); 
+}
 
 void print_help() {
     std::cout << "\n" << ui::color::BOLD << "Training Management:" << ui::color::RESET << "\n";
@@ -68,6 +86,10 @@ int cmd_server(int argc, char* argv[]) {
     app_config.load_from_file("server_config.ini");
     app_config.load_from_env();
     app_config.parse_args(argc, argv); // Overrides all
+    
+    // Register Signal Handlers
+    std::signal(SIGINT, handle_sigint);
+    std::signal(SIGTERM, handle_sigint);
     
     // 2. Retrieve Settings (Generic Section API)
     // Flexible & Decoupled
@@ -183,10 +205,16 @@ int cmd_server(int argc, char* argv[]) {
     bool server_running = true;
     std::string line;
     
-    while (server_running) {
+    while (server_running && !g_shutdown_requested) {
         std::cout << color::BOLD << "> " << color::RESET << std::flush;
         
-        if (!std::getline(std::cin, line)) break; // EOF
+        // Use select/poll to make this non-blocking or rely on signal interrupting read?
+        // Simple std::getline is blocking. Signal handler sets flag, but we need to wake up.
+        // On many *nix systems, signal interrupts read() causing cin to fail or return.
+        if (!std::getline(std::cin, line)) {
+            if (g_shutdown_requested) break; // Signal caused EOF or error
+            break; // Real EOF (Ctrl+D)
+        }
         if (line.empty()) continue;
         
         std::stringstream ss(line);
