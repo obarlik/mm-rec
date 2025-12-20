@@ -12,9 +12,11 @@ namespace fs = std::filesystem;
 
 // Static state
 static std::unique_ptr<JobTraining> active_job_ = nullptr;
+static std::string active_run_name_ = "";  // Track which run owns the active job
 
 bool RunManager::start_job(const TrainingJobConfig& config_in) {
     if (active_job_ && active_job_->is_running()) {
+        ui::error("Job already running for: " + active_run_name_);
         return false;
     }
 
@@ -62,8 +64,26 @@ bool RunManager::start_job(const TrainingJobConfig& config_in) {
         }
     }
 
+    // Set active run ownership
+    active_run_name_ = isolated_config.run_name;
+    
     active_job_ = std::make_unique<JobTraining>();
-    return active_job_->start(isolated_config);
+    try {
+        // Start the job (Training happens in a separate thread inside, 
+        // but initialization like dataset loading might happen here depending on implementation)
+        // If start() is blocking or does init, we catch errors here.
+        // Assuming active_job_->start() spawns a thread, but might throw during setup.
+        bool success = active_job_->start(isolated_config);
+        if (!success) {
+            // Failed to start - clear ownership
+            active_run_name_ = "";
+        }
+        return success;
+    } catch (const std::exception& e) {
+        std::cerr << "Message: Failed to start job: " << e.what() << std::endl;
+        active_run_name_ = "";  // Clear ownership on failure
+        return false;
+    }
 }
 
 void RunManager::stop_job() {
@@ -71,6 +91,7 @@ void RunManager::stop_job() {
         active_job_->stop();
         active_job_->join();
         active_job_.reset();
+        active_run_name_ = "";  // Clear ownership
     }
 }
 
