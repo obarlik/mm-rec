@@ -129,10 +129,9 @@ private:
 
     void handle_client(int socket) {
         char buffer[4096] = {0};
-        if (read(socket, buffer, 4096) < 0) {} // Silence warning by checking result or void cast. Let's use if check to be cleaner logic wise but empty body is fine for now as we parse buffer anyway. Actually (void) is better.
-        // Re-reading logic: simplistic read.
-        // Let's just use (void)
-        (void)read(socket, buffer, 4096);
+        if (read(socket, buffer, 4096) < 0) {
+             // Ignore read errors for this simple dashboard
+        }
         std::string request(buffer);
 
         std::stringstream ss(request);
