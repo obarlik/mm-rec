@@ -35,7 +35,7 @@ int cmd_view_trace(int argc, char* argv[]) {
     net::HttpServer server(port);
 
     // Register Handler
-    server.register_handler("/" + filename, [&](const std::string&) -> std::string {
+    server.register_handler("/" + filename, [&](const net::Request&) -> std::string {
         std::ifstream f(trace_path);
         if (f) {
             std::stringstream buffer;

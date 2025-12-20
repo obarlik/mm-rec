@@ -64,7 +64,7 @@ Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
     dashboard_server_ = std::make_unique<net::HttpServer>(8080);
     
     // Serve HTML
-    dashboard_server_->register_handler("/", [](const std::string&) -> std::string {
+    dashboard_server_->register_handler("/", [](const net::Request&) -> std::string {
         return net::HttpServer::build_response(200, "text/html", ui::DASHBOARD_HTML);
     });
     
@@ -98,18 +98,18 @@ Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
 
 void Trainer::setup_dashboard_handlers() {
     // Serve HTML
-    dashboard_server_->register_handler("/", [](const std::string&) -> std::string {
+    dashboard_server_->register_handler("/", [](const net::Request&) -> std::string {
         return net::HttpServer::build_response(200, "text/html", ui::DASHBOARD_HTML);
     });
     
     // API: Stop
-    dashboard_server_->register_handler("/api/stop", [this](const std::string&) -> std::string {
+    dashboard_server_->register_handler("/api/stop", [this](const net::Request&) -> std::string {
         this->stop_requested_ = true;
         LOG_UI("🛑 Stop requested via Dashboard!");
         return net::HttpServer::build_response(200, "application/json", "{\"status\": \"stopping\"}");
     });
     // API: Hardware Info
-    dashboard_server_->register_handler("/api/hardware", [](const std::string&) -> std::string {
+    dashboard_server_->register_handler("/api/hardware", [](const net::Request&) -> std::string {
         std::stringstream json;
         json << "{";
         
@@ -170,7 +170,7 @@ void Trainer::setup_dashboard_handlers() {
     });
     
     // API: Stats
-    dashboard_server_->register_handler("/api/stats", [this](const std::string&) -> std::string {
+    dashboard_server_->register_handler("/api/stats", [this](const net::Request&) -> std::string {
         std::lock_guard<std::mutex> lock(this->stats_mutex_);
         std::stringstream json;
         json << "{";

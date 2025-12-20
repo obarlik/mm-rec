@@ -99,9 +99,25 @@ struct HttpServerConfig {
     int timeout_sec = 3;
 };
 
+
+struct Request {
+    std::string method;
+    std::string path;
+    std::string body;
+    std::function<bool()> is_connected;
+};
+
 class HttpServer {
 public:
-    using Handler = std::function<std::string(const std::string&)>;
+    using Handler = std::function<std::string(const Request&)>;
+    // NextFn represents the next step in the pipeline (either another middleware or the final handler)
+    using NextFn = std::function<std::string(const Request&)>;
+    
+    // Bidirectional Middleware:
+    // - Pre-processing: Code before calling next(req)
+    // - Post-processing: Code after calling next(req)
+    // - Short-circuit: Return response WITHOUT calling next(req)
+    using Middleware = std::function<std::string(const Request&, NextFn)>;
 
     HttpServer(const HttpServerConfig& config) 
         : config_(config), running_(false), pool_(config.threads) {
@@ -126,6 +142,14 @@ public:
     void register_handler(const std::string& path, Handler handler) {
         std::lock_guard<std::mutex> lock(handlers_mutex_);
         handlers_[path] = handler;
+    }
+
+    // Register a middleware to the pipeline
+    // Order matters: use(A); use(B) -> A intercepts first, calls B, B calls Handler.
+    // Response flows back: Handler -> B -> A.
+    void use(Middleware middleware) {
+        std::lock_guard<std::mutex> lock(middlewares_mutex_);
+        middlewares_.push_back(middleware);
     }
 
     bool start() {
@@ -173,8 +197,6 @@ public:
         return true;
     }
 
-    // ... (rest is same) ...
-
     void stop() {
         if (running_) {
             running_ = false;
@@ -213,6 +235,7 @@ public:
             ss << "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n";
             ss << "Access-Control-Allow-Headers: Content-Type\r\n";
         }
+        ss << "X-MMRec-Version: 0.1.0\r\n";
         ss << "Connection: close\r\n"; // Keep-alive parsing is complex, stick to close for reliability
         ss << "\r\n";
         ss << body;
@@ -230,6 +253,8 @@ private:
     std::thread listener_thread_;
     std::map<std::string, Handler> handlers_;
     std::mutex handlers_mutex_;
+    std::vector<Middleware> middlewares_;
+    std::mutex middlewares_mutex_;
     ThreadPool pool_;
     std::atomic<bool> listener_started_{false};  // Track listener thread startup
 
@@ -263,7 +288,6 @@ private:
     void handle_client(int socket) {
         
         // PRODUCTION SAFETY: Set timeouts
-        // This prevents "Slowloris" attacks or stuck clients from consuming a thread forever.
 #ifdef _WIN32
         DWORD timeout = config_.timeout_sec * 1000;
         setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
@@ -278,7 +302,7 @@ private:
 
         std::vector<char> buffer(8192); // Increased buffer
         
-        LOG_INFO("handle_client: about to read from socket");
+        // LOG_INFO("handle_client: about to read from socket");
         
 #ifndef _WIN32
         ssize_t bytes_read = read(socket, buffer.data(), buffer.size());
@@ -286,7 +310,7 @@ private:
         int bytes_read = recv(socket, buffer.data(), static_cast<int>(buffer.size()), 0);
 #endif
 
-        LOG_INFO("handle_client: read " + std::to_string(bytes_read) + " bytes");
+        // LOG_INFO("handle_client: read " + std::to_string(bytes_read) + " bytes");
         if (bytes_read <= 0) {
 #ifndef _WIN32
             close(socket);
@@ -296,8 +320,8 @@ private:
             return;
         }
 
-        std::string request(buffer.data(), bytes_read);
-        std::stringstream ss(request);
+        std::string raw_request(buffer.data(), bytes_read);
+        std::stringstream ss(raw_request);
         std::string method, path;
         ss >> method >> path;
         
@@ -316,34 +340,82 @@ private:
             path = path.substr(0, query_pos);
         }
 
-        std::string response;
-        Handler handler = nullptr;
+        // Construct Request Object
+        Request req;
+        req.method = method;
+        req.path = path;
+        req.body = raw_request; // Storing full raw request as body for now/compatibility, ideally split headers/body
+        
+        // Connectivity Check Lambda
+        req.is_connected = [socket]() -> bool {
+            char buf;
+#ifndef _WIN32
+            ssize_t r = recv(socket, &buf, 1, MSG_PEEK | MSG_DONTWAIT);
+            if (r == 0) return false; // Graceful closed
+            if (r < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) return true; // Still connected, just no data
+                return false; // Error detected
+            }
+            return true;
+#else
+            int r = recv(socket, &buf, 1, MSG_PEEK);
+            if (r == 0) return false;
+            if (r < 0) {
+                int err = WSAGetLastError();
+                if (err == WSAEWOULDBLOCK) return true;
+                return false;
+            }
+            return true;
+#endif
+        };
 
-        {
-            std::lock_guard<std::mutex> lock(handlers_mutex_);
-            // Basic routing (exact match for now)
-            if (handlers_.count(path)) {
-                handler = handlers_[path];
-            } else {
-                 // Try wildcards (simple suffix check)
-                 for(auto const& [key, h] : handlers_) {
-                     if (key.back() == '*' && path.find(key.substr(0, key.size()-1)) == 0) {
-                         handler = h;
-                         break;
+        std::string response;
+
+        // --- Chain of Responsibility Composition ---
+        
+        // 1. Initial "Bottom" Handler: The Router
+        NextFn dispatch = [this](const Request& r) -> std::string {
+             Handler handler = nullptr;
+             {
+                 std::lock_guard<std::mutex> lock(handlers_mutex_);
+                 if (handlers_.count(r.path)) {
+                     handler = handlers_[r.path];
+                 } else {
+                     // Suffix wildcard
+                      for(auto const& [key, h] : handlers_) {
+                         if (key.back() == '*' && r.path.find(key.substr(0, key.size()-1)) == 0) {
+                             handler = h;
+                             break;
+                         }
                      }
                  }
+             }
+
+             if (handler) {
+                 try {
+                     return handler(r);
+                 } catch(const std::exception& e) {
+                     return build_response(500, "text/plain", std::string("Internal Error: ") + e.what());
+                 }
+             }
+             return build_response(404, "text/plain", "Not Found");
+        };
+
+        // 2. Wrap Middleware Layers (Reverse Order)
+        // Last added middleware is the "outer" most layer, called first.
+        {
+            std::lock_guard<std::mutex> lock(middlewares_mutex_);
+            for (auto it = middlewares_.rbegin(); it != middlewares_.rend(); ++it) {
+                auto current_mw = *it;
+                auto next = dispatch; // Capture current 'next'
+                dispatch = [current_mw, next](const Request& r) -> std::string {
+                    return current_mw(r, next);
+                };
             }
         }
 
-        if (handler) {
-            try {
-                response = handler(request);
-            } catch(const std::exception& e) {
-                response = build_response(500, "text/plain", std::string("Internal Error: ") + e.what());
-            }
-        } else {
-            response = build_response(404, "text/plain", "Not Found");
-        }
+        // 3. Execute Chain
+        response = dispatch(req);
 
 #ifndef _WIN32
         send(socket, response.c_str(), response.size(), 0);
@@ -357,3 +429,4 @@ private:
 
 } // namespace net
 } // namespace mm_rec
+

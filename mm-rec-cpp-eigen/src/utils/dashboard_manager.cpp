@@ -54,7 +54,8 @@ DashboardManager::~DashboardManager() {
 bool DashboardManager::start(const net::HttpServerConfig& base_config) {
     if (server_) return true; // Already running
 
-    int max_retries = 10;
+    // User requested range: 8085-8089 (5 ports)
+    int max_retries = 5; 
     bool success = false;
 
     for (int i = 0; i < max_retries; ++i) {
@@ -134,7 +135,7 @@ void DashboardManager::update_system_stats(size_t mem_mb) {
 }
 
 // --- Helper for Resumable File Serving ---
-static std::string serve_file_with_range(const std::string& path, const std::string& req) {
+static std::string serve_file_with_range(const std::string& path, const mm_rec::net::Request& req) {
     if (!std::filesystem::exists(path)) return mm_rec::net::HttpServer::build_response(404, "text/plain", "Not found");
     
     uintmax_t file_size = std::filesystem::file_size(path);
@@ -143,17 +144,17 @@ static std::string serve_file_with_range(const std::string& path, const std::str
     bool is_range = false;
 
     // Parse Range Header
-    size_t range_header_pos = req.find("Range: bytes=");
+    size_t range_header_pos = req.body.find("Range: bytes=");
     if (range_header_pos != std::string::npos) {
          is_range = true;
          size_t start_val = range_header_pos + 13;
-         size_t dash_pos = req.find("-", start_val);
-         size_t end_line = req.find("\r\n", start_val);
+         size_t dash_pos = req.body.find("-", start_val);
+         size_t end_line = req.body.find("\r\n", start_val);
          
          if (dash_pos != std::string::npos && dash_pos < end_line) {
              try {
-                 range_start = std::stoull(req.substr(start_val, dash_pos - start_val));
-                 std::string end_str = req.substr(dash_pos + 1, end_line - (dash_pos + 1));
+                 range_start = std::stoull(req.body.substr(start_val, dash_pos - start_val));
+                 std::string end_str = req.body.substr(dash_pos + 1, end_line - (dash_pos + 1));
                  if (!end_str.empty()) range_end = std::stoull(end_str);
              } catch (...) { is_range = false; }
          }
@@ -190,7 +191,7 @@ void DashboardManager::register_routes() {
     if (!server_) return;
 
     // MINIMAL TEST: Zero dependencies, pure stack
-    server_->register_handler("/", [](const std::string&) -> std::string {
+    server_->register_handler("/", [](const mm_rec::net::Request&) -> std::string {
         const char* body = "<html><body><h1>WORKS</h1></body></html>";
         std::stringstream ss;
         ss << "HTTP/1.1 200 OK\r\n";
@@ -202,17 +203,17 @@ void DashboardManager::register_routes() {
     });
 
     // Static CSS
-    server_->register_handler("/static/style.css", [](const std::string&) -> std::string {
+    server_->register_handler("/static/style.css", [](const mm_rec::net::Request&) -> std::string {
         return mm_rec::net::HttpServer::build_response(200, "text/css", std::string(assets::get_style_css()));
     });
 
     // Static JS
-    server_->register_handler("/static/app.js", [](const std::string&) -> std::string {
+    server_->register_handler("/static/app.js", [](const mm_rec::net::Request&) -> std::string {
         return mm_rec::net::HttpServer::build_response(200, "application/javascript", std::string(assets::get_app_js()));
     });
     
     // API Stats
-    server_->register_handler("/api/stats", [this](const std::string&) -> std::string {
+    server_->register_handler("/api/stats", [this](const mm_rec::net::Request&) -> std::string {
 
         std::stringstream ss;
         ss << "{";
@@ -245,7 +246,7 @@ void DashboardManager::register_routes() {
     });
     
     // API Hardware
-    server_->register_handler("/api/hardware", [](const std::string&) -> std::string {
+    server_->register_handler("/api/hardware", [](const mm_rec::net::Request&) -> std::string {
         auto& vk = mm_rec::VulkanBackend::get();
         std::string gpu_name = vk.is_ready() ? vk.get_device_name() : "Vulkan Not Ready";
         size_t vram_mb = vk.is_ready() ? (vk.get_total_vram() / 1024 / 1024) : 0;
@@ -263,14 +264,14 @@ void DashboardManager::register_routes() {
     });
     
     // Stop Signal
-    server_->register_handler("/api/stop", [this](const std::string&) -> std::string {
+    server_->register_handler("/api/stop", [this](const mm_rec::net::Request&) -> std::string {
         stats_.should_stop = true;
         LOG_INFO("Stop signal received from Dashboard.");
         return mm_rec::net::HttpServer::build_response(200, "text/plain", "Stopping...");
     });
 
     // History API
-    server_->register_handler("/api/history", [](const std::string&) -> std::string {
+    server_->register_handler("/api/history", [](const mm_rec::net::Request&) -> std::string {
         std::ifstream f("dashboard_history.csv");
         std::vector<float> losses;
         std::string line;
@@ -298,7 +299,7 @@ void DashboardManager::register_routes() {
     });
     
     // API Runs List
-    server_->register_handler("/api/runs", [](const std::string&) -> std::string {
+    server_->register_handler("/api/runs", [](const mm_rec::net::Request&) -> std::string {
         auto runs = RunManager::list_runs();
         std::stringstream ss;
         ss << "[";
@@ -319,7 +320,7 @@ void DashboardManager::register_routes() {
     });
 
     // API Stop Run
-    server_->register_handler("/api/runs/stop", [this](const std::string&) -> std::string {
+    server_->register_handler("/api/runs/stop", [this](const mm_rec::net::Request&) -> std::string {
         if (!RunManager::is_job_running()) {
              return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"No job is running\"}");
         }
@@ -329,7 +330,8 @@ void DashboardManager::register_routes() {
     });
 
     // API Start Run (New)
-    server_->register_handler("/api/runs/start", [this](const std::string& req) -> std::string {
+    server_->register_handler("/api/runs/start", [this](const mm_rec::net::Request& req_obj) -> std::string {
+        const std::string& req = req_obj.body;
         auto get_json_val = [&](const std::string& key) -> std::string {
             std::string search = "\"" + key + "\":";
             size_t pos = req.find(search);
@@ -385,7 +387,8 @@ void DashboardManager::register_routes() {
     });
 
     // API Resume Run
-    server_->register_handler("/api/runs/resume", [this](const std::string& req) -> std::string {
+    server_->register_handler("/api/runs/resume", [this](const mm_rec::net::Request& req_obj) -> std::string {
+         const std::string& req = req_obj.body;
          auto get_param = [&](const std::string& key) -> std::string {
              size_t pos = req.find(key + "=");
              if (pos == std::string::npos) return "";
@@ -438,7 +441,8 @@ void DashboardManager::register_routes() {
     });
 
     // API Delete Run
-    server_->register_handler("/api/runs/delete", [this](const std::string& req) -> std::string {
+    server_->register_handler("/api/runs/delete", [this](const mm_rec::net::Request& req_obj) -> std::string {
+         const std::string& req = req_obj.body;
          auto get_param = [&](const std::string& key) -> std::string {
              size_t pos = req.find(key + "=");
              if (pos == std::string::npos) return "";
@@ -464,7 +468,8 @@ void DashboardManager::register_routes() {
     });
 
     // API Get Run Config
-    server_->register_handler("/api/runs/config", [](const std::string& req) -> std::string {
+    server_->register_handler("/api/runs/config", [](const mm_rec::net::Request& req_obj) -> std::string {
+         const std::string& req = req_obj.body;
          std::string first_line = req.substr(0, req.find("\r\n"));
          size_t q_pos = first_line.find("?name=");
          if (q_pos == std::string::npos) return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing name parameter\"}");
@@ -507,7 +512,8 @@ void DashboardManager::register_routes() {
     });
 
     // API Get Run Logs
-    server_->register_handler("/api/runs/logs", [](const std::string& req) -> std::string {
+    server_->register_handler("/api/runs/logs", [](const mm_rec::net::Request& req_obj) -> std::string {
+         const std::string& req = req_obj.body;
          std::string first_line = req.substr(0, req.find("\r\n"));
          size_t q_pos = first_line.find("?name=");
          if (q_pos == std::string::npos) return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing name parameter\"}");
@@ -554,7 +560,7 @@ void DashboardManager::register_routes() {
     // --- Phase 3 Config & Data ---
 
     // API List Configs
-    server_->register_handler("/api/configs", [](const std::string&) -> std::string {
+    server_->register_handler("/api/configs", [](const mm_rec::net::Request&) -> std::string {
         std::stringstream ss;
         ss << "[";
         bool first = true;
@@ -575,7 +581,8 @@ void DashboardManager::register_routes() {
     });
     
     // API Read Config
-    server_->register_handler("/api/configs/read", [](const std::string& req) -> std::string {
+    server_->register_handler("/api/configs/read", [](const mm_rec::net::Request& req_obj) -> std::string {
+        const std::string& req = req_obj.body;
         std::string first_line = req.substr(0, req.find("\r\n"));
         size_t q_pos = first_line.find("?name=");
         if (q_pos == std::string::npos) return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing name parameter\"}");
@@ -612,7 +619,8 @@ void DashboardManager::register_routes() {
     });
 
     // API Create Config
-    server_->register_handler("/api/configs/create", [](const std::string& req) -> std::string {
+    server_->register_handler("/api/configs/create", [](const mm_rec::net::Request& req_obj) -> std::string {
+        const std::string& req = req_obj.body;
         auto get_json_val = [&](const std::string& key) -> std::string {
             std::string search = "\"" + key + "\":";
             size_t pos = req.find(search);
@@ -660,7 +668,7 @@ void DashboardManager::register_routes() {
     });
 
     // API List Datasets
-    server_->register_handler("/api/datasets", [](const std::string&) -> std::string {
+    server_->register_handler("/api/datasets", [](const mm_rec::net::Request&) -> std::string {
         std::stringstream ss;
         ss << "[";
         bool first = true;
@@ -679,7 +687,8 @@ void DashboardManager::register_routes() {
     });
 
     // API Upload Dataset
-    server_->register_handler("/api/datasets/upload", [](const std::string& req) -> std::string {
+    server_->register_handler("/api/datasets/upload", [](const mm_rec::net::Request& req_obj) -> std::string {
+        const std::string& req = req_obj.body;
         size_t header_end = req.find("\r\n\r\n");
         if (header_end == std::string::npos) return mm_rec::net::HttpServer::build_response(400, "text/plain", "Bad Request");
         
@@ -708,7 +717,7 @@ void DashboardManager::register_routes() {
     // --- Phase 3 Model & Inference ---
 
     // API List Models
-    server_->register_handler("/api/models", [](const std::string&) -> std::string {
+    server_->register_handler("/api/models", [](const mm_rec::net::Request&) -> std::string {
         std::vector<std::pair<std::string, uintmax_t>> models;
         try {
             // Root
@@ -742,8 +751,8 @@ void DashboardManager::register_routes() {
     });
 
     // API Download Model
-    server_->register_handler("/api/models/download", [](const std::string& req) -> std::string {
-        std::string first_line = req.substr(0, req.find("\r\n"));
+    server_->register_handler("/api/models/download", [](const mm_rec::net::Request& req) -> std::string {
+        std::string first_line = req.body.substr(0, req.body.find("\r\n"));
         size_t q_pos = first_line.find("?name=");
         if (q_pos == std::string::npos) return mm_rec::net::HttpServer::build_response(400, "text/plain", "Missing name");
         size_t end_pos = first_line.find(" ", q_pos);
@@ -763,16 +772,16 @@ void DashboardManager::register_routes() {
     });
 
     // API Inference
-    server_->register_handler("/api/inference", [](const std::string& req) -> std::string {
+    server_->register_handler("/api/inference", [](const mm_rec::net::Request& req) -> std::string {
         auto get_json_val = [&](const std::string& key) -> std::string {
             std::string search = "\"" + key + "\":";
-            size_t pos = req.find(search);
+            size_t pos = req.body.find(search);
              if (pos == std::string::npos) return "";
-            size_t start = req.find("\"", pos + search.length());
+            size_t start = req.body.find("\"", pos + search.length());
              if (start == std::string::npos) return ""; 
              start++;
-            size_t end = req.find("\"", start);
-            return req.substr(start, end - start);
+            size_t end = req.body.find("\"", start);
+            return req.body.substr(start, end - start);
         };
 
         std::string model_name = get_json_val("model");
@@ -828,9 +837,12 @@ void DashboardManager::register_routes() {
             Tensor input = Tensor::zeros({1, 1});
             input.data()[0] = (float)tokens[i];
             g_inference.model->forward(input);
+            if (!req.is_connected()) { LOG_INFO("Client disconnected during context ingest"); return ""; }
         }
         
         for(int i=0; i<max_new_tokens; ++i) {
+            if (!req.is_connected()) { LOG_INFO("Client disconnected during generation"); return ""; }
+
             Tensor input = Tensor::zeros({1, 1});
             input.data()[0] = (float)current_token;
             Tensor logits = g_inference.model->forward(input);
