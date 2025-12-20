@@ -1,6 +1,9 @@
 #pragma once
 
 #include "mm_rec/utils/logger.h"
+#include "mm_rec/utils/thread_pool.h" 
+#include "mm_rec/utils/connection_manager.h" // New
+#include "mm_rec/utils/traffic_manager.h"    // New
 #include <string>
 #include <functional>
 #include <map>
@@ -15,10 +18,12 @@
 #include <mutex>
 #include <condition_variable>
 #include <future>
+#include <set>
 
 #ifndef _WIN32
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h> 
 #include <unistd.h>
 #include <fcntl.h>
 #else
@@ -31,72 +36,13 @@ namespace mm_rec {
 
 namespace net {
 
-// Simple Thread Pool
-class ThreadPool {
-    // ... (keep existing ThreadPool implementation) ...
-public:
-    ThreadPool(size_t threads) : stop_(false) {
-        for(size_t i = 0; i < threads; ++i)
-            workers_.emplace_back(
-                [this] {
-                    for(;;) {
-                        std::function<void()> task;
-                        {
-                            std::unique_lock<std::mutex> lock(this->queue_mutex_);
-                            this->condition_.wait(lock,
-                                [this]{ return this->stop_ || !this->tasks_.empty(); });
-                            if(this->stop_ && this->tasks_.empty())
-                                return;
-                            task = std::move(this->tasks_.front());
-                            this->tasks_.pop();
-                        }
-                        task();
-                    }
-                }
-            );
-    }
-    // ... (rest of ThreadPool) ...
-    // destrctor etc are fine
-    template<class F, class... Args>
-    auto enqueue(F&& f, Args&&... args) 
-        -> std::future<typename std::invoke_result<F, Args...>::type> {
-        using return_type = typename std::invoke_result<F, Args...>::type;
-
-        auto task = std::make_shared<std::packaged_task<return_type()>>(
-            std::bind(std::forward<F>(f), std::forward<Args>(args)...)
-        );
-        std::future<return_type> res = task->get_future();
-        {
-            std::unique_lock<std::mutex> lock(queue_mutex_);
-            if(stop_)
-                throw std::runtime_error("enqueue on stopped ThreadPool");
-            tasks_.emplace([task](){ (*task)(); });
-        }
-        condition_.notify_one();
-        return res;
-    }
-
-    ~ThreadPool() {
-        {
-            std::unique_lock<std::mutex> lock(queue_mutex_);
-            stop_ = true;
-        }
-        condition_.notify_all();
-        for(std::thread &worker: workers_)
-            worker.join();
-    }
-private:
-    std::vector<std::thread> workers_;
-    std::queue<std::function<void()>> tasks_;
-    std::mutex queue_mutex_;
-    std::condition_variable condition_;
-    bool stop_;
-};
-
 struct HttpServerConfig {
     int port = 8085;
     size_t threads = 4;
     int timeout_sec = 3;
+    size_t max_connections = 100;
+    int max_req_per_min = 1000;
+    int throttle_ms = 0; // Speed control
 };
 
 
@@ -120,7 +66,12 @@ public:
     using Middleware = std::function<std::string(const Request&, NextFn)>;
 
     HttpServer(const HttpServerConfig& config) 
-        : config_(config), running_(false), pool_(config.threads) {
+        : config_(config), 
+          running_(false), 
+          pool_(config.threads),
+          conn_manager_(config.max_connections),
+          traffic_manager_(config.max_req_per_min, config.throttle_ms)
+    {
 #ifdef _WIN32
         WSADATA wsaData;
         WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -255,7 +206,12 @@ private:
     std::mutex handlers_mutex_;
     std::vector<Middleware> middlewares_;
     std::mutex middlewares_mutex_;
+    
+    // Components
     ThreadPool pool_;
+    ConnectionManager conn_manager_;
+    TrafficManager traffic_manager_;
+    
     std::atomic<bool> listener_started_{false};  // Track listener thread startup
 
     void listener_loop() {
@@ -278,16 +234,49 @@ private:
              if (new_socket < 0) continue;
 #endif
 
+            // 1. Connection Limit Check
+            char client_ip[INET_ADDRSTRLEN] = "";
+            inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
+            std::string ip_str(client_ip);
+
+            if (!conn_manager_.accept_connection(ip_str)) {
+#ifndef _WIN32
+                close(new_socket);
+#else
+                closesocket(new_socket);
+#endif
+                continue; // Reject cleanly (or send 503 if we want to be polite, but close is faster for DoS)
+            }
+
             // Offload to thread pool
-            pool_.enqueue([this, new_socket] {
-                this->handle_client(new_socket);
+            pool_.enqueue([this, new_socket, ip_str] {
+                // RAII-style connection counting would be better, but strict manual decrement is fine for this scope
+                this->handle_client(new_socket, ip_str);
+                conn_manager_.close_connection(ip_str);
             });
         }
     }
 
-    void handle_client(int socket) {
+    void handle_client(int socket, const std::string& client_ip) {
         
-        // PRODUCTION SAFETY: Set timeouts
+        // 2. Traffic Throttling (Speed Control)
+        traffic_manager_.apply_throttling();
+
+        // 3. Rate Limit Check
+        if (!traffic_manager_.allowed(client_ip)) {
+             // Too Many Requests
+             std::string response = build_response(429, "text/plain", "429 Too Many Requests");
+#ifndef _WIN32
+            send(socket, response.c_str(), response.size(), 0);
+            close(socket);
+#else
+            send(socket, response.c_str(), static_cast<int>(response.size()), 0);
+            closesocket(socket);
+#endif
+            return;
+        }
+
+        // --- Standard Handling (Timeouts, Read, Dispatch) ---
 #ifdef _WIN32
         DWORD timeout = config_.timeout_sec * 1000;
         setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));

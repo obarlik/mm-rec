@@ -75,6 +75,11 @@ int cmd_server(int argc, char* argv[]) {
     int threads = server_conf.get<int>("threads", 4);
     int timeout = server_conf.get<int>("timeout", 3);
     
+    // New Management Configs
+    int max_connections = server_conf.get<int>("max_connections", 100);
+    int rate_limit = server_conf.get<int>("rate_limit", 1000);
+    int throttle_ms = server_conf.get<int>("throttle_ms", 0);
+    
     bool daemon_mode = false;
     for (int i = 0; i < argc; ++i) {
         if (std::string(argv[i]) == "--daemon") {
@@ -107,6 +112,7 @@ int cmd_server(int argc, char* argv[]) {
             exit(0);
         }
         
+        // Close standard file descriptors
         close(STDIN_FILENO);
         close(STDOUT_FILENO);
         close(STDERR_FILENO);
@@ -141,6 +147,9 @@ int cmd_server(int argc, char* argv[]) {
     config.port = port;
     config.threads = threads;
     config.timeout_sec = timeout;
+    config.max_connections = max_connections;
+    config.max_req_per_min = rate_limit;
+    config.throttle_ms = throttle_ms;
     
     DashboardManager::instance().start(config);
     
