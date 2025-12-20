@@ -62,10 +62,32 @@ int cmd_train(int argc, char* argv[]) {
 
     std::string config_path = argv[1];
     std::string data_path = argv[2];
+    std::string run_name = "default_run";
     
-    // --- 1. Setup Logging ---
-    Logger::instance().start_writer("train.log", LogLevel::DEBUG);
+    // Parse optional args
+    for (int i = 3; i < argc; ++i) {
+        std::string arg = argv[i];
+        if ((arg == "--run-name" || arg == "-n") && i + 1 < argc) {
+            run_name = argv[++i];
+        }
+    }
+    
+    // --- Run Management Setup ---
+    namespace fs = std::filesystem;
+    std::string runs_dir = "runs";
+    std::string run_dir = runs_dir + "/" + run_name;
+    
+    if (!fs::exists(runs_dir)) fs::create_directory(runs_dir);
+    if (!fs::exists(run_dir)) fs::create_directory(run_dir);
+    else {
+        // If reusing run, maybe we want to append? 
+        // For now, simple directory existence is fine.
+    }
+    
+    // --- 1. Setup Logging (Redirect to Run Dir) ---
+    Logger::instance().start_writer(run_dir + "/train.log", LogLevel::DEBUG);
     ui::print_header("Adaptive Curriculum Training (Online)");
+    ui::info("Run Directory: " + run_dir);
 
     // --- 2. Initialize Backend & Hardware ---
     if (VulkanBackend::get().init()) {
@@ -191,8 +213,8 @@ int cmd_train(int argc, char* argv[]) {
     MemoryManager::instance().mark_persistent();
     
     // --- 7. Checkpoint Resume ---
-    std::string latest_ckpt_path = "checkpoint_latest.bin";
-    std::string best_ckpt_path = "checkpoint_best.bin";
+    std::string latest_ckpt_path = run_dir + "/checkpoint_latest.bin";
+    std::string best_ckpt_path = run_dir + "/checkpoint_best.bin";
     int start_epoch = 1;
     float best_loss = 1e9;
     
@@ -203,27 +225,34 @@ int cmd_train(int argc, char* argv[]) {
             start_epoch = loaded_meta.epoch + 1;
             best_loss = loaded_meta.loss;
             ui::success("Resumed from Epoch " + std::to_string(loaded_meta.epoch) + " (Loss: " + std::to_string(loaded_meta.loss) + ")");
+        } else {
+            ui::info("No previous checkpoint found in " + run_dir);
         }
     } catch (...) {
         ui::warning("Failed to resume. Starting fresh.");
     }
     
-    // Save initial state
-    CheckpointMetadata init_meta;
-    init_meta.epoch = 0;
-    init_meta.learning_rate = learning_rate;
-    CheckpointManager::save_checkpoint(latest_ckpt_path, model, init_meta);
+    // Save initial state (if new)
+    if (start_epoch == 1) {
+        CheckpointMetadata init_meta;
+        init_meta.epoch = 0;
+        init_meta.learning_rate = learning_rate;
+        CheckpointManager::save_checkpoint(latest_ckpt_path, model, init_meta);
+    }
 
-    // --- 8. Metrics ---
+    // --- 8. Metrics (Redirect to Run Dir) ---
     bool enable_metrics = true;
     for(int i=0; i<argc; ++i) if(std::string(argv[i]) == "--no-metrics") enable_metrics = false;
     
     if (enable_metrics) {
+        // Configure Dashboard History Path
+        DashboardManager::instance().set_history_path(run_dir + "/dashboard_history.csv");
+        
         MetricsSamplingConfig sampling;
         sampling.enabled = true;
         sampling.interval = 10;
-        MetricsManager::instance().start_writer("training_metrics.bin", sampling);
-        ui::info("Metrics logging enabled.");
+        MetricsManager::instance().start_writer(run_dir + "/training_metrics.bin", sampling);
+        ui::info("Metrics logging enabled -> " + run_dir);
     }
 
     // --- 9. Training Loop ---
@@ -330,7 +359,7 @@ int cmd_train(int argc, char* argv[]) {
     CheckpointMetadata final_meta;
     final_meta.epoch = max_iterations;
     final_meta.learning_rate = learning_rate;
-    CheckpointManager::save_checkpoint("kernel_adaptive_final.bin", model, final_meta);
+    CheckpointManager::save_checkpoint(run_dir + "/kernel_adaptive_final.bin", model, final_meta);
 
     MetricsManager::instance().stop_writer();
     Logger::instance().stop_writer();

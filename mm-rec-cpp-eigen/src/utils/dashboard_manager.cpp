@@ -18,8 +18,15 @@ DashboardManager& DashboardManager::instance() {
 
 DashboardManager::DashboardManager() {
     // Initialize standard/safe values
-    // Open history file in append mode
-    history_file_.open("dashboard_history.csv", std::ios::app);
+    // File opening deferred to set_log_path or lazy init
+}
+
+void DashboardManager::set_history_path(const std::string& path) {
+    std::lock_guard<std::mutex> lock(history_mtx_);
+    if (history_file_.is_open()) {
+        history_file_.close();
+    }
+    history_file_.open(path, std::ios::app);
 }
 
 DashboardManager::~DashboardManager() {

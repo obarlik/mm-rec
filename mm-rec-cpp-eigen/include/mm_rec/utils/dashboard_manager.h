@@ -34,6 +34,7 @@ public:
     void stop();
     
     // Update methods for workers
+    void set_history_path(const std::string& path);
     void update_training_stats(float loss, float lr, float speed, int step);
     void update_system_stats(size_t mem_mb);
     
