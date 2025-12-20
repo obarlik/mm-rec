@@ -17,6 +17,20 @@ BINARY="$PROJECT_ROOT/mm_rec"
 PID_FILE="/tmp/mm_rec_server.pid"
 LOG_FILE="/tmp/mm_rec_server.log"
 
+# Parse port from args for verification
+PORT=8085
+for i in "$@"; do
+    if [[ "$i" == "--port"* ]]; then
+        # Handle --port=1234 format if used, or assume next arg (simplified)
+        continue
+    fi
+     # Simple check: if prev arg was --port, this is the port
+    if [[ "$PREV" == "--port" ]]; then
+        PORT="$i"
+    fi
+    PREV="$i"
+done
+
 echo -e "${COLOR_CYAN}========================================${COLOR_RESET}"
 echo -e "${COLOR_CYAN}  MM-REC Server Daemonizer${COLOR_RESET}"
 echo -e "${COLOR_CYAN}========================================${COLOR_RESET}"
@@ -55,7 +69,8 @@ rm -f "$PID_FILE"
 # Start the binary
 # We don't need 'nohup' or '&' because the binary self-daemonizes (double-fork)
 # But we suppress output to avoid clutter
-"$BINARY" server --daemon > /dev/null 2>&1
+# Pass any extra arguments to the binary (like --port, --threads)
+"$BINARY" server --daemon "$@" > /dev/null 2>&1
 
 # Wait for PID file to be created by the daemon
 echo -n "Waiting for daemon..."
@@ -78,9 +93,9 @@ SERVER_PID=$(cat "$PID_FILE")
 if ps -p $SERVER_PID > /dev/null 2>&1; then
     echo -e "${COLOR_GREEN}✓${COLOR_RESET} Server started successfully"
     echo -e "  ${COLOR_CYAN}→${COLOR_RESET} PID: $SERVER_PID"
-    echo -e "  ${COLOR_CYAN}→${COLOR_RESET} Dashboard: http://localhost:8085"
+    echo -e "  ${COLOR_CYAN}→${COLOR_RESET} Dashboard: http://localhost:$PORT"
     echo -e "  ${COLOR_CYAN}→${COLOR_RESET} Logs: $LOG_FILE"
-    echo -e "  ${COLOR_CYAN}→${COLOR_RESET} Stop:scripts/stop_server.sh"
+    echo -e "  ${COLOR_CYAN}→${COLOR_RESET} Stop: scripts/stop_server.sh"
 else
     echo -e "${COLOR_RED}✗${COLOR_RESET} Server failed to start"
     echo -e "${COLOR_YELLOW}→${COLOR_RESET} Check logs: $LOG_FILE"
@@ -93,7 +108,7 @@ echo -e "${COLOR_CYAN}[3/3]${COLOR_RESET} Verification..."
 sleep 1
 
 # Test dashboard
-if curl -s http://localhost:8085/api/stats > /dev/null 2>&1; then
+if curl -s http://localhost:$PORT/api/stats > /dev/null 2>&1; then
     echo -e "${COLOR_GREEN}✓${COLOR_RESET} Dashboard is responding"
 else
     echo -e "${COLOR_YELLOW}⚠${COLOR_RESET}  Dashboard may still be initializing..."

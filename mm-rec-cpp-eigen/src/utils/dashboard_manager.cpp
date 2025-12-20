@@ -34,29 +34,36 @@ DashboardManager::~DashboardManager() {
     stop();
 }
 
-bool DashboardManager::start(int base_port) {
+bool DashboardManager::start(const net::HttpServerConfig& base_config) {
     if (server_) return true; // Already running
 
     int max_retries = 10;
     bool success = false;
 
     for (int i = 0; i < max_retries; ++i) {
-        int port = base_port + i;
-        server_ = std::make_unique<mm_rec::net::HttpServer>(port);
-        register_routes();
+        // Create a copy of config for this attempt
+        net::HttpServerConfig current_config = base_config;
+        current_config.port = base_config.port + i;
         
-        if (server_->start()) {
-            std::string msg = "Global Dashboard started on port " + std::to_string(port);
-            LOG_INFO(msg);
-            mm_rec::ui::success(msg);
+        try {
+            server_ = std::make_unique<mm_rec::net::HttpServer>(current_config);
+            register_routes();
             
-            if (port != base_port) {
-                std::string fallback_msg = "(Port " + std::to_string(base_port) + " was busy)";
-                LOG_INFO(fallback_msg);
-                mm_rec::ui::warning(fallback_msg);
+            if (server_->start()) {
+                std::string msg = "Global Dashboard started on port " + std::to_string(current_config.port);
+                LOG_INFO(msg);
+                mm_rec::ui::success(msg);
+                
+                if (current_config.port != base_config.port) {
+                    std::string fallback_msg = "(Port " + std::to_string(base_config.port) + " was busy)";
+                    LOG_INFO(fallback_msg);
+                    mm_rec::ui::warning(fallback_msg);
+                }
+                success = true;
+                break;
             }
-            success = true;
-            break;
+        } catch (...) {
+            server_.reset();
         }
         
         // Failed, try next
@@ -65,7 +72,7 @@ bool DashboardManager::start(int base_port) {
 
     if (!success) {
         LOG_ERROR("Failed to start Global Dashboard on any port " + 
-                 std::to_string(base_port) + "-" + std::to_string(base_port + max_retries - 1));
+                 std::to_string(base_config.port) + "-" + std::to_string(base_config.port + max_retries - 1));
     }
     return success;
 }

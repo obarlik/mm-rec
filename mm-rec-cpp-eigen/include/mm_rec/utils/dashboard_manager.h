@@ -29,8 +29,14 @@ class DashboardManager {
 public:
     static DashboardManager& instance();
 
-    // Start the background server
-    bool start(int port = 8085);
+    // Start the dashboard server
+    bool start(int port = 8085) {
+        net::HttpServerConfig config;
+        config.port = port;
+        return start(config);
+    }
+
+    bool start(const net::HttpServerConfig& config);
     void stop();
     
     // Update methods for workers

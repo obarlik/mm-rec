@@ -40,6 +40,7 @@ compile_commands.json
 *.txt
 !config*.txt
 !CMakeLists.txt
+!server_config.txt
 
 # IDE
 .vscode/
@@ -47,3 +48,4 @@ compile_commands.json
 
 # Debug
 symbols.txt
+server_config.ini

@@ -19,6 +19,7 @@
 #include <atomic>
 #include <thread>
 #include <fstream>
+#include <filesystem>
 
 // Unix daemon headers
 #ifndef _WIN32
@@ -28,13 +29,65 @@
 #include <fcntl.h>
 #endif
 
+// Simple JSON parser would be heavy, let's use a robust property loader + Env vars
+#include <cstdlib> // getenv
+
 using namespace mm_rec;
 using namespace mm_rec::ui;
 
-// Global job instance (simple single-job server for now)
+// Global job instance
 static std::unique_ptr<JobTraining> current_job;
 
+struct ServerSettings {
+    int port = 8085;
+    int threads = 4;
+    int timeout = 3;
+};
+
+class ServerConfigLoader {
+public:
+    static ServerSettings load(int argc, char* argv[]) {
+        ServerSettings settings;
+        
+        // 1. Load from Config File (server_config.ini)
+        std::ifstream config_file("server_config.ini");
+        if (config_file.is_open()) {
+            std::cout << "Loading config from server_config.ini...\n"; // Debug
+            std::string line;
+            while (std::getline(config_file, line)) {
+                if (line.empty() || line[0] == '#' || line[0] == ';') continue;
+                std::stringstream ss(line);
+                std::string key, val;
+                if (std::getline(ss, key, '=') && std::getline(ss, val)) {
+                    // Trim key/val logic could be added here if needed
+                    if (key == "port") { 
+                        try { settings.port = std::stoi(val); std::cout << "  Config Port: " << settings.port << "\n"; } catch(...) {}
+                    }
+                    else if (key == "threads") try { settings.threads = std::stoi(val); } catch(...) {}
+                    else if (key == "timeout") try { settings.timeout = std::stoi(val); } catch(...) {}
+                }
+            }
+        }
+
+        // 2. Load from Environment Variables (Docker/Cloud friendly)
+        if (const char* env_port = std::getenv("MM_REC_PORT")) settings.port = std::stoi(env_port);
+        if (const char* env_threads = std::getenv("MM_REC_THREADS")) settings.threads = std::stoi(env_threads);
+        if (const char* env_timeout = std::getenv("MM_REC_TIMEOUT")) settings.timeout = std::stoi(env_timeout);
+
+        // 3. Load from CLI Args (Overrides everything)
+        for (int i = 0; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg == "--port" && i + 1 < argc) settings.port = std::stoi(argv[++i]);
+            else if (arg == "--threads" && i + 1 < argc) settings.threads = std::stoi(argv[++i]);
+            else if (arg == "--timeout" && i + 1 < argc) settings.timeout = std::stoi(argv[++i]);
+        }
+
+        return settings;
+    }
+};
+
 void print_help() {
+    // ... existing help ...
     std::cout << "\n" << ui::color::BOLD << "Training Management:" << ui::color::RESET << "\n";
     std::cout << "  list                              List all training runs\n";
     std::cout << "  info <run_name>                   Show detailed run information\n";
@@ -47,11 +100,15 @@ void print_help() {
     std::cout << "  tune                              Run hardware auto-tuner\n";
     std::cout << "  help                              Show this help\n";
     std::cout << "  exit                              Shutdown server\n";
+    std::cout << "\n" << ui::color::BOLD << "Configuration Precedence:" << ui::color::RESET << "\n";
+    std::cout << "  1. CLI Args (--port, --threads)\n";
+    std::cout << "  2. Env Vars (MM_REC_PORT)\n";
+    std::cout << "  3. Config File (server_config.txt)\n";
     std::cout << "\n";
 }
 
 int cmd_server(int argc, char* argv[]) {
-    // Check for --daemon flag
+    // Determine daemon mode strictly from args first
     bool daemon_mode = false;
     for (int i = 0; i < argc; ++i) {
         if (std::string(argv[i]) == "--daemon") {
@@ -59,9 +116,13 @@ int cmd_server(int argc, char* argv[]) {
             break;
         }
     }
+
+    // Load Configuration
+    ServerSettings settings = ServerConfigLoader::load(argc, argv);
     
 #ifdef _WIN32
     if (daemon_mode) {
+// ... rest remains same ...
         ui::warning("Daemon mode is not supported on Windows yet. Running in console mode.");
         daemon_mode = false; // Fallback to normal mode
     }
@@ -79,7 +140,8 @@ int cmd_server(int argc, char* argv[]) {
             // Parent exits immediately - this prevents zombie!
             // Child is now orphaned and adopted by init
             std::cout << "✓ Daemon started (PID: " << pid << ")\n";
-            std::cout << "  Dashboard: http://localhost:8085\n";
+            std::cout << "  Dashboard: http://localhost:" << settings.port << "\n";
+            std::cout << "  Threads: " << settings.threads << ", Timeout: " << settings.timeout << "s\n";
             exit(0);  // Parent dies, no zombie!
         }
         
@@ -128,11 +190,19 @@ int cmd_server(int argc, char* argv[]) {
 
     if (!daemon_mode) {
         ui::print_header("MM-Rec Interactive Server");
+        ui::info("Port: " + std::to_string(settings.port));
+        ui::info("Threads: " + std::to_string(settings.threads));
+        ui::info("Timeout: " + std::to_string(settings.timeout));
         ui::info("Type 'help' for commands.");
     }
     
     // Start Dashboard
-    DashboardManager::instance().start(8085);
+    net::HttpServerConfig config;
+    config.port = settings.port;
+    config.threads = settings.threads;
+    config.timeout_sec = settings.timeout;
+    
+    DashboardManager::instance().start(config);
     
     // Daemon mode: just wait for signal
     if (daemon_mode) {
