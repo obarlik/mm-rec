@@ -129,6 +129,35 @@ constexpr char DASHBOARD_HTML[] = R"HTML(
             <h2>System Performance (Stall)</h2>
             <div style="height: 200px;"><canvas id="perfChart"></canvas></div>
         </div>
+        
+        <!-- Hybrid Metrics Card -->
+        <div class="card full-width">
+            <h2>Hybrid Execution (CPU <-> GPU)</h2>
+            <div style="display: flex; align-items: center; gap: 20px;">
+                <div style="flex: 1;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                        <span>Workload Distribution</span>
+                        <span><span id="gpu-ratio-val">50</span>% GPU</span>
+                    </div>
+                    <div style="background: #334155; height: 20px; border-radius: 10px; overflow: hidden; position: relative;">
+                        <!-- CPU portion (Left, Blue) -->
+                        <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 100%; background: #3b82f6;"></div>
+                        <!-- GPU portion (Right, Purple overlay) -->
+                        <div id="gpu-bar" style="position: absolute; left: 0; top: 0; bottom: 0; width: 50%; background: #a855f7; transition: width 0.5s;"></div>
+                        <!-- Text Overlay -->
+                        <div style="position: absolute; width: 100%; text-align: center; font-size: 12px; line-height: 20px; font-weight: bold; color: white; mix-blend-mode: difference;">
+                            CPU (Left) vs GPU (Right)
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="flex: 0 0 150px; text-align: center;">
+                    <div class="stat-label">Sync Delta</div>
+                    <div class="stat-value" id="sync-delta" style="font-size: 1.5rem;">0.0 ms</div>
+                    <div style="font-size: 0.8rem; color: #94a3b8;">(Lower is better)</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <style>
@@ -300,6 +329,22 @@ constexpr char DASHBOARD_HTML[] = R"HTML(
                 const safeInt = (val) => val != null ? val : '--';
                 
                 document.getElementById('loss').innerText = safeFloat(data.loss, 4);
+                
+                // Update Hybrid Metrics
+                if (data.gpu_ratio != null) {
+                    const pct = (data.gpu_ratio * 100).toFixed(1);
+                    document.getElementById('gpu-bar').style.width = pct + "%";
+                    document.getElementById('gpu-ratio-val').innerText = pct;
+                }
+                if (data.sync_delta != null) {
+                    const delta = data.sync_delta.toFixed(2);
+                    const el = document.getElementById('sync-delta');
+                    el.innerText = delta + " ms";
+                    // Color code
+                    if (Math.abs(data.sync_delta) < 2.0) el.style.color = "#22c55e"; // Green
+                    else el.style.color = "#ef4444"; // Red
+                }
+
                 document.getElementById('epoch').innerText = safeInt(data.epoch);
                 document.getElementById('step').innerText = safeInt(data.step);
                 document.getElementById('lr').innerText = safeFloat(data.lr, 6);

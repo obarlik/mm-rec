@@ -50,6 +50,7 @@ enum class MetricType {
     CHECKPOINT_SAVE,
     MEMORY_USAGE,
     FLUX_BRAKE,
+    HYBRID_PERF,
     CUSTOM
 };
 

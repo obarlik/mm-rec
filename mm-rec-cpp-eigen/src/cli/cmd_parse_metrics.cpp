@@ -64,7 +64,7 @@ void export_trace_json(const std::vector<MetricEvent>& events, const std::string
         first = false;
         
         int type_idx = static_cast<int>(e.type);
-        std::string name = (type_idx >= 0 && type_idx < 9) ? type_names[type_idx] : "UNKNOWN";
+        std::string name = (type_idx >= 0 && type_idx <= 9) ? type_names[type_idx] : "UNKNOWN";
         
         // Manual JSON construction for speed (no dependency)
         // ts: timestamp in microseconds
@@ -88,6 +88,37 @@ void export_trace_json(const std::vector<MetricEvent>& events, const std::string
     ui::info("Open in browser: https://ui.perfetto.dev/ or chrome://tracing");
 }
 
+// CSV Export
+void export_csv(const std::vector<MetricEvent>& events, const std::string& out_path) {
+    std::ofstream ofs(out_path);
+    if (!ofs) {
+        ui::error("Failed to create CSV file: " + out_path);
+        return;
+    }
+    
+    // Header
+    ofs << "Type,Timestamp_US,Value1,Value2,Extra,Label\n";
+    
+    const char* type_names[] = {
+        "TRAIN", "INFER", "FORWARD", "BACKWARD", 
+        "OPTIM", "CKPT", "MEMORY", "BRAKE", "HYBRID", "CUSTOM"
+    };
+    
+    for (const auto& e : events) {
+        int type_idx = static_cast<int>(e.type);
+        std::string name = (type_idx >= 0 && type_idx <= 9) ? type_names[type_idx] : "UNKNOWN";
+        
+        ofs << name << ","
+            << e.timestamp_us << ","
+            << e.value1 << ","
+            << e.value2 << ","
+            << e.extra << ","
+            << "\"" << e.label << "\"\n";
+    }
+    
+    ui::success("CSV exported to: " + out_path);
+}
+
 int cmd_parse_metrics(int argc, char* argv[]) {
     if (argc < 2) {
         ui::error("Usage: mm_rec parse-metrics <metrics_file.bin> [--export-trace <out.json>]");
@@ -96,9 +127,15 @@ int cmd_parse_metrics(int argc, char* argv[]) {
     
     std::string metrics_path = argv[1];
     std::string trace_out_path = "";
+    std::string csv_out_path = "";
     
-    if (argc >= 4 && std::string(argv[2]) == "--export-trace") {
-        trace_out_path = argv[3];
+    for (int i=2; i<argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--export-trace" && i+1 < argc) {
+            trace_out_path = argv[++i];
+        } else if (arg == "--export-csv" && i+1 < argc) {
+            csv_out_path = argv[++i];
+        }
     }
     
     // Open binary file
@@ -142,12 +179,12 @@ int cmd_parse_metrics(int argc, char* argv[]) {
     std::map<std::string, MetricStats> stats;
     const char* type_names[] = {
         "TRAIN", "INFER", "FORWARD", "BACKWARD", 
-        "OPTIM", "CKPT", "MEMORY", "BRAKE", "CUSTOM"
+        "OPTIM", "CKPT", "MEMORY", "BRAKE", "HYBRID", "CUSTOM"
     };
 
     for (const auto& e : events) {
         int type_idx = static_cast<int>(e.type);
-        const char* type_str = (type_idx >= 0 && type_idx < 9) ? type_names[type_idx] : "UNKNOWN";
+        const char* type_str = (type_idx >= 0 && type_idx <= 9) ? type_names[type_idx] : "UNKNOWN";
         stats[type_str].add_value(e.value1); // Assuming value1 is the primary metric
     }
 
@@ -178,6 +215,11 @@ int cmd_parse_metrics(int argc, char* argv[]) {
     if (!trace_out_path.empty()) {
         ui::print_header("Trace Export");
         export_trace_json(events, trace_out_path);
+    }
+
+    if (!csv_out_path.empty()) {
+        ui::print_header("CSV Export");
+        export_csv(events, csv_out_path);
     }
     
     Logger::instance().stop_writer();

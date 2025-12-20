@@ -20,6 +20,10 @@ float DynamicBalancer::get_gpu_ratio() {
     return current_ratio.load(std::memory_order_relaxed);
 }
 
+double DynamicBalancer::get_sync_diff() {
+    return avg_diff.load(std::memory_order_relaxed);
+}
+
 void DynamicBalancer::report_metrics(double cpu_ms, double gpu_ms) {
     // We want cpu_ms == gpu_ms
     // If cpu_ms > gpu_ms, CPU is bottleneck -> Reduce CPU load (Increase GPU ratio)

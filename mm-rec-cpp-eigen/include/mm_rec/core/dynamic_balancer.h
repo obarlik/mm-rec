@@ -16,6 +16,10 @@ public:
     // Get the current optimal GPU ratio (0.0 - 1.0)
     static float get_gpu_ratio();
     
+    // Get the current time difference (CPU - GPU) in ms
+    // Near 0 means perfect balance. Positive means CPU is slow.
+    static double get_sync_diff();
+
     // Updates the ratio based on measured execution times
     // cpu_ms: Duration of CPU portion
     // gpu_ms: Duration of GPU portion

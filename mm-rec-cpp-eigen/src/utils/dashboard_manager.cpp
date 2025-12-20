@@ -3,6 +3,9 @@
 #include "mm_rec/utils/logger.h"
 #include "mm_rec/utils/ui.h" // [NEW] for console feedback
 #include "mm_rec/core/vulkan_backend.h"
+#include "mm_rec/core/vulkan_backend.h"
+#include "mm_rec/core/dynamic_balancer.h"
+#include "mm_rec/utils/metrics.h"
 #include <sstream>
 #include <iostream>
 
@@ -80,11 +83,25 @@ void DashboardManager::update_training_stats(float loss, float lr, float speed, 
         loss_history_.pop_front();
     }
     
-    // Persist to CSV: step,loss,lr,speed
-    if (history_file_.is_open()) {
-        history_file_ << step << "," << loss << "," << lr << "," << speed << "\n";
-        history_file_.flush();
-    }
+    // Persist to CSV: DISABLED (Use binary format + parser)
+    // if (history_file_.is_open()) { ... }
+    
+    // Log directly to High-Efficiency Binary format
+    // Value1: Ratio, Value2: Diff
+    float ratio = mm_rec::DynamicBalancer::get_gpu_ratio();
+    double diff = mm_rec::DynamicBalancer::get_sync_diff();
+    
+    // Log Training Stats to Metrics
+    mm_rec::MetricsManager::record(mm_rec::MetricType::TRAINING_STEP, loss, lr, step, "STEP");
+    
+    // Log Hybrid Stats
+    mm_rec::MetricsManager::record(
+        mm_rec::MetricType::HYBRID_PERF, 
+        ratio, 
+        static_cast<float>(diff), 
+        0, 
+        "HYBRID"
+    );
 }
 
 void DashboardManager::update_system_stats(size_t mem_mb) {
@@ -109,8 +126,15 @@ void DashboardManager::register_routes() {
         ss << "\"step\": " << stats_.current_step.load() << ",";
         ss << "\"total_steps\": " << stats_.total_steps.load() << ",";
         ss << "\"lr\": " << stats_.current_lr.load() << ",";
-        ss << "\"speed\": " << stats_.current_speed.load() << ",";
-        ss << "\"mem\": " << stats_.memory_usage_mb.load() << ",";
+        ss << "\"speed\": " << stats_.current_speed.load() << ","; // Original line
+        ss << "\"mem\": " << stats_.memory_usage_mb.load() << ","; // Original line
+        
+        // Hybrid Metrics
+        float ratio = mm_rec::DynamicBalancer::get_gpu_ratio();
+        double diff = mm_rec::DynamicBalancer::get_sync_diff();
+        ss << "\"gpu_ratio\": " << ratio << ",";
+        ss << "\"sync_delta\": " << diff << ",";
+        
         ss << "\"epoch\": 1,"; // simplified
         
         std::lock_guard<std::mutex> lock(history_mtx_);
