@@ -328,8 +328,10 @@ void DashboardManager::register_routes() {
          auto get_param = [&](const std::string& key) -> std::string {
              size_t pos = req.find(key + "=");
              if (pos == std::string::npos) return "";
-             size_t end = req.find('&', pos);
-             return req.substr(pos + key.size() + 1, end - (pos + key.size() + 1));
+             size_t start = pos + key.size() + 1;
+             size_t end = req.find_first_of("& \r\n", start);
+             if (end == std::string::npos) return req.substr(start);
+             return req.substr(start, end - start);
          };
 
          std::string run_name = get_param("name");
@@ -346,10 +348,21 @@ void DashboardManager::register_routes() {
          }
          
          std::string run_dir = RunManager::get_run_dir(run_name);
-         std::string config_path = run_dir + "/config.txt";
+         
+         // 1. Verify Config (Isolated)
+         std::string config_path = run_dir + "/config.ini";
+         if (!std::filesystem::exists(config_path)) {
+             config_path = run_dir + "/config.txt"; // Fallback
+         }
          
          if (!std::filesystem::exists(config_path)) {
               return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Missing config in run dir\"}");
+         }
+         
+         // 2. Verify Checkpoint (Data Integrity)
+         std::string checkpoint_path = run_dir + "/checkpoint.bin";
+         if (!std::filesystem::exists(checkpoint_path)) {
+              return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"No checkpoint found (cannot resume)\"}");
          }
 
          TrainingJobConfig config;
@@ -368,8 +381,10 @@ void DashboardManager::register_routes() {
          auto get_param = [&](const std::string& key) -> std::string {
              size_t pos = req.find(key + "=");
              if (pos == std::string::npos) return "";
-             size_t end = req.find('&', pos);
-             return req.substr(pos + key.size() + 1, end - (pos + key.size() + 1));
+             size_t start = pos + key.size() + 1;
+             size_t end = req.find_first_of("& \r\n", start);
+             if (end == std::string::npos) return req.substr(start);
+             return req.substr(start, end - start);
          };
 
          std::string run_name = get_param("name");
