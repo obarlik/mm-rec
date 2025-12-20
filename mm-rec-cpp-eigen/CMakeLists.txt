@@ -5,6 +5,33 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# ==========================================
+# AUTO-CLEANUP: Kill residual processes before build
+# ==========================================
+# This prevents port conflicts and zombie processes during development
+# Only runs once per configure to avoid interrupting builds
+set(CLEANUP_SCRIPT "${CMAKE_SOURCE_DIR}/../scripts/cleanup_silent.sh")
+set(CLEANUP_MARKER "${CMAKE_BINARY_DIR}/.cleanup_done")
+
+if(EXISTS ${CLEANUP_SCRIPT} AND NOT EXISTS ${CLEANUP_MARKER})
+    message(STATUS "🧹 Cleaning up residual processes...")
+    execute_process(
+        COMMAND bash ${CLEANUP_SCRIPT}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/..
+        RESULT_VARIABLE CLEANUP_RESULT
+    )
+    if(CLEANUP_RESULT EQUAL 0)
+        message(STATUS "✅ Pre-build cleanup done")
+        # Create marker file to skip cleanup on subsequent make calls
+        file(WRITE ${CLEANUP_MARKER} "cleanup completed")
+    endif()
+elseif(EXISTS ${CLEANUP_MARKER})
+    # Cleanup already done, skip silently
+else()
+    message(STATUS "ℹ️  Cleanup script not found, skipping")
+endif()
+# ==========================================
+
 # Build type
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)

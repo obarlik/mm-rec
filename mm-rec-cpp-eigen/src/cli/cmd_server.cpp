@@ -42,12 +42,38 @@ void print_help() {
 }
 
 int cmd_server(int argc, char* argv[]) {
+    // Check for --daemon flag
+    bool daemon_mode = false;
+    for (int i = 0; i < argc; ++i) {
+        if (std::string(argv[i]) == "--daemon") {
+            daemon_mode = true;
+            break;
+        }
+    }
+    
     ui::print_header("MM-Rec Interactive Server");
-    ui::info("Type 'help' for commands.");
+    
+    if (daemon_mode) {
+        ui::info("Running in daemon mode (no REPL)");
+        ui::info("Press Ctrl+C to stop");
+    } else {
+        ui::info("Type 'help' for commands.");
+    }
     
     // Start Dashboard immediately in idle mode
     DashboardManager::instance().start(8085);
     
+    // Daemon mode: just wait for signal
+    if (daemon_mode) {
+        // Keep running until signal received
+        while (!DashboardManager::instance().should_stop()) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+        DashboardManager::instance().stop();
+        return 0;
+    }
+    
+    // Interactive mode: REPL
     bool server_running = true;
     std::string line;
     

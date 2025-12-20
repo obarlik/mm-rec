@@ -77,8 +77,9 @@ int main(int argc, char* argv[]) {
     // For now, we disable it by default based on benchmark results.
     // SystemOptimizer::optimize_runtime();
 
-    // Start Global Dashboard (Production Mode)
-    DashboardManager::instance().start(8085);
+    // NOTE: Dashboard is now started only in 'server' mode
+    // See cmd_server.cpp for dashboard initialization
+
     
     // Check for explicit flag (simple check)
     for(int i=1; i<argc; ++i) {
