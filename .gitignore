@@ -174,3 +174,4 @@ mlruns/
 test_metrics/
 test_reports/
 !mm_rec/data/
+node_modules/
