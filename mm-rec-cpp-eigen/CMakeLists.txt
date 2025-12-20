@@ -144,6 +144,7 @@ set(UTILS_SOURCES
     src/utils/session.cpp
     src/utils/checkpoint.cpp
     src/utils/dashboard_manager.cpp
+    src/utils/run_manager.cpp
 )
 
 set(JOB_SOURCES

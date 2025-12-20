@@ -2,6 +2,7 @@
 #include "mm_rec/utils/dashboard_html.h"
 #include "mm_rec/utils/logger.h"
 #include "mm_rec/utils/ui.h" // [NEW] for console feedback
+#include "mm_rec/utils/run_manager.h"
 #include "mm_rec/core/vulkan_backend.h"
 #include "mm_rec/core/vulkan_backend.h"
 #include "mm_rec/core/dynamic_balancer.h"
@@ -208,6 +209,27 @@ void DashboardManager::register_routes() {
         json << "] }";
         
         return mm_rec::net::HttpServer::build_response(200, "application/json", json.str());
+    });
+    
+    // API Runs List
+    server_->register_handler("/api/runs", [](const std::string&) -> std::string {
+        auto runs = RunManager::list_runs();
+        std::stringstream ss;
+        ss << "[";
+        for (size_t i = 0; i < runs.size(); ++i) {
+            const auto& run = runs[i];
+            ss << "{";
+            ss << "\"name\": \"" << run.name << "\",";
+            ss << "\"status\": \"" << run.status_str << "\",";
+            ss << "\"epoch\": " << run.current_epoch << ",";
+            ss << "\"loss\": " << run.current_loss << ",";
+            ss << "\"best_loss\": " << run.best_loss << ",";
+            ss << "\"size_mb\": " << run.total_size_mb;
+            ss << "}";
+            if (i < runs.size() - 1) ss << ",";
+        }
+        ss << "]";
+        return mm_rec::net::HttpServer::build_response(200, "application/json", ss.str());
     });
 }
 

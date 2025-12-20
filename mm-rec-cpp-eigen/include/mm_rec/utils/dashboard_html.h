@@ -52,6 +52,7 @@ constexpr char DASHBOARD_HTML[] = R"HTML(
             <div style="display: flex; gap: 10px;">
                 <button id="histBtn" class="btn" style="background: #8b5cf6;" onclick="loadHistory()">LOAD HISTORY</button>
                 <button class="btn" style="background: #3b82f6;" onclick="openHwModal()">HARDWARE</button>
+                <button class="btn" style="background: #a855f7;" onclick="openRunsModal()">RUNS</button>
                 <button class="btn stop-btn" onclick="stopTraining()">STOP TRAINING</button>
             </div>
         </div>
@@ -72,6 +73,32 @@ constexpr char DASHBOARD_HTML[] = R"HTML(
                     <div class="hw-row"><strong>SIMD:</strong> <span id="hw-simd">-</span></div>
                     <div class="hw-row"><strong>Memory (Total):</strong> <span id="hw-ram">-</span></div>
                     <div class="hw-row"><strong>Compute Mode:</strong> <span id="hw-compute">-</span></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Runs Modal -->
+        <div id="runsModal" class="modal">
+            <div class="modal-content" style="width: 700px;">
+                <div class="modal-header">
+                    <h2>Training Runs</h2>
+                    <span class="close" onclick="closeRunsModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="border-bottom: 2px solid #334155;">
+                                <th style="padding: 10px; text-align: left;">Name</th>
+                                <th style="padding: 10px; text-align: left;">Status</th>
+                                <th style="padding: 10px; text-align: right;">Epoch</th>
+                                <th style="padding: 10px; text-align: right;">Loss</th>
+                                <th style="padding: 10px; text-align: right;">Size</th>
+                            </tr>
+                        </thead>
+                        <tbody id="runs-table-body">
+                            <tr><td colspan="5" style="text-align: center; padding: 20px;">Loading...</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -318,6 +345,47 @@ constexpr char DASHBOARD_HTML[] = R"HTML(
         }
         function closeHwModal() { modal.style.display = "none"; }
         window.onclick = function(event) { if (event.target == modal) closeHwModal(); }
+
+        // Runs Modal
+        const runsModal = document.getElementById('runsModal');
+        function openRunsModal() {
+            runsModal.style.display = 'block';
+            fetchRuns();
+        }
+        function closeRunsModal() { runsModal.style.display = 'none'; }
+        
+        async function fetchRuns() {
+            try {
+                const response = await fetch('/api/runs');
+                const runs = await response.json();
+                const tbody = document.getElementById('runs-table-body');
+                
+                if (runs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #94a3b8;">No runs found</td></tr>';
+                    return;
+                }
+                
+                tbody.innerHTML = runs.map(run => `
+                    <tr style="border-bottom: 1px solid #334155;">
+                        <td style="padding: 10px;">${run.name}</td>
+                        <td style="padding: 10px;">
+                            <span style="padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; background: ${
+                                run.status === 'RUNNING' ? '#22c55e' :
+                                run.status === 'COMPLETED' ? '#3b82f6' :
+                                run.status === 'FAILED' ? '#ef4444' : '#94a3b8'
+                            }; color: white;">${run.status}</span>
+                        </td>
+                        <td style="padding: 10px; text-align: right;">${run.epoch}</td>
+                        <td style="padding: 10px; text-align: right;">${run.loss > 0 ? run.loss.toFixed(3) : '-'}</td>
+                        <td style="padding: 10px; text-align: right;">${run.size_mb} MB</td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error('Failed to fetch runs:', err);
+                document.getElementById('runs-table-body').innerHTML = 
+                    '<tr><td colspan="5" style="text-align: center; padding: 20px; color: #ef4444;">Error loading runs</td></tr>';
+            }
+        }
 
         async function fetchStats() {
             try {
