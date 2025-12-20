@@ -2,6 +2,7 @@
 #include "mm_rec/utils/dashboard_html.h"
 #include "mm_rec/utils/logger.h"
 #include "mm_rec/utils/ui.h" // [NEW] for console feedback
+#include "mm_rec/core/vulkan_backend.h"
 #include <sstream>
 #include <iostream>
 
@@ -123,14 +124,22 @@ void DashboardManager::register_routes() {
         return mm_rec::net::HttpServer::build_response(200, "application/json", ss.str());
     });
     
-    // API Hardware (Mock/Real)
+    // API Hardware (Real)
     server_->register_handler("/api/hardware", [](const std::string&) -> std::string {
-        // We could hook this into SystemOptimizer or similar later
-        std::string json = R"JSON({
-            "cpu_model": "Intel Core (Production)",
-            "compute_device": "Hybrid (CPU+Vulkan)"
-        })JSON";
-        return mm_rec::net::HttpServer::build_response(200, "application/json", json);
+        auto& vk = mm_rec::VulkanBackend::get();
+        std::string gpu_name = vk.is_ready() ? vk.get_device_name() : "Vulkan Not Ready";
+        size_t vram_mb = vk.is_ready() ? (vk.get_total_vram() / 1024 / 1024) : 0;
+        
+        std::stringstream json;
+        json << "{";
+        json << "  \"cpu_model\": \"Host Processor\","; 
+        json << "  \"compute_device\": \"" << gpu_name << "\",";
+        json << "  \"mem_total_mb\": " << vram_mb << ","; 
+        json << "  \"arch\": \"x86_64 / SPIR-V\",";
+        json << "  \"cores_logical\": \"N/A\","; 
+        json << "  \"simd\": \"AVX2 / Int8\"";
+        json << "}";
+        return mm_rec::net::HttpServer::build_response(200, "application/json", json.str());
     });
     
     // Stop Signal

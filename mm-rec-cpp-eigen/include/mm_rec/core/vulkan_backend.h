@@ -491,6 +491,7 @@ private:
     std::atomic<size_t> allocated_bytes_{0};
     size_t total_vram_{0};
     size_t reserved_bytes_{0};
+    std::string device_name_ = "Unknown Vulkan Device";
 
     // --- Compute Pipeline Symbols ---
     VkResult (*vkCreateShaderModule)(VkDevice, const void*, const void*, VkShaderModule*) = nullptr; // void* for CreateInfo to lazy struct
@@ -539,6 +540,9 @@ public:
         reserved_bytes_ = mb * 1024 * 1024;
         std::cout << "[Vulkan] Reserved VRAM: " << mb << " MB" << std::endl;
     }
+
+    std::string get_device_name() const { return device_name_; }
+    size_t get_total_vram() const { return total_vram_; }
     
     void free_memory(VkDeviceMemory memory) {
         if (!device || !memory) return;
@@ -794,6 +798,8 @@ public:
             std::cout << "   GPU: " << props.deviceName << " | VRAM: " 
                       << std::fixed << std::setprecision(1) << (total_vram_ / (1024.0*1024.0*1024.0)) << " GB" << std::endl;
             std::cout << "   GPU Threads: " << props.limits.maxComputeWorkGroupInvocations << " (Max Concurrency per Block)" << std::endl;
+            
+            device_name_ = props.deviceName;
         }
         
         // Get Queue
