@@ -15,7 +15,20 @@ gibi sorunlara yol açıyordu.
 
 ### Çok Katmanlı Çözüm Sistemi
 
-#### 1. **Graceful Shutdown (C++ Signal Handlers)**
+#### 1. **CMake Otomatik Entegrasyon** (⭐ ÖNERİLEN)
+- **Her CMake çağrısında** otomatik cleanup
+- `cmake ..` veya `make` komutları cleanup'ı tetikler
+- Sessiz çalışır,human hataya yer bırakmaz
+- Zero configuration - hiçbir şey yapmanıza gerek yok!
+
+**Nasıl çalışır:**
+```bash
+cd mm-rec-cpp-eigen/build
+cmake ..  # Otomatik olarak cleanup yapar!
+make -j$(nproc)  # Safe to build
+```
+
+#### 2. **Graceful Shutdown (C++ Signal Handlers)**
 - `mm_rec_cli.cpp` ve diğer C++ uygulamalara signal handler eklendi
 - Ctrl+C (SIGINT), SIGTERM, SIGQUIT sinyalleri yakalanıyor
 - Dashboard server düzgünce kapatılıyor

@@ -10,14 +10,14 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # ==========================================
 # This prevents port conflicts and zombie processes during development
 # Only runs once per configure to avoid interrupting builds
-set(CLEANUP_SCRIPT "${CMAKE_SOURCE_DIR}/../scripts/cleanup_silent.sh")
+set(CLEANUP_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/cleanup_silent.sh")
 set(CLEANUP_MARKER "${CMAKE_BINARY_DIR}/.cleanup_done")
 
 if(EXISTS ${CLEANUP_SCRIPT} AND NOT EXISTS ${CLEANUP_MARKER})
     message(STATUS "🧹 Cleaning up residual processes...")
     execute_process(
         COMMAND bash ${CLEANUP_SCRIPT}
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/..
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         RESULT_VARIABLE CLEANUP_RESULT
     )
     if(CLEANUP_RESULT EQUAL 0)

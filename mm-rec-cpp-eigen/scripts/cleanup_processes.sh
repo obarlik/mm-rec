@@ -193,3 +193,7 @@ else
         echo -e "\n${COLOR_GREEN}✓${COLOR_RESET} No processes were running"
     fi
 fi
+
+# Always exit with success (cleanup is best-effort)
+exit 0
+

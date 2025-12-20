@@ -19,6 +19,12 @@
 #include <atomic>
 #include <thread>
 
+// Unix daemon headers
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 using namespace mm_rec;
 using namespace mm_rec::ui;
 
@@ -51,16 +57,62 @@ int cmd_server(int argc, char* argv[]) {
         }
     }
     
-    ui::print_header("MM-Rec Interactive Server");
-    
+    // Self-daemonize for nohup compatibility
     if (daemon_mode) {
-        ui::info("Running in daemon mode (no REPL)");
-        ui::info("Press Ctrl+C to stop");
+        // First fork
+        pid_t pid = fork();
+        if (pid < 0) {
+            std::cerr << "Fork failed!\n";
+            return 1;
+        }
+        
+        if (pid > 0) {
+            // Parent exits immediately - this prevents zombie!
+            // Child is now orphaned and adopted by init
+            std::cout << "✓ Daemon started (PID: " << pid << ")\n";
+            std::cout << "  Dashboard: http://localhost:8085\n";
+            exit(0);  // Parent dies, no zombie!
+        }
+        
+        // Child continues...
+        // Create new session (detach from controlling terminal)
+        if (setsid() < 0) {
+            return 1;
+        }
+        
+        // Second fork (optional but recommended for full daemon)
+        pid = fork();
+        if (pid < 0) {
+            return 1;
+        }
+        
+        if (pid > 0) {
+            // First child exits
+            exit(0);
+        }
+        
+        // Grand-child is now a proper daemon
+        // Close standard file descriptors
+        close(STDIN_FILENO);
+        close(STDOUT_FILENO);
+        close(STDERR_FILENO);
+        
+        // Redirect to /dev/null
+        open("/dev/null", O_RDONLY);  // stdin
+        open("/dev/null", O_WRONLY);  // stdout  
+        open("/dev/null", O_WRONLY);  // stderr
+        
+        // Change working directory to root (optional)
+        // chdir("/");
+        
+        // Clear file mode creation mask
+        umask(0);
     } else {
+        ui::print_header("MM-Rec Interactive Server");
         ui::info("Type 'help' for commands.");
     }
     
-    // Start Dashboard immediately in idle mode
+    // Start Dashboard
     DashboardManager::instance().start(8085);
     
     // Daemon mode: just wait for signal
