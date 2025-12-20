@@ -107,6 +107,7 @@ function(embed_resource target input_file)
         COMMENT "Embedding Resource: ${input_name} -> Object"
     )
     
+    set_source_files_properties(${output_file} PROPERTIES GENERATED TRUE)
     target_sources(${target} PRIVATE ${output_file})
 endfunction()
 
@@ -199,8 +200,7 @@ add_library(mm_rec_eigen STATIC
     ${DATA_SOURCES}
 )
 
-# Include generated dashboard assets
-target_include_directories(mm_rec_eigen PRIVATE ${CMAKE_BINARY_DIR}/src/dashboard)
+target_link_libraries(mm_rec_eigen dashboard_assets)
 
 
 target_link_libraries(mm_rec_eigen

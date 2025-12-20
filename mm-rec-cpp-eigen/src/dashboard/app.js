@@ -1,78 +1,77 @@
-<script>
 // Components
 function Sidebar() {
     return `
-        <div class="sidebar">
-            <div class="sidebar-header"><h1>MM-Rec</h1></div>
-            <nav class="sidebar-nav">
-                <a href="#/" class="nav-item" data-view="training">
-                    <i class="fas fa-chart-line"></i><span>Training</span>
-                </a>
-                <a href="#/runs" class="nav-item" data-view="runs">
-                    <i class="fas fa-list"></i><span>Runs</span>
-                </a>
-                <a href="#/hardware" class="nav-item" data-view="hardware">
-                    <i class="fas fa-microchip"></i><span>Hardware</span>
-                </a>
-            </nav>
-        </div>
+    <div class="sidebar">
+        <div class="sidebar-header"><h1>MM-Rec</h1></div>
+        <nav class="sidebar-nav">
+            <a href="#/" class="nav-item" data-view="training">
+                <i class="fas fa-chart-line"></i><span>Training</span>
+            </a>
+            <a href="#/runs" class="nav-item" data-view="runs">
+                <i class="fas fa-list"></i><span>Runs</span>
+            </a>
+            <a href="#/hardware" class="nav-item" data-view="hardware">
+                <i class="fas fa-microchip"></i><span>Hardware</span>
+            </a>
+        </nav>
+    </div>
     `;
 }
 
 function TopBar() {
     return `
-        <div class="top-bar">
-            <div class="top-bar-title">Training Dashboard</div>
-            <div>
-                <button class="btn btn-danger" onclick="fetch('/api/stop')">
-                    <i class="fas fa-stop"></i> Stop
-                </button>
-            </div>
+    <div class="top-bar">
+        <div class="top-bar-title">Training Dashboard</div>
+        <div>
+            <button class="btn btn-danger" onclick="fetch('/api/stop')">
+                <i class="fas fa-stop"></i> Stop
+            </button>
         </div>
+    </div>
     `;
 }
 
 function TrainingView() {
     return `
-        <div id="training-view" class="view active">
-            <div class="cards">
-                <div class="card"><div class="card-title">Loss</div><div class="card-value" id="loss">--</div></div>
-                <div class="card"><div class="card-title">Step</div><div class="card-value" id="step">--</div></div>
-                <div class="card"><div class="card-title">Speed</div><div class="card-value" id="speed">--</div></div>
-                <div class="card"><div class="card-title">GPU Ratio</div><div class="card-value" id="gpu_ratio">--</div></div>
-            </div>
-            <div class="card"><canvas id="chart"></canvas></div>
+    <div id="training-view" class="view active">
+        <div class="cards">
+            <div class="card"><div class="card-title">Loss</div><div class="card-value" id="loss">--</div></div>
+            <div class="card"><div class="card-title">Step</div><div class="card-value" id="step">--</div></div>
+            <div class="card"><div class="card-title">Speed</div><div class="card-value" id="speed">--</div></div>
+            <div class="card"><div class="card-title">GPU Ratio</div><div class="card-value" id="gpu_ratio">--</div></div>
         </div>
+        <div class="card"><canvas id="chart"></canvas></div>
+    </div>
     `;
 }
 
 function RunsView() {
     return `
-        <div id="runs-view" class="view">
-            <div class="card">
-                <h2>Training Runs</h2>
-                <table><thead><tr>
-                    <th>Name</th><th>Status</th><th>Epoch</th><th>Loss</th><th>Size</th><th>Actions</th>
-                </tr></thead>
-                <tbody id="runs-table"><tr><td colspan="6">Loading...</td></tr></tbody></table>
-            </div>
+    <div id="runs-view" class="view">
+        <div class="card">
+            <h2>Training Runs</h2>
+            <table><thead><tr>
+                <th>Name</th><th>Status</th><th>Epoch</th><th>Loss</th><th>Size</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="runs-table"><tr><td colspan="6">Loading...</td></tr></tbody></table>
         </div>
+    </div>
     `;
 }
 
 function HardwareView() {
     return `
-        <div id="hardware-view" class="view">
-            <div class="card">
-                <h2>Hardware</h2>
-                <table>
-                    <tr><td>Processor</td><td id="hw-cpu">Loading...</td></tr>
-                    <tr><td>Architecture</td><td id="hw-arch">-</td></tr>
-                    <tr><td>Memory</td><td id="hw-ram">-</td></tr>
-                    <tr><td>Compute</td><td id="hw-compute">-</td></tr>
-                </table>
-            </div>
+    <div id="hardware-view" class="view">
+        <div class="card">
+            <h2>Hardware</h2>
+            <table>
+                <tr><td>Processor</td><td id="hw-cpu">Loading...</td></tr>
+                <tr><td>Architecture</td><td id="hw-arch">-</td></tr>
+                <tr><td>Memory</td><td id="hw-ram">-</td></tr>
+                <tr><td>Compute</td><td id="hw-compute">-</td></tr>
+            </table>
         </div>
+    </div>
     `;
 }
 
@@ -110,10 +109,26 @@ router
         showView('runs');
         const r = await fetch('/api/runs');
         const runs = await r.json();
-        document.getElementById('runs-table').innerHTML = runs.map(x => 
-            `<tr><td>${x.name}</td><td><span class="badge badge-${x.status === 'RUNNING' ? 'success' : 'muted'}">${x.status}</span></td>
-            <td>${x.epoch}</td><td>${x.loss > 0 ? x.loss.toFixed(3) : '-'}</td><td>${x.size_mb} MB</td></tr>`
-        ).join('');
+        document.getElementById('runs-table').innerHTML = runs.map(x => {
+            let actions = '';
+            // Only show actions if status is known
+            if (x.status === 'RUNNING') {
+                actions = `<button onclick="stopRun('${x.name}')" class="btn btn-sm btn-danger" title="Stop"><i class="fas fa-stop"></i></button>`;
+            } else {
+                actions = `
+                    <button onclick="resumeRun('${x.name}')" class="btn btn-sm btn-primary" title="Resume"><i class="fas fa-play"></i></button>
+                    <button onclick="deleteRun('${x.name}')" class="btn btn-sm btn-danger" title="Delete"><i class="fas fa-trash"></i></button>
+                `;
+            }
+            return `<tr>
+                <td>${x.name}</td>
+                <td><span class="badge badge-${x.status === 'RUNNING' ? 'success' : 'muted'}">${x.status}</span></td>
+                <td>${x.epoch}</td>
+                <td>${x.loss > 0 ? x.loss.toFixed(3) : '-'}</td>
+                <td>${x.total_size_mb || x.size_mb} MB</td>
+                <td>${actions}</td>
+            </tr>`;
+        }).join('');
     })
     .on('/hardware', async () => {
         showView('hardware');
@@ -140,31 +155,30 @@ async function fetchStats() {
             chart.data.datasets[0].data = d.history;
             chart.update();
         }
-    } catch (e) {}
+    } catch (e) { }
 }
 
 // Run management functions
 async function resumeRun(name) {
     if (confirm(`Resume training run: ${name}?`)) {
-        await fetch(`/api/runs/resume/${name}`, { method: 'POST' });
-        router.navigate('/runs'); // Refresh runs view
+        await fetch(`/api/runs/resume?name=${name}`, { method: 'POST' });
+        setTimeout(() => router.navigate('/runs'), 500);
     }
 }
 
 async function stopRun(name) {
-    if (confirm(`Stop training run: ${name}?`)) {
-        await fetch(`/api/runs/stop/${name}`, { method: 'POST' });
-        setTimeout(() => router.navigate('/runs'), 500); // Refresh after stop
+    if (confirm(`Stop active training run?`)) {
+        await fetch(`/api/runs/stop`, { method: 'POST' });
+        setTimeout(() => router.navigate('/runs'), 500);
     }
 }
 
 async function deleteRun(name) {
     if (confirm(`Delete training run: ${name}? This cannot be undone!`)) {
-        await fetch(`/api/runs/delete/${name}`, { method: 'DELETE' });
-        router.navigate('/runs'); // Refresh runs view
+        await fetch(`/api/runs/delete?name=${name}`, { method: 'DELETE' });
+        setTimeout(() => router.navigate('/runs'), 500);
     }
 }
 
 setInterval(fetchStats, 1000);
 fetchStats();
-</script>

@@ -4,9 +4,34 @@
 #include <sstream>
 #include <algorithm>
 #include <ctime>
+#include <memory>
+#include "mm_rec/jobs/job_training.h"
 
 namespace mm_rec {
 namespace fs = std::filesystem;
+
+// Static state
+static std::unique_ptr<JobTraining> active_job_ = nullptr;
+
+bool RunManager::start_job(const TrainingJobConfig& config) {
+    if (active_job_ && active_job_->is_running()) {
+        return false;
+    }
+    active_job_ = std::make_unique<JobTraining>();
+    return active_job_->start(config);
+}
+
+void RunManager::stop_job() {
+    if (active_job_ && active_job_->is_running()) {
+        active_job_->stop();
+        active_job_->join();
+        active_job_.reset();
+    }
+}
+
+bool RunManager::is_job_running() {
+    return active_job_ && active_job_->is_running();
+}
 
 std::string RunManager::get_run_dir(const std::string& run_name) {
     return get_runs_dir() + "/" + run_name;

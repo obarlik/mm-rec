@@ -8,6 +8,7 @@
 #include "mm_rec/utils/metrics.h"
 #include <sstream>
 #include <iostream>
+#include <filesystem>
 
 namespace mm_rec {
 
@@ -127,17 +128,17 @@ void DashboardManager::register_routes() {
 
     // Home - Serve main HTML
     server_->register_handler("/", [](const std::string&) -> std::string {
-        return mm_rec::net::HttpServer::build_response(200, "text/html", assets::INDEX_HTML);
+        return mm_rec::net::HttpServer::build_response(200, "text/html", std::string(assets::get_index_html()));
     });
 
     // Static CSS
     server_->register_handler("/static/style.css", [](const std::string&) -> std::string {
-        return mm_rec::net::HttpServer::build_response(200, "text/css", assets::STYLE_CSS);
+        return mm_rec::net::HttpServer::build_response(200, "text/css", std::string(assets::get_style_css()));
     });
 
     // Static JS
     server_->register_handler("/static/app.js", [](const std::string&) -> std::string {
-        return mm_rec::net::HttpServer::build_response(200, "application/javascript", assets::APP_JS);
+        return mm_rec::net::HttpServer::build_response(200, "application/javascript", std::string(assets::get_app_js()));
     });
     // API Stats
     server_->register_handler("/api/stats", [this](const std::string&) -> std::string {
@@ -327,5 +328,6 @@ void DashboardManager::register_routes() {
          }
          return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Delete failed\"}");
     });
+}
 
 } // namespace mm_rec

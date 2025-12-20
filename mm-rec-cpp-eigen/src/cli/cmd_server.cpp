@@ -213,7 +213,18 @@ int cmd_server(int argc, char* argv[]) {
         // On many *nix systems, signal interrupts read() causing cin to fail or return.
         if (!std::getline(std::cin, line)) {
             if (g_shutdown_requested) break; // Signal caused EOF or error
-            break; // Real EOF (Ctrl+D)
+            
+#ifndef _WIN32
+            // If not a TTY (e.g. nohup or pipe), don't exit on EOF, just wait.
+            if (!isatty(STDIN_FILENO)) {
+                // Log only once if needed, or just silent wait
+                while (!g_shutdown_requested && !DashboardManager::instance().should_stop()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                }
+                break;
+            }
+#endif
+            break; // Real EOF (Ctrl+D) on TTY
         }
         if (line.empty()) continue;
         
