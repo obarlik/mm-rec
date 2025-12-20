@@ -136,9 +136,16 @@ void DashboardManager::update_system_stats(size_t mem_mb) {
 void DashboardManager::register_routes() {
     if (!server_) return;
 
-    // Home - Serve main HTML
+    // MINIMAL TEST: Zero dependencies, pure stack
     server_->register_handler("/", [](const std::string&) -> std::string {
-        return mm_rec::net::HttpServer::build_response(200, "text/html", std::string(assets::get_index_html()));
+        const char* body = "<html><body><h1>WORKS</h1></body></html>";
+        std::stringstream ss;
+        ss << "HTTP/1.1 200 OK\r\n";
+        ss << "Content-Type: text/html\r\n";
+        ss << "Content-Length: " << strlen(body) << "\r\n";
+        ss << "Connection: close\r\n\r\n";
+        ss << body;
+        return ss.str();
     });
 
     // Static CSS

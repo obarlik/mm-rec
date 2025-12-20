@@ -281,19 +281,25 @@ private:
     }
     
     void write_event(std::ofstream& ofs, const LogEvent& event) {
-        // Format: [TIMESTAMP] [LEVEL] Message
+        // Format: ISO 8601 timestamp [LEVEL] Message
         const char* level_str = "UI";
         if (event.level == LogLevel::INFO) level_str = "INFO";
         else if (event.level == LogLevel::WARNING) level_str = "WARN";
         else if (event.level == LogLevel::ERROR) level_str = "ERROR";
         else if (event.level == LogLevel::DEBUG) level_str = "DEBUG";
         
-        // Convert microseconds to readable time
-        auto sec = event.timestamp_us / 1000000;
-        auto usec = event.timestamp_us % 1000000;
+        // Convert microseconds to ISO 8601: YYYY-MM-DD HH:MM:SS.mmm
+        auto total_sec = event.timestamp_us / 1000000;
+        auto millis = (event.timestamp_us % 1000000) / 1000;
         
-        ofs << "[" << sec << "." << usec << "] "
-            << "[" << level_str << "] "
+        time_t time_sec = static_cast<time_t>(total_sec);
+        std::tm* tm_info = std::localtime(&time_sec);
+        
+        char time_buf[32];
+        std::strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", tm_info);
+        
+        ofs << time_buf << "." << std::setfill('0') << std::setw(3) << millis
+            << " [" << level_str << "] "
             << event.message << "\n";
     }
     

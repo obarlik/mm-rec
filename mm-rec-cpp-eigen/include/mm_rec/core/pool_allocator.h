@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <iostream>
 #include <mutex>
+#include <thread>  // For std::this_thread::get_id()
 #include <algorithm>
 #include <cstdlib> // posix_memalign
 #include <new> // bad_alloc
@@ -19,8 +20,9 @@ constexpr uintptr_t SLAB_MASK = ~(uintptr_t(SLAB_SIZE - 1)); // Mask to find sla
 struct SlabHeader {
     uint32_t block_size;  // Size of objects in this slab (0 = large object)
     uint32_t magic;      // Safety check (0xAABBCCDD)
-    // Padding to 32 bytes to ensure alignment of first object
-    char padding[24]; 
+    uint32_t thread_id;  // Thread that allocated this (for cross-thread detection)
+    // Padding to 32 bytes
+    char padding[20]; 
 };
 static_assert(sizeof(SlabHeader) == 32, "SlabHeader must be 32 bytes");
 
@@ -29,13 +31,20 @@ static_assert(sizeof(SlabHeader) == 32, "SlabHeader must be 32 bytes");
  * Prevents "Use-After-Free" if a thread dies but another holds a pointer to its data.
  * Memory is released only when the program terminates.
  */
+class FixedSizePool; // Forward declaration
+
 class GlobalSlabRegistry {
 public:
     static GlobalSlabRegistry& instance() {
         static GlobalSlabRegistry instance;
         return instance;
     }
+    
+    GlobalSlabRegistry();  // Implemented after FixedSizePool
 
+    // Cross-thread deallocation (mutex-protected) - implemented after FixedSizePool
+    void deallocate_cross_thread(void* ptr, uint32_t block_size);
+    
     // Takes ownership of a slab, returns raw pointer for thread usage
     void* register_slab(void* slab_ptr) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -75,6 +84,7 @@ private:
 
     SlabNode* head_ = nullptr;
     std::mutex mutex_;
+    FixedSizePool* shared_pools_[6];  // Global pools for cross-thread deallocation
 };
 
 /**
@@ -146,6 +156,9 @@ private:
         SlabHeader* header = static_cast<SlabHeader*>(raw_mem);
         header->block_size = block_size_;
         header->magic = 0xAABBCCDD;
+        // Store allocating thread ID for cross-thread detection
+        header->thread_id = static_cast<uint32_t>(
+            std::hash<std::thread::id>{}(std::this_thread::get_id()));
 
         // Register
         GlobalSlabRegistry::instance().register_slab(raw_mem);
@@ -159,6 +172,33 @@ private:
     char* current_slab_ptr_ = nullptr;
     size_t current_slab_offset_ = 0;
 };
+
+// GlobalSlabRegistry method implementations (after FixedSizePool definition)
+inline GlobalSlabRegistry::GlobalSlabRegistry() {
+    // Initialize global pools for cross-thread deallocation
+    shared_pools_[0] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(32);
+    shared_pools_[1] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(64);
+    shared_pools_[2] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(128);
+    shared_pools_[3] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(256);
+    shared_pools_[4] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(512);
+    shared_pools_[5] = new(std::malloc(sizeof(FixedSizePool))) FixedSizePool(1024);
+}
+
+inline void GlobalSlabRegistry::deallocate_cross_thread(void* ptr, uint32_t block_size) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    int idx = -1;
+    if (block_size <= 32) idx = 0;
+    else if (block_size <= 64) idx = 1;
+    else if (block_size <= 128) idx = 2;
+    else if (block_size <= 256) idx = 3;
+    else if (block_size <= 512) idx = 4;
+    else idx = 5;
+    
+    if (idx >= 0 && shared_pools_[idx]) {
+        shared_pools_[idx]->deallocate(ptr);
+    }
+}
 
 /**
  * @brief PoolAllocator manages multiple FixedSizePools to handle requests of varying sizes.
@@ -211,6 +251,8 @@ public:
         SlabHeader* header = static_cast<SlabHeader*>(raw_mem);
         header->block_size = 0; // 0 = Large Object
         header->magic = 0xAABBCCDD;
+        header->thread_id = static_cast<uint32_t>(
+            std::hash<std::thread::id>{}(std::this_thread::get_id()));
         
         return static_cast<char*>(raw_mem) + sizeof(SlabHeader);
 #endif
@@ -239,17 +281,30 @@ public:
             // Large Object
             std::free(reinterpret_cast<void*>(header));
         } else {
-            // Small Object -> Pool
-            uint32_t sz = header->block_size;
-            int idx = -1;
-            if (sz <= 32) idx=0;
-            else if (sz <= 64) idx=1;
-            else if (sz <= 128) idx=2;
-            else if (sz <= 256) idx=3;
-            else if (sz <= 512) idx=4;
-            else idx=5; // 1024
+            // Small Object - BRANCHLESS routing
+            uint32_t alloc_thread = header->thread_id;
+            uint32_t current_thread = static_cast<uint32_t>(
+                std::hash<std::thread::id>{}(std::this_thread::get_id()));
             
-            if (idx >= 0) pools_[idx]->deallocate(ptr);
+            // Branchless comparison: true=1, false=0
+            bool is_same_thread = (alloc_thread == current_thread);
+            
+            if (is_same_thread) {
+                // FAST PATH: Same thread, use thread-local pool (lock-free)
+                uint32_t sz = header->block_size;
+                int idx = -1;
+                if (sz <= 32) idx=0;
+                else if (sz <= 64) idx=1;
+                else if (sz <= 128) idx=2;
+                else if (sz <= 256) idx=3;
+                else if (sz <= 512) idx=4;
+                else idx=5;
+                
+                if (idx >= 0) pools_[idx]->deallocate(ptr);
+            } else {
+                // SLOW PATH: Cross-thread, use global pool (mutex)
+                GlobalSlabRegistry::instance().deallocate_cross_thread(ptr, header->block_size);
+            }
         }
     }
     

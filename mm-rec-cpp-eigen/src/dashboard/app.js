@@ -6,12 +6,15 @@ const app = {
     chart: null,
     pollInterval: null,
     lossHistory: [],
+    sidebarState: 'full', // 'full', 'mini', 'hidden' (mobile)
 
     init: function () {
         console.log("Initializing Run-Centric Dashboard...");
         this.initChart();
+        this.updateHardwareInfo();
+        this.restoreSidebarState(); // Restore from localStorage
         this.startPolling();
-        this.viewHome(); // Default view
+        this.viewHome();
     },
 
     startPolling: function () {
@@ -351,6 +354,70 @@ const app = {
             document.getElementById('upload-status').textContent = 'Done';
             this.fetchDatasets();
         });
+    },
+
+    updateHardwareInfo: function () {
+        fetch('/api/hardware')
+            .then(r => r.json())
+            .then(hw => {
+                const gpuEl = document.getElementById('hw-gpu');
+                const memEl = document.getElementById('hw-mem');
+
+                if (gpuEl) {
+                    gpuEl.innerHTML = `<i class="fas fa-microchip" style="margin-right: 4px; color: #5e72e4;"></i> ${hw.compute_device || 'N/A'}`;
+                }
+
+                if (memEl) {
+                    const vram_gb = (hw.mem_total_mb / 1024).toFixed(1);
+                    memEl.textContent = `VRAM: ${vram_gb} GB`;
+                }
+            })
+            .catch(err => {
+                console.error('Failed to fetch hardware info:', err);
+                const gpuEl = document.getElementById('hw-gpu');
+                if (gpuEl) gpuEl.textContent = 'Hardware info unavailable';
+            });
+    },
+
+    // Sidebar Control
+    toggleSidebar: function () {
+        const sidebar = document.getElementById('sidebar');
+        const isMobile = window.innerWidth <= 768;
+
+        if (isMobile) {
+            // Mobile: toggle visibility
+            sidebar.classList.toggle('mobile-open');
+            this.sidebarState = sidebar.classList.contains('mobile-open') ? 'full' : 'hidden';
+        } else {
+            // Desktop: toggle between full and mini
+            sidebar.classList.toggle('mini');
+            this.sidebarState = sidebar.classList.contains('mini') ? 'mini' : 'full';
+        }
+
+        // Save to localStorage
+        localStorage.setItem('sidebarState', this.sidebarState);
+    },
+
+    restoreSidebarState: function () {
+        const saved = localStorage.getItem('sidebarState');
+        const sidebar = document.getElementById('sidebar');
+        const isMobile = window.innerWidth <= 768;
+
+        if (saved && sidebar) {
+            this.sidebarState = saved;
+
+            if (isMobile) {
+                // Mobile: default hidden
+                if (saved === 'full') {
+                    sidebar.classList.add('mobile-open');
+                }
+            } else {
+                // Desktop: restore mini state
+                if (saved === 'mini') {
+                    sidebar.classList.add('mini');
+                }
+            }
+        }
     }
 };
 

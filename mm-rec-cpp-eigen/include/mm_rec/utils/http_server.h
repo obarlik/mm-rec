@@ -148,12 +148,25 @@ public:
             return false;
         }
 
-        if (listen(server_fd_, 100) < 0) { // Increased backlog
+        if (listen(server_fd_, 100) < 0) {
             return false;
         }
         
         running_ = true;
-        listener_thread_ = std::thread(&HttpServer::listener_loop, this);
+        listener_started_.store(false, std::memory_order_release);
+        
+        try {
+            listener_thread_ = std::thread(&HttpServer::listener_loop, this);
+            
+            // Wait for thread to actually start (atomic synchronization)
+            while (!listener_started_.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            
+        } catch (const std::exception& e) {
+            running_ = false;
+            return false;
+        }
         
         LOG_INFO("High-Performance HTTP Server started on port " + std::to_string(config_.port) + 
                  " (Threads: " + std::to_string(config_.threads) + ")");
@@ -218,8 +231,11 @@ private:
     std::map<std::string, Handler> handlers_;
     std::mutex handlers_mutex_;
     ThreadPool pool_;
+    std::atomic<bool> listener_started_{false};  // Track listener thread startup
 
     void listener_loop() {
+        listener_started_.store(true, std::memory_order_release);
+        
         while (running_) {
             struct sockaddr_in client_addr;
 #ifdef _WIN32
@@ -245,6 +261,7 @@ private:
     }
 
     void handle_client(int socket) {
+        
         // PRODUCTION SAFETY: Set timeouts
         // This prevents "Slowloris" attacks or stuck clients from consuming a thread forever.
 #ifdef _WIN32
@@ -261,12 +278,15 @@ private:
 
         std::vector<char> buffer(8192); // Increased buffer
         
+        LOG_INFO("handle_client: about to read from socket");
+        
 #ifndef _WIN32
         ssize_t bytes_read = read(socket, buffer.data(), buffer.size());
 #else
         int bytes_read = recv(socket, buffer.data(), static_cast<int>(buffer.size()), 0);
 #endif
 
+        LOG_INFO("handle_client: read " + std::to_string(bytes_read) + " bytes");
         if (bytes_read <= 0) {
 #ifndef _WIN32
             close(socket);

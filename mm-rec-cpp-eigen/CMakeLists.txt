@@ -315,6 +315,21 @@ add_executable(test_pool_benchmark tests/test_pool_benchmark.cpp)
 target_link_libraries(test_pool_benchmark mm_rec_eigen)
 add_test(NAME test_pool_benchmark COMMAND test_pool_benchmark)
 
+# Thread Safety Test
+add_executable(test_pool_thread_safety tests/test_pool_thread_safety.cpp)
+target_link_libraries(test_pool_thread_safety mm_rec_eigen)
+add_test(NAME test_pool_thread_safety COMMAND test_pool_thread_safety)
+
+# Full Server Structure Test
+add_executable(test_mmrec_server_structure tests/test_mmrec_server_structure.cpp)
+target_link_libraries(test_mmrec_server_structure mm_rec_eigen)
+add_test(NAME test_mmrec_server_structure COMMAND test_mmrec_server_structure)
+
+# REAL DashboardManager Test
+add_executable(test_real_dashboard tests/test_real_dashboard.cpp)
+target_link_libraries(test_real_dashboard mm_rec_eigen)
+add_test(NAME test_real_dashboard COMMAND test_real_dashboard)
+
 add_executable(test_system_optimizer tests/test_system_optimizer.cpp)
 target_link_libraries(test_system_optimizer mm_rec_eigen)
 

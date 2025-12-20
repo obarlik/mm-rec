@@ -239,15 +239,35 @@
 <body>
 
     <!-- SIDEBAR -->
-    <nav class="sidebar">
-        <div class="sidebar-header">MM-Rec Access</div>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <span id="sidebar-title">MM-Rec Access</span>
+            <button class="sidebar-toggle" onclick="app.toggleSidebar()" aria-label="Toggle Sidebar">
+                <i class="fas fa-bars"></i>
+            </button>
+        </div>
         <a href="#" class="nav-item active" onclick="app.viewHome()">
-            <i class="fas fa-list"></i> Training Runs
+            <i class="fas fa-list"></i><span>Training Runs</span>
         </a>
         <a href="#" class="nav-item" onclick="app.viewLibrary()">
-            <i class="fas fa-book"></i> Library
+            <i class="fas fa-book"></i><span>Library</span>
         </a>
         <div style="flex:1"></div>
+
+        <!-- Hardware Info -->
+        <div style="padding: 16px 20px; border-top: 1px solid #333; background: rgba(94, 114, 228, 0.05);">
+            <div
+                style="font-size: 0.75rem; color: #9fa8da; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">
+                <i class="fas fa-microchip"></i> Hardware
+            </div>
+            <div style="font-size: 0.85rem; color: #e8eaf6; margin-bottom: 4px;" id="hw-gpu">
+                <i class="fas fa-cog fa-spin" style="font-size: 0.7rem; margin-right: 4px;"></i> Loading...
+            </div>
+            <div style="font-size: 0.75rem; color: #9fa8da;" id="hw-mem">
+                VRAM: --
+            </div>
+        </div>
+
         <div style="padding: 20px; color:#666; font-size:0.8rem;" id="server-status">
             Connecting...
         </div>
