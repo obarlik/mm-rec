@@ -4,6 +4,7 @@
 #include <vector>
 #include <chrono>
 #include <filesystem>
+#include "mm_rec/jobs/job_training.h"
 
 namespace mm_rec {
 
@@ -57,6 +58,11 @@ public:
     // Check if run exists
     static bool run_exists(const std::string& run_name);
     
+    // Manager Active Job
+    static bool start_job(const TrainingJobConfig& config);
+    static void stop_job();
+    static bool is_job_running();
+
     // Get runs directory path
     static std::string get_runs_dir() { return "runs"; }
     

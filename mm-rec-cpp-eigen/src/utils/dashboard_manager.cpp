@@ -233,7 +233,7 @@ void DashboardManager::register_routes() {
             const auto& run = runs[i];
             ss << "{";
             ss << "\"name\": \"" << run.name << "\",";
-            ss << "\"status\": \"" << run.status_str << "\",";
+            ss << "\"status\": \"" << (RunManager::is_job_running() && run.status == RunStatus::RUNNING ? "RUNNING" : run.status_str) << "\","; // Hacky sync
             ss << "\"epoch\": " << run.current_epoch << ",";
             ss << "\"loss\": " << run.current_loss << ",";
             ss << "\"best_loss\": " << run.best_loss << ",";
@@ -244,6 +244,88 @@ void DashboardManager::register_routes() {
         ss << "]";
         return mm_rec::net::HttpServer::build_response(200, "application/json", ss.str());
     });
-}
+
+    // API Stop Run
+    server_->register_handler("/api/runs/stop", [this](const std::string&) -> std::string {
+        if (!RunManager::is_job_running()) {
+             return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"No job is running\"}");
+        }
+        RunManager::stop_job();
+        LOG_INFO("Job stopped via API.");
+        return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"status\": \"stopped\"}");
+    });
+
+    // API Resume Run (Format: /api/runs/resume/RUN_NAME)
+    server_->register_handler("/api/runs/resume", [this](const std::string& req) -> std::string {
+         // Simple parsing: assuming last segment is name. 
+         // Real handler would parse URL path, but HttpServer basic router is exact match.
+         // We'll use wildcard match in server and parse here if needed, 
+         // BUT HttpServer only supports exact or simple prefix.
+         // Let's use Query Param for simplicity in this basic server: ?name=RUN_NAME
+         
+         // Helper to extract query param
+         auto get_param = [&](const std::string& key) -> std::string {
+             size_t pos = req.find(key + "=");
+             if (pos == std::string::npos) return "";
+             size_t end = req.find('&', pos);
+             return req.substr(pos + key.size() + 1, end - (pos + key.size() + 1));
+         };
+
+         std::string run_name = get_param("name");
+         if (run_name.empty()) {
+             return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing name parameter\"}");
+         }
+
+         if (RunManager::is_job_running()) {
+             return mm_rec::net::HttpServer::build_response(409, "application/json", "{\"error\": \"Job already running\"}");
+         }
+
+         if (!RunManager::run_exists(run_name)) {
+             return mm_rec::net::HttpServer::build_response(404, "application/json", "{\"error\": \"Run not found\"}");
+         }
+         
+         std::string run_dir = RunManager::get_run_dir(run_name);
+         std::string config_path = run_dir + "/config.txt";
+         
+         if (!std::filesystem::exists(config_path)) {
+              // Creating dummy config if missing for resume? No, fail.
+              return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Missing config in run dir\"}");
+         }
+
+         TrainingJobConfig config;
+         config.run_name = run_name;
+         config.config_path = config_path;
+         config.data_path = "training_data.bin"; // Default for now
+         
+         if (RunManager::start_job(config)) {
+             return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"status\": \"started\"}");
+         }
+         return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Failed to start\"}");
+    });
+
+    // API Delete Run
+    server_->register_handler("/api/runs/delete", [this](const std::string& req) -> std::string {
+         auto get_param = [&](const std::string& key) -> std::string {
+             size_t pos = req.find(key + "=");
+             if (pos == std::string::npos) return "";
+             size_t end = req.find('&', pos);
+             return req.substr(pos + key.size() + 1, end - (pos + key.size() + 1));
+         };
+
+         std::string run_name = get_param("name");
+         if (run_name.empty()) {
+             return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing name parameter\"}");
+         }
+
+         if (RunManager::is_job_running()) {
+             // TODO: Check if it's THIS run specifically
+             return mm_rec::net::HttpServer::build_response(409, "application/json", "{\"error\": \"Cannot delete whle a job is running\"}");
+         }
+
+         if (RunManager::delete_run(run_name)) {
+             return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"status\": \"deleted\"}");
+         }
+         return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Delete failed\"}");
+    });
 
 } // namespace mm_rec
