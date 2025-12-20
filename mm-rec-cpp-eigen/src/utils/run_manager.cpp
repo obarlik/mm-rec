@@ -13,12 +13,55 @@ namespace fs = std::filesystem;
 // Static state
 static std::unique_ptr<JobTraining> active_job_ = nullptr;
 
-bool RunManager::start_job(const TrainingJobConfig& config) {
+bool RunManager::start_job(const TrainingJobConfig& config_in) {
     if (active_job_ && active_job_->is_running()) {
         return false;
     }
+
+    // --- ISOLATION LOGIC ---
+    TrainingJobConfig isolated_config = config_in;
+    
+    // 1. Create Run Directory
+    if (isolated_config.run_name.empty()) {
+        isolated_config.run_name = "run_" + std::to_string(std::time(nullptr));
+    }
+    create_run(isolated_config.run_name);
+    std::string run_dir = get_run_dir(isolated_config.run_name);
+
+    // 2. Copy Config File
+    if (fs::exists(config_in.config_path)) {
+        std::string dest_config = run_dir + "/config.ini";
+        try {
+            fs::copy_file(config_in.config_path, dest_config, fs::copy_options::overwrite_existing);
+            isolated_config.config_path = dest_config; // Point to isolated copy
+        } catch (...) {
+            ui::error("Failed to copy config to run dir");
+            return false;
+        }
+    }
+
+    // 3. Symlink Dataset (Access from own folder)
+    if (fs::exists(config_in.data_path)) {
+        std::string data_filename = fs::path(config_in.data_path).filename().string();
+        std::string dest_data = run_dir + "/" + data_filename;
+        try {
+            // Remove if exists
+            if (fs::exists(dest_data)) fs::remove(dest_data);
+            
+            // Create symlink (Absolute path required for target)
+            fs::path target = fs::absolute(config_in.data_path);
+            fs::create_symlink(target, dest_data);
+            
+            isolated_config.data_path = dest_data; // Point to local symlink
+        } catch (const std::exception& e) {
+             // Fallback: Use absolute original path if symlink fails
+             ui::warning(std::string("Symlink failed: ") + e.what() + ". Using original path.");
+             isolated_config.data_path = fs::absolute(config_in.data_path).string();
+        }
+    }
+
     active_job_ = std::make_unique<JobTraining>();
-    return active_job_->start(config);
+    return active_job_->start(isolated_config);
 }
 
 void RunManager::stop_job() {

@@ -8,9 +8,258 @@
     <script src="https://unpkg.com/navigo@8.11.1/lib/navigo.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        /* Tabs */
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #333;
+        }
+        .tab-btn {
+            background: none;
+            border: none;
+            color: #888;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        .tab-btn.active {
+            color: #fff;
+            border-bottom: 2px solid #3498db;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        
+        /* Modals */
+        .modal {
+            display: none; 
+            position: fixed; 
+            z-index: 1000; 
+            left: 0; top: 0; 
+            width: 100%; height: 100%; 
+            background-color: rgba(0,0,0,0.7); 
+        }
+        .modal-content {
+            background-color: #1e1e1e;
+            margin: 10% auto; 
+            padding: 20px; 
+            border: 1px solid #333;
+            width: 50%; 
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .close { float: right; font-size: 28px; cursor: pointer; color: #aaa; }
+        .close:hover { color: #fff; }
+        
+        /* Utils */
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; color: #bbb; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; 
+            padding: 8px; 
+            background: #2b2b2b; 
+            border: 1px solid #444; 
+            color: #fff; 
+            border-radius: 4px;
+        }
+        .upload-area { border: 2px dashed #444; padding: 20px; text-align: center; border-radius: 8px; font-size: 0.9em;}
+        .grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .result-box { background: #111; padding: 10px; margin-top: 10px; border-radius: 4px; min-height: 50px; font-family: monospace; white-space: pre-wrap; }
+        .item-list { list-style: none; padding: 0; }
+        .item-list li { background: #252525; padding: 10px; margin-bottom: 5px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
+        .btn-small { padding: 4px 8px; font-size: 0.8em; margin-left: 5px; }
+    </style>
 </head>
 <body>
-    <div id="app"></div>
+    <div class="container">
+        <header>
+            <h1>MM-Rec Dashboard</h1>
+            <div id="server-status" class="status-indicator">Connecting...</div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <div class="tabs">
+            <button class="tab-btn active" onclick="app.switchTab('overview')">Overview</button>
+            <button class="tab-btn" onclick="app.switchTab('configs')">Configs</button>
+            <button class="tab-btn" onclick="app.switchTab('datasets')">Datasets</button>
+            <button class="tab-btn" onclick="app.switchTab('models')">Models</button>
+        </div>
+
+        <!-- TAB: OVERVIEW -->
+        <div id="tab-overview" class="tab-content active">
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="card">
+                    <h3>Current Loss</h3>
+                    <div class="value" id="loss-value">--</div>
+                </div>
+                <div class="card">
+                    <h3>Step</h3>
+                    <div class="value" id="step-value">--</div>
+                </div>
+                <div class="card">
+                    <h3>Learning Rate</h3>
+                    <div class="value" id="lr-value">--</div>
+                </div>
+                <div class="card">
+                    <h3>Speed</h3>
+                    <div class="value" id="speed-value">--</div>
+                </div>
+                <div class="card">
+                    <h3>Memory Usage</h3>
+                    <div class="value" id="mem-value">--</div>
+                </div>
+                <div class="card">
+                    <h3>Hybrid Sync Delta</h3>
+                    <div class="value" id="sync-value">--</div>
+                </div>
+            </div>
+
+            <!-- Charts -->
+            <div class="charts-container">
+                <div class="chart-card">
+                    <h3>Loss History</h3>
+                    <div class="chart-box" id="loss-chart"></div>
+                </div>
+            </div>
+
+            <!-- Runs -->
+            <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                    <h3>Training Runs</h3>
+                    <button class="btn-primary" onclick="app.openNewRunModal()">+ New Training</button>
+                </div>
+                <table id="runs-table">
+                    <thead>
+                        <tr>
+                            <th>Run Name</th>
+                            <th>Status</th>
+                            <th>Epoch</th>
+                            <th>Loss</th>
+                            <th>Best Loss</th>
+                            <th>Size (MB)</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="runs-body">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Hardware -->
+            <div class="card">
+                <h3>Hardware Info</h3>
+                <div id="hardware-info" class="info-grid">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB: CONFIGS -->
+        <div id="tab-configs" class="tab-content">
+            <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                    <h3>Configurations</h3>
+                    <button class="btn-primary" onclick="app.openNewConfigModal()">+ New Config</button>
+                </div>
+                <ul id="config-list" class="item-list"></ul>
+            </div>
+        </div>
+
+        <!-- TAB: DATASETS -->
+        <div id="tab-datasets" class="tab-content">
+            <div class="card">
+                <h3>Datasets</h3>
+                <div class="upload-area">
+                    <input type="file" id="dataset-file-input">
+                    <button class="btn-secondary" onclick="app.uploadDataset()">Upload Dataset</button>
+                    <span id="upload-status" style="margin-left:10px;"></span>
+                </div>
+                <br>
+                <ul id="dataset-list" class="item-list"></ul>
+            </div>
+        </div>
+
+        <!-- TAB: MODELS -->
+        <div id="tab-models" class="tab-content">
+            <div class="grid-2col">
+                <div class="card">
+                    <h3>Local Models & Checkpoints</h3>
+                    <ul id="model-list" class="item-list"></ul>
+                </div>
+                <div class="card">
+                    <h3>Inference Playground</h3>
+                    <div class="form-group">
+                        <label>Select Model</label>
+                        <select id="inference-model-select"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>Prompt</label>
+                        <textarea id="inference-prompt" rows="4" placeholder="Enter text to generate..."></textarea>
+                    </div>
+                    <button class="btn-primary" onclick="app.runInference()">Generate</button>
+                    <div id="inference-result" class="result-box"></div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- MODAL: NEW RUN -->
+    <div id="modal-new-run" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="app.closeModal('modal-new-run')">&times;</span>
+            <h2>Start New Training</h2>
+            <div class="form-group">
+                <label>Run Name</label>
+                <input type="text" id="new-run-name" placeholder="run_experiment_1">
+            </div>
+            <div class="form-group">
+                <label>Base Configuration</label>
+                <select id="new-run-config"></select>
+            </div>
+            <div class="form-group">
+                <label>Dataset</label>
+                <select id="new-run-dataset"></select>
+            </div>
+            <div style="text-align:right;">
+                <button class="btn-secondary" onclick="app.closeModal('modal-new-run')">Cancel</button>
+                <button class="btn-primary" onclick="app.startNewRun()">Start Training</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: NEW CONFIG -->
+    <div id="modal-new-config" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="app.closeModal('modal-new-config')">&times;</span>
+            <h2>Create New Configuration</h2>
+            <div class="form-group">
+                <label>Filename (e.g. experimental.ini)</label>
+                <input type="text" id="new-config-filename">
+            </div>
+            <div class="form-group">
+                <label>Content (INI Format)</label>
+                <textarea id="new-config-content" rows="10" spellcheck="false">[model]
+vocab_size = 50257
+hidden_dim = 768
+num_layers = 12
+
+[training]
+batch_size = 16
+learning_rate = 3e-4
+max_epochs = 10
+context_length = 1024
+</textarea>
+            </div>
+            <div style="text-align:right;">
+                <button class="btn-secondary" onclick="app.closeModal('modal-new-config')">Cancel</button>
+                <button class="btn-primary" onclick="app.createConfig()">Save Configuration</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/app.js"></script>
 </body>
 </html>

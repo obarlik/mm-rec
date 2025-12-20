@@ -131,31 +131,31 @@ kill_by_port() {
     fi
 }
 
-echo "Phase 1: Killing processes by pattern..."
+echo "Phase 1: Freeing ports (Primary Strategy)..."
 echo ""
 
-# Kill by pattern (most comprehensive)
-kill_with_escalation "demo_training_cpp" "demo_training_cpp"
-kill_with_escalation "demo_inference_cpp" "demo_inference_cpp"
-kill_with_escalation "mm_rec_cli" "mm_rec_cli"
-kill_with_escalation "mm-rec-cpp-eigen" "mm-rec-cpp-eigen"
+# Clean up ports first (Most precise and safe)
+kill_by_port 8085
+kill_by_port 8080
+kill_by_port 8086
 
 echo ""
 echo "Phase 2: Killing by binary name..."
 echo ""
 
-# Kill by exact binary name
+# Kill by exact binary name (Safe)
+kill_by_binary "mm_rec"
 kill_by_binary "demo_training_cpp"
 kill_by_binary "demo_inference_cpp"
-kill_by_binary "mm_rec_cli"
 
 echo ""
-echo "Phase 3: Freeing ports..."
+echo "Phase 3: Killing remaining known workers..."
 echo ""
 
-# Clean up ports
-kill_by_port 8085
-kill_by_port 8080
+# Only kill specific worker patterns, NOT the project directory name!
+# kill_with_escalation "mm-rec-cpp-eigen" -> UNSAFE (Matches pwd)
+kill_with_escalation "demo_training_cpp" "demo_training_cpp"
+kill_with_escalation "demo_inference_cpp" "demo_inference_cpp"
 
 echo ""
 echo "Phase 4: Final verification..."
