@@ -20,12 +20,26 @@ const app = {
     startPolling: function () {
         if (this.pollInterval) clearInterval(this.pollInterval);
         this.pollInterval = setInterval(() => {
+            this.checkActiveRun(); // Global check
+
             if (this.activeView === 'home') {
                 this.updateRunsTable();
             } else if (this.activeView === 'run-detail' && this.activeRun) {
                 this.updateRunMonitor();
             }
         }, 1000);
+    },
+
+    checkActiveRun: function () {
+        fetch('/api/stats').then(r => r.json()).then(d => {
+            const el = document.getElementById('active-run-display');
+            if (d.run_name && d.run_name.length > 0) {
+                el.style.display = 'block';
+                document.getElementById('active-run-name').textContent = d.run_name;
+            } else {
+                el.style.display = 'none';
+            }
+        }).catch(() => { });
     },
 
     // --- NAVIGATION ---

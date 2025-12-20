@@ -23,6 +23,9 @@ struct DashboardStats {
     
     // Control flags
     std::atomic<bool> should_stop{false};
+    
+    // Context
+    std::string current_run_name; // Not atomic, but set once at start
 };
 
 class DashboardManager {
@@ -41,6 +44,13 @@ public:
     
     // Update methods for workers
     void set_history_path(const std::string& path);
+    void set_active_run(const std::string& run_name) {
+        stats_.current_run_name = run_name;
+    }
+    void clear_active_run() {
+         stats_.current_run_name.clear();
+    }
+    
     void update_training_stats(float loss, float lr, float speed, int step);
     void update_system_stats(size_t mem_mb);
     

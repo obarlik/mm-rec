@@ -162,6 +162,10 @@ void DashboardManager::register_routes() {
     server_->register_handler("/api/stats", [this](const std::string&) -> std::string {
         std::stringstream ss;
         ss << "{";
+        {
+             // Protect string access if needed, though usually set once
+             ss << "\"run_name\": \"" << stats_.current_run_name << "\",";
+        }
         ss << "\"loss\": " << stats_.current_loss.load() << ",";
         ss << "\"step\": " << stats_.current_step.load() << ",";
         ss << "\"total_steps\": " << stats_.total_steps.load() << ",";

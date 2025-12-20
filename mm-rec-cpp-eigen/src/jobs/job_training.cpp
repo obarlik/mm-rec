@@ -84,6 +84,7 @@ void JobTraining::run_internal(TrainingJobConfig config) {
         
         // --- Dashboard ---
         DashboardManager::instance().reset_stop_signal();
+        DashboardManager::instance().set_active_run(config.run_name);
         DashboardManager::instance().set_history_path(run_dir + "/dashboard_history.csv");
 
         // --- Load Config ---
