@@ -3,7 +3,7 @@ const { expect } = require('chai');
 const chrome = require('selenium-webdriver/chrome');
 
 // Configuration
-const BASE_URL = 'http://localhost:8085';
+const BASE_URL = 'http://127.0.0.1:8106'; // Explicit IPv4 to avoid localhost resolution issues
 const RUN_NAME = 'js_selenium_Run_' + Date.now();
 
 describe('MM-Rec Dashboard E2E Tests (JS)', function () {
@@ -32,10 +32,15 @@ describe('MM-Rec Dashboard E2E Tests (JS)', function () {
 
     it('should load the dashboard', async function () {
         await driver.get(BASE_URL);
-        const title = await driver.getTitle();
-        if (!title.includes('MM-Rec Dashboard')) {
-            throw new Error('Title mismatch: ' + title);
-        }
+
+        // Wait for body to be present
+        await driver.wait(until.elementLocated(By.tagName('body')), 10000);
+
+        // Wait for title
+        await driver.wait(async () => {
+            const title = await driver.getTitle();
+            return title.includes('MM-Rec Dashboard');
+        }, 10000, "Title did not match 'MM-Rec Dashboard'");
     });
 
     it('should create and start a new run', async function () {
@@ -49,12 +54,29 @@ describe('MM-Rec Dashboard E2E Tests (JS)', function () {
         // 3. Fill Form
         await driver.findElement(By.id('new-run-name')).sendKeys(RUN_NAME);
 
-        // Select Config
+        // Select Config (Using config_small.txt as base)
         const configSelect = await driver.findElement(By.id('new-run-config'));
         await configSelect.click();
-        await driver.findElement(By.xpath("//option[contains(text(), 'mm_rec.ini')]")).click();
 
-        // 4. Click Start
+        // Wait for options to load
+        await driver.wait(until.elementLocated(By.xpath("//option[contains(text(), 'config_small.txt')]")), 2000);
+        await driver.findElement(By.xpath("//option[contains(text(), 'config_small.txt')]")).click();
+
+        // 4. Test Inline Customization (Toggle Editor)
+        const toggleBtn = await driver.findElement(By.id('btn-toggle-custom'));
+        await toggleBtn.click();
+
+        // Wait for textarea
+        const customArea = await driver.wait(until.elementLocated(By.id('new-run-custom-config')), 2000);
+        await driver.wait(until.elementIsVisible(customArea), 2000);
+
+        // Verify Content Loaded (Contains 'vocab_size' or standard key)
+        await driver.wait(async () => {
+            const val = await customArea.getAttribute('value');
+            return val.length > 10;
+        }, 3000, "Config content did not load into textarea");
+
+        // 5. Click Start
         const startBtn = await driver.findElement(By.xpath("//button[contains(text(), 'Start')]"));
         await startBtn.click();
 
