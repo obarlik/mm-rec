@@ -53,21 +53,6 @@ MoELayer::MoELayer(const MoEConfig& config) : config_(config) {
     }
 }
 
-// Helper: Softmax on last dimension
-static void simple_softmax(std::vector<float>& vals) {
-    float max_val = -1e9;
-    for (float v : vals) max_val = std::max(max_val, v);
-    
-    float sum_exp = 0.0f;
-    for (float& v : vals) {
-        v = std::exp(v - max_val);
-        sum_exp += v;
-    }
-    
-    for (float& v : vals) {
-        v /= sum_exp;
-    }
-}
 
 Tensor MoELayer::forward(const Tensor& x, MoECache* cache) {
     int64_t batch = x.size(0);
