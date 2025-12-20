@@ -2,7 +2,7 @@
 # Designed for instant training and testing
 
 # Architecture (Tiny)
-vocab_size=64 # Increased from 16 to cover Max Token 42
+vocab_size=256 # Byte-level tokenizer (0-255)
 hidden_dim=64
 mem_dim=64
 ffn_dim=128

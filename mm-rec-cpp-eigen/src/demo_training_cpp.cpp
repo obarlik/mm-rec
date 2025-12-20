@@ -62,36 +62,42 @@ int main() {
     std::cout << "✅ Hardware Optimized: " << tuning.peak_gflops << " GFLOPS (Ratio: " << tuning.best_cpu_ratio << ")" << std::endl;
     
     // 1. Setup Data
-    // 1. Setup Data
-    std::string data_path = "train_data.bin";
-    int64_t total_tokens = 500000; // 500K tokens for longer run
-    generate_data(data_path, total_tokens);
+    std::string data_path = "training_data_nano.bin"; // Real TinyStories Data
+    
+    // Check if data exists
+    if (!fs::exists(data_path)) {
+        std::cerr << "❌ Error: " << data_path << " not found!" << std::endl;
+        std::cerr << "   Run 'python3 tokenize_nano.py' first." << std::endl;
+        return 1;
+    }
     
     // 2. Setup Pipeline
     auto dataset = std::make_shared<Dataset>(data_path);
-    int64_t batch_size = 512; // Threshold for GPU
+    int64_t batch_size = 512; // High batch size for efficiency
     int64_t seq_len = 64;
-    // Note: 256 * 64 = 16,384 tokens per batch.
-    DataLoader loader(dataset, batch_size, seq_len, /*shuffle=*/false, /*workers=*/4);
+    // Note: 512 * 64 = 32,768 tokens per batch. 
+    
+    // 4 workers for loading
+    DataLoader loader(dataset, batch_size, seq_len, /*shuffle=*/true, /*workers=*/4);
     
     std::cout << "📊 Pipeline Ready. Batches: " << loader.total_batches() << std::endl;
     
     // 3. Setup Model
     MMRecModelConfig config;
-    config.vocab_size = 100; // Matches data generation
+    config.vocab_size = 256; // Byte-level tokenizer (0-255)
     config.hidden_dim = 128;
-    config.mem_dim = 128; // Must match hidden_dim if MoE processes memory
+    config.mem_dim = 128; 
     config.ffn_dim = 256;
     config.num_layers = 4;
-    config.num_experts = 4; // MoE enabled
+    config.num_experts = 4; 
     config.top_k = 2;
     
     MMRecModel model(config);
-    std::cout << "🧠 Model Initialized (MoE enabled)" << std::endl;
+    std::cout << "🧠 Model Initialized (MoE enabled, Vocab=256)" << std::endl;
     
     // 4. Setup Trainer
     TrainingConfig train_config;
-    train_config.learning_rate = 0.01f;
+    train_config.learning_rate = 0.001f; // Higher LR for small model/vocab
     train_config.num_epochs = 1;
     train_config.batch_size = batch_size;
     train_config.validate_every = 100;

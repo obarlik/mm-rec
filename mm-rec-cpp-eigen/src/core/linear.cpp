@@ -12,6 +12,8 @@
 #include <future>
 #include "mm_rec/core/vulkan_compute.h"
 #include "mm_rec/core/vulkan_op.h"
+#include "mm_rec/core/dynamic_balancer.h"
+#include <chrono>
 
 namespace mm_rec {
 
@@ -50,11 +52,14 @@ Tensor Linear::forward(const Tensor& input) {
          return output;
     }
     
-    // --- Hybrid Execution ---
+    // --- Hybrid Execution (Dynamic Load Balancing) ---
     static bool force_cpu = (std::getenv("MM_REC_FORCE_CPU") != nullptr);
 
+    // 1. Get Dynamic Split Ratio (Runtime Tuned)
+    float gpu_ratio = DynamicBalancer::get_gpu_ratio();
+    
     // Calculate Partition
-    int64_t gpu_batch = (int64_t)(batch * 0.8);
+    int64_t gpu_batch = (int64_t)(batch * gpu_ratio);
     int64_t cpu_batch = batch - gpu_batch;
 
     // Safety Guard: If batch is too small to split (gpu_batch=0), run all on CPU.
@@ -78,10 +83,15 @@ Tensor Linear::forward(const Tensor& input) {
     Tensor input_cpu = input.slice(0, 0, cpu_batch);
     Tensor input_gpu = input.slice(0, cpu_batch, gpu_batch);
     
+    auto t0 = std::chrono::high_resolution_clock::now();
+    
     // 1. Launch GPU Async
     auto gpu_future = std::async(std::launch::async, [this, &input_gpu, gpu_batch]() {
         static bool once_gpu = false;
-        if (!once_gpu) { std::cout << "🚀 Executing on GPU! Workload>" << (gpu_batch * in_features_ * out_features_) << std::endl; once_gpu = true; }
+        if (!once_gpu) { 
+            std::cout << "🚀 Hybrid Execution: GPU Thread Activated! (GPU Batch: " << gpu_batch << ")" << std::endl; 
+            once_gpu = true; 
+        }
 
         Tensor result_gpu = Tensor::zeros({gpu_batch, out_features_});
         Tensor W_T = weight_.transpose();
@@ -109,6 +119,10 @@ Tensor Linear::forward(const Tensor& input) {
         }();
 
         // Use stateless, robust dispatch (Allocates per frame, but stable 148 GFLOPS)
+        // Wait, 'matmul_submit_async' logic handles blocking already?
+        // VulkanCompute::matmul is blocking call (internally wait fence).
+        // Since we are inside async lambda, blocking here is fine (it blocks the async thread, not main thread).
+        
         bool ok = VulkanCompute::matmul(
             input_gpu.data(), 
             W_T.data(), 
@@ -121,7 +135,7 @@ Tensor Linear::forward(const Tensor& input) {
         
         if (!ok) throw std::runtime_error("GPU Dispatch Failed");
         
-        // Add bias (CPU)
+        // Add bias (CPU) - doing it here allows parallel bias add
         float* out_data = result_gpu.data();
         const float* bias_data = bias_.data();
         for (int64_t b = 0; b < gpu_batch; ++b) {
@@ -132,6 +146,7 @@ Tensor Linear::forward(const Tensor& input) {
     });
     
     // 2. Run CPU Sync
+    auto t_cpu_start = std::chrono::high_resolution_clock::now();
     Tensor output_cpu = input_cpu.matmul(weight_.transpose());
     {
          int64_t out_f = out_features_;
@@ -142,11 +157,34 @@ Tensor Linear::forward(const Tensor& input) {
              for (int64_t f = 0; f < out_f; ++f) out_data[b * out_f + f] += bias_data[f];
          }
     }
+    auto t_cpu_end = std::chrono::high_resolution_clock::now();
     
-    // 3. Join
+    // 3. Join (Wait for GPU)
     Tensor output_gpu = gpu_future.get();
+    auto t_gpu_end = std::chrono::high_resolution_clock::now();
     
-    // 4. Concat
+    // 4. Report Metrics (CPU vs GPU Time)
+    // CPU time is pure computation
+    // GPU time is total wait time (since we started async immediately) minus CPU time?
+    // No, GPU duration is t_gpu_end - t0.
+    // CPU duration is t_cpu_end - t_cpu_start (approx t_cpu_end - t0).
+    // Note: CPU starts slightly after GPU launch overhead.
+    // We want to balance Total Latency.
+    // If CPU finishes at T+10 and GPU at T+15, GPU is bottleneck.
+    // If CPU finishes at T+15 and GPU at T+10, CPU is bottleneck.
+    // So we compare finish times relative to start?
+    // Or durations?
+    // We want `t_cpu_end` ~= `t_gpu_end`.
+    
+    // Let's use durations relative to t0.
+    double cpu_ms = std::chrono::duration<double, std::milli>(t_cpu_end - t0).count();
+    double gpu_ms = std::chrono::duration<double, std::milli>(t_gpu_end - t0).count();
+    
+    DynamicBalancer::report_metrics(cpu_ms, gpu_ms);
+    
+    // 5. Concat (Existing code handles return)
+    // Note: The original code continued here.
+
     // Need a dummy instance to call member cat? or make cat static?
     // Current design is member.
     return input.cat({output_cpu, output_gpu}, 0);
