@@ -21,10 +21,12 @@
 #include <fstream>
 
 // Unix daemon headers
+#ifndef _WIN32
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#endif
 
 using namespace mm_rec;
 using namespace mm_rec::ui;
@@ -58,7 +60,13 @@ int cmd_server(int argc, char* argv[]) {
         }
     }
     
-    // Self-daemonize for nohup compatibility
+#ifdef _WIN32
+    if (daemon_mode) {
+        ui::warning("Daemon mode is not supported on Windows yet. Running in console mode.");
+        daemon_mode = false; // Fallback to normal mode
+    }
+#else
+    // Self-daemonize for nohup compatibility (Linux/Unix only)
     if (daemon_mode) {
         // First fork
         pid_t pid = fork();
@@ -115,7 +123,10 @@ int cmd_server(int argc, char* argv[]) {
             pid_file << getpid();
             pid_file.close();
         }
-    } else {
+    }
+#endif
+
+    if (!daemon_mode) {
         ui::print_header("MM-Rec Interactive Server");
         ui::info("Type 'help' for commands.");
     }
