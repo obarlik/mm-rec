@@ -172,6 +172,7 @@ set(UTILS_SOURCES
     src/utils/checkpoint.cpp
     src/utils/dashboard_manager.cpp
     src/utils/run_manager.cpp
+    src/utils/config.cpp
 )
 
 set(JOB_SOURCES
