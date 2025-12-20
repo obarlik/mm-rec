@@ -36,11 +36,19 @@ bool RunManager::start_job(const TrainingJobConfig& config_in) {
     }
     std::string run_dir = get_run_dir(isolated_config.run_name);
 
-    // 2. Copy Config File
+    // 2. Copy Config File (if source exists and is different from dest)
     if (fs::exists(config_in.config_path)) {
         std::string dest_config = run_dir + "/config.ini";
         try {
-            fs::copy_file(config_in.config_path, dest_config, fs::copy_options::overwrite_existing);
+            // Check if source and dest are the same file to avoid self-copy error
+            bool same_file = false;
+            if (fs::exists(dest_config)) {
+               if (fs::equivalent(config_in.config_path, dest_config)) same_file = true;
+            }
+
+            if (!same_file) {
+                 fs::copy_file(config_in.config_path, dest_config, fs::copy_options::overwrite_existing);
+            }
             isolated_config.config_path = dest_config; // Point to isolated copy
         } catch (const std::exception& e) {
             ui::error(std::string("Failed to copy config to run dir: ") + e.what());

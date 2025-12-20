@@ -452,10 +452,16 @@
             <div class="form-group"><label>Name</label><input type="text" id="new-run-name"></div>
             <div class="form-group">
                 <label>Configuration Template</label>
-                <div style="display:flex; gap:10px;">
-                    <select id="new-run-config" style="flex:1;"></select>
-                    <button class="btn-secondary" onclick="app.customizeSelectedConfig()">Customize</button>
+                <select id="new-run-config" onchange="app.onConfigSelectChange()"></select>
+
+                <div style="margin-top:5px;">
+                    <button class="btn-secondary btn-small" id="btn-toggle-custom"
+                        onclick="app.toggleCustomConfig()">Show/Edit Config</button>
                 </div>
+
+                <textarea id="new-run-custom-config"
+                    style="display:none; width:100%; height:150px; margin-top:5px; font-family:monospace; font-size:0.8rem;"
+                    placeholder="Select a template first..."></textarea>
             </div>
             <div class="form-group"><label>Dataset</label><select id="new-run-dataset"></select></div>
             <button class="btn-primary" onclick="app.startNewRun()">Start</button>

@@ -384,11 +384,24 @@ const app = {
         const name = document.getElementById('new-run-name').value;
         const config = document.getElementById('new-run-config').value;
         const dataset = document.getElementById('new-run-dataset').value;
+
+        // Check for custom content
+        const customEl = document.getElementById('new-run-custom-config');
+        let content = null;
+        if (customEl.style.display !== 'none' && customEl.value.trim().length > 0) {
+            content = customEl.value;
+        }
+
         if (!name) return alert("Enter name");
 
         fetch('/api/runs/start', {
             method: 'POST',
-            body: JSON.stringify({ run_name: name, config_file: config, data_file: dataset })
+            body: JSON.stringify({
+                run_name: name,
+                config_file: config,
+                data_file: dataset,
+                config_content: content // Send content if edited
+            })
         }).then(r => r.json()).then(d => {
             if (d.error) alert(d.error);
             else {
@@ -398,12 +411,44 @@ const app = {
         });
     },
 
+    toggleCustomConfig: function () {
+        const el = document.getElementById('new-run-custom-config');
+        const btn = document.getElementById('btn-toggle-custom');
+        const select = document.getElementById('new-run-config');
+
+        if (el.style.display === 'none') {
+            el.style.display = 'block';
+            btn.textContent = "Hide Config";
+            // Load content if empty
+            if (el.value.length === 0 && select.value) {
+                this.loadTemplateContent(select.value);
+            }
+        } else {
+            el.style.display = 'none';
+            btn.textContent = "Show/Edit Config";
+        }
+    },
+
+    onConfigSelectChange: function () {
+        const el = document.getElementById('new-run-custom-config');
+        const select = document.getElementById('new-run-config');
+        if (el.style.display !== 'none') {
+            this.loadTemplateContent(select.value);
+        }
+    },
+
+    loadTemplateContent: function (name) {
+        const el = document.getElementById('new-run-custom-config');
+        el.value = "Loading...";
+        el.disabled = true;
+        fetch(`/api/configs/read?name=${name}`).then(r => r.json()).then(d => {
+            el.value = d.content || "";
+            el.disabled = false;
+        });
+    },
+
     customizeSelectedConfig: function () {
-        const configName = document.getElementById('new-run-config').value;
-        if (!configName) return;
-        this.closeModal('modal-new-run');
-        this.viewLibrary();
-        setTimeout(() => this.loadConfigToEditor(configName), 100); // Small delay to allow view switch
+        // Deprecated/Removed in favor of inline toggle
     },
 
     // --- CHART ---
