@@ -51,6 +51,7 @@ enum class MetricType {
     MEMORY_USAGE,
     FLUX_BRAKE,
     HYBRID_PERF,
+    API_LATENCY, // New metric type
     CUSTOM
 };
 

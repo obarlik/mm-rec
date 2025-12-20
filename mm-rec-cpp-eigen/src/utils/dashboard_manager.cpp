@@ -9,6 +9,7 @@
 #include "mm_rec/model/mm_rec_model.h"
 #include "mm_rec/data/tokenizer.h"
 #include "mm_rec/utils/checkpoint.h"
+#include "mm_rec/utils/middlewares.h" // New include
 #include <sstream>
 #include <iostream>
 #include <filesystem>
@@ -62,9 +63,18 @@ bool DashboardManager::start(const net::HttpServerConfig& base_config) {
         // Create a copy of config for this attempt
         net::HttpServerConfig current_config = base_config;
         current_config.port = base_config.port + i;
-        
+
         try {
             server_ = std::make_unique<mm_rec::net::HttpServer>(current_config);
+            
+            // Register Middlewares (Order: Last added is Outermost)
+            // 1. Security (Modifies response headers)
+            server_->use(mm_rec::net::Middlewares::Security);
+            // 2. Metrics (Records latency)
+            server_->use(mm_rec::net::Middlewares::Metrics);
+            // 3. Logger (Logs final result and timing)
+            server_->use(mm_rec::net::Middlewares::Logger);
+            
             register_routes();
             
             if (server_->start()) {
