@@ -26,8 +26,11 @@ namespace fs = std::filesystem;
 JobTraining::JobTraining() {}
 
 JobTraining::~JobTraining() {
+    // Ensure thread is cleaned up to prevent zombie processes
     stop();
-    join();
+    if (worker_.joinable()) {
+        worker_.join();
+    }
 }
 
 bool JobTraining::start(const TrainingJobConfig& config) {
