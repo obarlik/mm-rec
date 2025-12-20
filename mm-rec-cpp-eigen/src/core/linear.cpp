@@ -154,7 +154,7 @@ Tensor Linear::forward(const Tensor& input) {
     });
     
     // 2. Run CPU Sync
-    auto t_cpu_start = std::chrono::high_resolution_clock::now();
+    // auto t_cpu_start = std::chrono::high_resolution_clock::now();
     Tensor output_cpu = input_cpu.matmul(weight_.transpose());
     {
          int64_t out_f = out_features_;
