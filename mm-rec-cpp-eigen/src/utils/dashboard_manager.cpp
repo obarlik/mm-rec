@@ -263,6 +263,68 @@ void DashboardManager::register_routes() {
         return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"status\": \"stopped\"}");
     });
 
+    // API Start Run (New)
+    server_->register_handler("/api/runs/start", [this](const std::string& req) -> std::string {
+        auto get_json_val = [&](const std::string& key) -> std::string {
+            std::string search = "\"" + key + "\":";
+            size_t pos = req.find(search);
+            if (pos == std::string::npos) return "";
+            size_t start = req.find("\"", pos + search.length()); 
+            if (start == std::string::npos) return ""; 
+            start++;
+            size_t end = start;
+            while (end < req.length()) {
+                if (req[end] == '"' && req[end-1] != '\\') break; 
+                end++;
+            }
+            return req.substr(start, end - start);
+        };
+
+        std::string name = get_json_val("run_name");
+        std::string config_file = get_json_val("config_file");
+        std::string data_file = get_json_val("data_file");
+
+        if (name.empty() || config_file.empty()) {
+            return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing run_name or config_file\"}");
+        }
+
+        if (RunManager::is_job_running()) {
+            return mm_rec::net::HttpServer::build_response(409, "application/json", "{\"error\": \"Job already running\"}");
+        }
+
+        // 1. Setup Run Directory
+        std::string run_dir = "runs/" + name;
+        if (std::filesystem::exists(run_dir)) {
+             return mm_rec::net::HttpServer::build_response(409, "application/json", "{\"error\": \"Run already exists\"}");
+        }
+        std::filesystem::create_directories(run_dir);
+
+        // 2. Prepare Config
+        std::string target_config = run_dir + "/config.ini";
+        if (std::filesystem::exists(config_file)) {
+            std::filesystem::copy_file(config_file, target_config);
+        } else {
+             // Try searching in current dir
+             if (std::filesystem::exists("./" + config_file)) {
+                 std::filesystem::copy_file("./" + config_file, target_config);
+             } else {
+                 return mm_rec::net::HttpServer::build_response(404, "application/json", "{\"error\": \"Config file not found\"}");
+             }
+        }
+
+        // 3. Prepare config object
+        TrainingJobConfig job_config;
+        job_config.run_name = name;
+        job_config.config_path = target_config; 
+        job_config.data_path = data_file; // Pass original data path, RunManager might handle absolute/relative
+
+        // 4. Start
+        if (RunManager::start_job(job_config)) {
+             return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"status\": \"started\"}");
+        }
+        return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Failed to start job\"}");
+    });
+
     // API Resume Run
     server_->register_handler("/api/runs/resume", [this](const std::string& req) -> std::string {
          auto get_param = [&](const std::string& key) -> std::string {
@@ -325,6 +387,94 @@ void DashboardManager::register_routes() {
              return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"status\": \"deleted\"}");
          }
          return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Delete failed\"}");
+    });
+
+    // API Get Run Config
+    server_->register_handler("/api/runs/config", [](const std::string& req) -> std::string {
+         std::string first_line = req.substr(0, req.find("\r\n"));
+         size_t q_pos = first_line.find("?name=");
+         if (q_pos == std::string::npos) return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing name parameter\"}");
+         
+         size_t end_pos = first_line.find(" ", q_pos);
+         std::string run_name = first_line.substr(q_pos + 6, end_pos - (q_pos + 6));
+         
+         if (run_name.empty() || run_name.find("..") != std::string::npos || run_name.find("/") != std::string::npos) {
+             return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Invalid run name\"}");
+         }
+
+         std::string config_path = "runs/" + run_name + "/config.ini";
+         if (!std::filesystem::exists(config_path)) {
+             // Fallback for older runs
+             config_path = "runs/" + run_name + "/config.txt";
+             if (!std::filesystem::exists(config_path)) {
+                return mm_rec::net::HttpServer::build_response(404, "application/json", "{\"error\": \"Config not found\"}");
+             }
+         }
+         
+         std::ifstream f(config_path);
+         if (!f.good()) return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Read error\"}");
+         
+         std::stringstream buffer;
+         buffer << f.rdbuf();
+         
+         // Escape JSON string for safe transport if returning as JSON field, 
+         // OR return plain text. Returning JSON object with "content" field is safer for UI.
+         std::string content = buffer.str();
+         std::string json_content;
+         for (char c : content) {
+             if (c == '"') json_content += "\\\"";
+             else if (c == '\n') json_content += "\\n";
+             else if (c == '\r') {} 
+             else if (c == '\\') json_content += "\\\\";
+             else json_content += c;
+         }
+         
+         return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"content\": \"" + json_content + "\"}");
+    });
+
+    // API Get Run Logs
+    server_->register_handler("/api/runs/logs", [](const std::string& req) -> std::string {
+         std::string first_line = req.substr(0, req.find("\r\n"));
+         size_t q_pos = first_line.find("?name=");
+         if (q_pos == std::string::npos) return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing name parameter\"}");
+         
+         size_t end_pos = first_line.find(" ", q_pos);
+         std::string run_name = first_line.substr(q_pos + 6, end_pos - (q_pos + 6));
+         
+         if (run_name.empty() || run_name.find("..") != std::string::npos || run_name.find("/") != std::string::npos) {
+             return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Invalid run name\"}");
+         }
+
+         std::string log_path = "runs/" + run_name + "/train.log";
+         if (!std::filesystem::exists(log_path)) {
+             return mm_rec::net::HttpServer::build_response(404, "application/json", "{\"error\": \"Log not found\"}");
+         }
+         
+         std::ifstream f(log_path, std::ios::binary);
+         if (!f.good()) return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Read error\"}");
+         
+         // Read last N bytes
+         const size_t MAX_LOG_SIZE = 16384; // 16KB tail
+         f.seekg(0, std::ios::end);
+         size_t file_size = f.tellg();
+         size_t start_pos = (file_size > MAX_LOG_SIZE) ? (file_size - MAX_LOG_SIZE) : 0;
+         
+         f.seekg(start_pos);
+         std::string content(file_size - start_pos, '\0');
+         f.read(&content[0], content.size());
+         
+         // JSON Escape
+         std::string json_content;
+         for (char c : content) {
+             if (c == '"') json_content += "\\\"";
+             else if (c == '\n') json_content += "\\n";
+             else if (c == '\r') {}
+             else if (c == '\\') json_content += "\\\\";
+             else if ((unsigned char)c < 32) {} // Skip control chars
+             else json_content += c;
+         }
+         
+         return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"content\": \"" + json_content + "\"}");
     });
 
     // --- Phase 3 Config & Data ---

@@ -1,375 +1,357 @@
 const app = {
     // State
+    activeView: 'home',
+    activeRun: null,
+    activeDetailTab: 'monitor',
     chart: null,
-    lossHistory: [],
     pollInterval: null,
-    currentTab: 'overview',
+    lossHistory: [],
 
     init: function () {
-        console.log("Initializing Dashboard...");
+        console.log("Initializing Run-Centric Dashboard...");
         this.initChart();
         this.startPolling();
-        this.updateRuns(); // Initial fetch
-        this.fetchModels(); // Initial fetch for Models tab
+        this.viewHome(); // Default view
     },
 
     startPolling: function () {
         if (this.pollInterval) clearInterval(this.pollInterval);
         this.pollInterval = setInterval(() => {
-            this.fetchStats();
-            this.updateRuns(); // Refresh runs list periodically
+            if (this.activeView === 'home') {
+                this.updateRunsTable();
+            } else if (this.activeView === 'run-detail' && this.activeRun) {
+                this.updateRunMonitor();
+            }
         }, 1000);
     },
 
-    // --- TABS ---
-    switchTab: function (tabName) {
-        this.currentTab = tabName;
+    // --- NAVIGATION ---
+    viewHome: function () {
+        this.switchView('home');
+        this.activeRun = null;
+        this.updateRunsTable();
+    },
 
-        // Buttons
-        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-        const activeBtn = document.querySelector(`.tab-btn[onclick*="${tabName}"]`);
-        if (activeBtn) activeBtn.classList.add('active');
+    viewLibrary: function () {
+        this.switchView('library');
+        this.activeRun = null;
+        this.fetchConfigs();
+        this.fetchDatasets();
+    },
 
-        // Content
-        document.querySelectorAll('.tab-content').forEach(div => div.style.display = 'none');
-        document.getElementById(`tab-${tabName}`).style.display = 'block';
+    viewRun: function (name) {
+        this.activeRun = name;
+        this.switchView('run-detail');
+
+        // Setup Header
+        document.getElementById('detail-run-name').textContent = name;
+        document.getElementById('detail-run-status').textContent = "Loading...";
+
+        // Reset subtabs
+        this.switchDetailTab('monitor');
+
+        // Initial Fetch
+        this.fetchRunDetails(name);
+    },
+
+    switchView: function (viewName) {
+        this.activeView = viewName;
+        // Sidebar active state
+        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+        if (viewName === 'home') document.querySelectorAll('.nav-item')[0].classList.add('active');
+        if (viewName === 'library') document.querySelectorAll('.nav-item')[1].classList.add('active');
+
+        // Show Section
+        document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+        document.getElementById(`view-${viewName}`).classList.add('active');
+    },
+
+    switchDetailTab: function (tabName) {
+        this.activeDetailTab = tabName;
+        document.querySelectorAll('.detail-tab').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.detail-tab').forEach(el => {
+            if (el.textContent.toLowerCase().includes(tabName) || el.onclick.toString().includes(tabName))
+                el.classList.add('active');
+        });
+
+        document.querySelectorAll('.detail-content').forEach(el => el.style.display = 'none');
+        document.getElementById(`detail-tab-${tabName}`).style.display = 'block';
 
         // Lazy Load
-        if (tabName === 'configs') this.fetchConfigs();
-        if (tabName === 'datasets') this.fetchDatasets();
-        if (tabName === 'models') this.fetchModels();
+        if (tabName === 'config') this.fetchRunConfig();
+        if (tabName === 'logs') this.fetchRunLogs();
+        if (tabName === 'models') this.fetchRunModels();
     },
 
-    // --- STATS & CHARTS ---
-    initChart: function () {
-        const ctx = document.getElementById('loss-chart').getContext('2d');
-        this.chart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: [],
-                datasets: [{
-                    label: 'Training Loss',
-                    data: [],
-                    borderColor: '#3498db',
-                    tension: 0.1,
-                    borderWidth: 2,
-                    pointRadius: 0
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                animation: false,
-                scales: {
-                    x: { display: false },
-                    y: { grid: { color: '#333' } }
-                }
-            }
+    // --- HOME WIDGETS ---
+    updateRunsTable: function () {
+        fetch('/api/runs').then(r => r.json()).then(runs => {
+            const tbody = document.getElementById('runs-body');
+            tbody.innerHTML = '';
+            runs.forEach(run => {
+                const tr = document.createElement('tr');
+                tr.style.cursor = 'pointer';
+                tr.onclick = () => this.viewRun(run.name);
+
+                let statusColor = '#888';
+                if (run.status === 'RUNNING') statusColor = '#2ecc71';
+                else if (run.status === 'FAILED') statusColor = '#e74c3c';
+                else if (run.status === 'COMPLETED') statusColor = '#3498db';
+
+                tr.innerHTML = `
+                    <td style="font-weight:bold; color:#fff;">${run.name}</td>
+                    <td><span style="background:${statusColor}; color:#000; padding:2px 6px; border-radius:3px; font-size:0.8em; font-weight:bold;">${run.status}</span></td>
+                    <td>${run.epoch}</td>
+                    <td>${run.loss.toFixed(4)}</td>
+                    <td>${run.size_mb} MB</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            // Check Server Status
+            document.getElementById('server-status').textContent = "Connected • " + runs.length + " runs";
+            document.getElementById('server-status').style.color = "#2ecc71";
+        }).catch(e => {
+            document.getElementById('server-status').textContent = "Disconnected";
+            document.getElementById('server-status').style.color = "#e74c3c";
         });
     },
 
-    fetchStats: function () {
-        fetch('/api/stats')
-            .then(r => r.json())
-            .then(data => {
-                // Update Values
-                document.getElementById('loss-value').textContent = data.loss.toFixed(6);
-                document.getElementById('step-value').textContent = data.step;
-                document.getElementById('lr-value').textContent = data.lr.toExponential(2);
-                document.getElementById('speed-value').textContent = data.speed.toFixed(1) + " tok/s";
-                document.getElementById('mem-value').textContent = data.mem + " MB";
-                document.getElementById('sync-value').textContent = (data.sync_delta * 1000).toFixed(2) + " ms";
-                document.getElementById('server-status').textContent = "Connected (Step " + data.step + ")";
-                document.getElementById('server-status').style.color = "#2ecc71";
+    // --- RUN DETAILS ---
+    fetchRunDetails: function (name) {
+        // Get status to render buttons
+        fetch('/api/runs').then(r => r.json()).then(runs => {
+            const run = runs.find(r => r.name === name);
+            if (run) {
+                const statusEl = document.getElementById('detail-run-status');
+                statusEl.textContent = run.status;
+                statusEl.className = `run-status status-${run.status}`;
 
-                // Update Chart
-                if (data.history && data.history.length > 0) {
-                    // Simple shift logic or full replace
-                    this.chart.data.labels = data.history.map((_, i) => i);
-                    this.chart.data.datasets[0].data = data.history;
-                    this.chart.update();
+                const actions = document.getElementById('detail-actions');
+                actions.innerHTML = '';
+
+                if (run.status === 'RUNNING') {
+                    actions.innerHTML = `<button class="btn-secondary" style="background:#e74c3c; color:white;" onclick="app.stopJob()">Stop Training</button>`;
+                } else {
+                    actions.innerHTML = `
+                        <button class="btn-secondary" onclick="app.resumeJob('${name}')">Resume</button>
+                        <button class="btn-secondary" style="background:#e74c3c; color:white;" onclick="app.deleteJob('${name}')">Delete</button>
+                     `;
                 }
-            })
-            .catch(e => {
-                document.getElementById('server-status').textContent = "Disconnected";
-                document.getElementById('server-status').style.color = "#e74c3c";
-            });
 
-        // Hardware (Separate call or less frequent)
-        fetch('/api/hardware').then(r => r.json()).then(hw => {
-            const container = document.getElementById('hardware-info');
-            container.innerHTML = `
-                <div><strong>GPU:</strong> ${hw.compute_device}</div>
-                <div><strong>VRAM:</strong> ${hw.mem_total_mb} MB</div>
-                <div><strong>CPU:</strong> ${hw.cpu_model}</div>
-                <div><strong>SIMD:</strong> ${hw.simd}</div>
-            `;
-        }).catch(() => { });
+                // Update Monitor Static Data if not running
+                if (run.status !== 'RUNNING') {
+                    document.getElementById('d-loss').textContent = run.loss.toFixed(4);
+                    document.getElementById('d-step').textContent = "Stopped";
+                    document.getElementById('d-speed').textContent = "0";
+                    document.getElementById('d-lr').textContent = "-";
+                }
+            }
+        });
+
+        // Trigger tab load
+        this.switchDetailTab(this.activeDetailTab);
     },
 
-    // --- RUNS MANAGEMENT ---
-    updateRuns: function () {
-        if (this.currentTab !== 'overview') return; // Optimize
+    updateRunMonitor: function () {
+        // Only update live stats if we are watching the RUNNING job
+        fetch('/api/runs').then(r => r.json()).then(runs => {
+            const run = runs.find(r => r.name === this.activeRun);
+            if (run && run.status === 'RUNNING') {
+                fetch('/api/stats').then(r => r.json()).then(data => {
+                    document.getElementById('d-loss').textContent = data.loss.toFixed(5);
+                    document.getElementById('d-step').textContent = data.step;
+                    document.getElementById('d-speed').textContent = data.speed.toFixed(1);
+                    document.getElementById('d-lr').textContent = data.lr.toExponential(2);
 
-        fetch('/api/runs')
-            .then(r => r.json())
-            .then(runs => {
-                const tbody = document.getElementById('runs-body');
-                tbody.innerHTML = '';
-                runs.forEach(run => {
-                    const tr = document.createElement('tr');
-
-                    // Status Badge Color
-                    let statusColor = '#888';
-                    if (run.status === 'RUNNING') statusColor = '#2ecc71';
-                    else if (run.status === 'FAILED') statusColor = '#e74c3c';
-                    else if (run.status === 'COMPLETED') statusColor = '#f1c40f';
-
-                    // Actions Logic
-                    let actions = '';
-                    if (run.status === 'RUNNING') {
-                        actions = `<button class="btn-small btn-danger" onclick="app.stopRun('${run.name}')" title="Stop"><i class="fas fa-stop"></i></button>`;
-                    } else {
-                        // Resume
-                        actions += `<button class="btn-small btn-success" onclick="app.resumeRun('${run.name}')" title="Resume"><i class="fas fa-play"></i></button>`;
-                        // Delete
-                        if (run.status !== 'RUNNING') {
-                            actions += `<button class="btn-small btn-danger" onclick="app.deleteRun('${run.name}')" title="Delete"><i class="fas fa-trash"></i></button>`;
-                        }
+                    if (data.history && data.history.length > 0) {
+                        this.chart.data.labels = data.history.map((_, i) => i);
+                        this.chart.data.datasets[0].data = data.history;
+                        this.chart.update();
                     }
-
-                    tr.innerHTML = `
-                        <td>${run.name}</td>
-                        <td><span style="color:${statusColor}">${run.status}</span></td>
-                        <td>${run.epoch}</td>
-                        <td>${run.loss.toFixed(4)}</td>
-                        <td>${run.best_loss.toFixed(4)}</td>
-                        <td>${run.size_mb}</td>
-                        <td>${actions}</td>
-                    `;
-                    tbody.appendChild(tr);
                 });
-            });
-    },
-
-    stopRun: function (name) {
-        if (!confirm("Stop training '" + name + "'?")) return;
-        fetch('/api/runs/stop', { method: 'POST' }).then(() => this.updateRuns());
-    },
-
-    resumeRun: function (name) {
-        fetch('/api/runs/resume?name=' + name, { method: 'POST' })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) alert(d.error);
-                this.updateRuns();
-            });
-    },
-
-    deleteRun: function (name) {
-        if (!confirm("Delete run '" + name + "' and all data?")) return;
-        fetch('/api/runs/delete?name=' + name, { method: 'DELETE' })
-            .then(r => r.json())
-            .then(d => {
-                if (d.error) alert(d.error);
-                this.updateRuns();
-            });
-    },
-
-    // --- NEW RUN MODAL ---
-    openNewRunModal: function () {
-        document.getElementById('modal-new-run').style.display = 'block';
-
-        // Fetch Configs
-        fetch('/api/configs').then(r => r.json()).then(configs => {
-            const sel = document.getElementById('new-run-config');
-            sel.innerHTML = '';
-            configs.forEach(c => {
-                // c is filename string? or object? implementation returned list of strings
-                const opt = document.createElement('option');
-                opt.value = c;
-                opt.textContent = c;
-                sel.appendChild(opt);
-            });
-        });
-
-        // Fetch Datasets
-        fetch('/api/datasets').then(r => r.json()).then(datasets => {
-            const sel = document.getElementById('new-run-dataset');
-            sel.innerHTML = '';
-            datasets.forEach(d => {
-                const opt = document.createElement('option');
-                opt.value = d.name;
-                opt.textContent = `${d.name} (${d.size_mb} MB)`;
-                sel.appendChild(opt);
-            });
+            }
         });
     },
 
-    startNewRun: function () {
-        const name = document.getElementById('new-run-name').value.trim();
-        const config = document.getElementById('new-run-config').value;
-        const dataset = document.getElementById('new-run-dataset').value;
+    fetchRunConfig: function () {
+        if (!this.activeRun) return;
+        const container = document.getElementById('d-config-content');
+        container.textContent = "Loading...";
 
-        if (!config || !dataset) {
-            alert("Please select config and dataset");
-            return;
-        }
-
-        const payload = {
-            run_name: name,
-            config_file: config,
-            data_file: dataset
-        };
-
-        fetch('/api/runs/start', {
-            method: 'POST',
-            body: JSON.stringify(payload),
-            headers: { 'Content-Type': 'application/json' }
-        })
+        fetch(`/api/runs/config?name=${this.activeRun}`)
             .then(r => r.json())
             .then(data => {
-                if (data.error) alert("Error: " + data.error);
+                if (data.error) container.textContent = data.error;
+                else container.textContent = data.content || "Empty Config";
+            });
+    },
+
+    fetchRunLogs: function () {
+        if (!this.activeRun) return;
+        const container = document.getElementById('d-log-content');
+        // container.textContent = "Loading..."; // Don't wipe if refreshing
+
+        fetch(`/api/runs/logs?name=${this.activeRun}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) container.textContent = data.error;
                 else {
-                    this.closeModal('modal-new-run');
-                    this.switchTab('overview');
-                    this.updateRuns();
+                    container.textContent = data.content;
+                    container.scrollTop = container.scrollHeight; // Auto scroll
                 }
             });
     },
 
-    // --- CONFIGS ---
-    fetchConfigs: function () {
-        fetch('/api/configs')
-            .then(r => r.json())
-            .then(items => {
-                const list = document.getElementById('config-list');
-                list.innerHTML = '';
-                items.forEach(c => {
-                    const li = document.createElement('li');
-                    li.innerHTML = `<span><i class="fas fa-file-code"></i> ${c}</span>`;
-                    list.appendChild(li);
-                });
+    fetchRunModels: function () {
+        if (!this.activeRun) return;
+        fetch('/api/models').then(r => r.json()).then(allModels => {
+            // Filter for this run
+            // Run models are in "run_name/checkpoint.bin"
+            // Or maybe just check if name contains activeRun
+            const models = allModels.filter(m => m.name.startsWith(this.activeRun + "/"));
+
+            const list = document.getElementById('d-model-list');
+            const select = document.getElementById('d-inference-model');
+            list.innerHTML = '';
+            select.innerHTML = '';
+
+            if (models.length === 0) list.innerHTML = '<li style="color:#666">No checkpoints found.</li>';
+
+            models.forEach(m => {
+                // List Item
+                const li = document.createElement('li');
+                const shortName = m.name.split('/').pop();
+                li.innerHTML = `<span>${shortName}</span> <a href="/api/models/download?name=${m.name}" target="_blank" class="btn-small btn-secondary">Download (${m.size_mb} MB)</a>`;
+                list.appendChild(li);
+
+                // Select Option
+                const opt = document.createElement('option');
+                opt.value = m.name;
+                opt.textContent = shortName;
+                select.appendChild(opt);
             });
-    },
-
-    openNewConfigModal: function () {
-        document.getElementById('modal-new-config').style.display = 'block';
-    },
-
-    createConfig: function () {
-        const filename = document.getElementById('new-config-filename').value.trim();
-        const content = document.getElementById('new-config-content').value;
-
-        fetch('/api/configs/create', {
-            method: 'POST',
-            body: JSON.stringify({ filename, content }),
-            headers: { 'Content-Type': 'application/json' }
-        }).then(r => r.json()).then(d => {
-            if (d.error) alert(d.error);
-            else {
-                this.closeModal('modal-new-config');
-                this.fetchConfigs();
-            }
         });
     },
 
-    // --- DATASETS ---
-    fetchDatasets: function () {
-        fetch('/api/datasets')
-            .then(r => r.json())
-            .then(items => {
-                const list = document.getElementById('dataset-list');
-                list.innerHTML = '';
-                items.forEach(d => {
-                    const li = document.createElement('li');
-                    li.innerHTML = `<span><i class="fas fa-database"></i> ${d.name}</span> <span style="color:#888">${d.size_mb} MB</span>`;
-                    list.appendChild(li);
-                });
-            });
-    },
-
-    uploadDataset: function () {
-        const fileInput = document.getElementById('dataset-file-input');
-        if (fileInput.files.length === 0) return;
-        const file = fileInput.files[0];
-
-        document.getElementById('upload-status').textContent = "Uploading...";
-
-        fetch('/api/datasets/upload?name=' + encodeURIComponent(file.name), {
-            method: 'PUT',
-            body: file
-        }).then(r => r.json()).then(d => {
-            if (d.error) {
-                document.getElementById('upload-status').textContent = "Error: " + d.error;
-            } else {
-                document.getElementById('upload-status').textContent = "Success!";
-                this.fetchDatasets();
-                fileInput.value = ''; // Reset
-            }
-        });
-    },
-
-    // --- MODELS & INFERENCE ---
-    fetchModels: function () {
-        fetch('/api/models').then(r => r.json()).then(items => {
-            // Models List
-            const list = document.getElementById('model-list');
-            if (list) {
-                list.innerHTML = '';
-                items.forEach(m => {
-                    const li = document.createElement('li');
-                    li.innerHTML = `
-                        <span><i class="fas fa-cube"></i> ${m.name}</span>
-                        <div>
-                            <span style="color:#888; margin-right:10px;">${m.size_mb} MB</span>
-                            <a href="/api/models/download?name=${m.name}" target="_blank" class="btn-small btn-secondary"><i class="fas fa-download"></i></a>
-                        </div>`;
-                    list.appendChild(li);
-                });
-            }
-
-            // Inference Select
-            const sel = document.getElementById('inference-model-select');
-            if (sel) {
-                const current = sel.value;
-                sel.innerHTML = '';
-                items.forEach(m => {
-                    const opt = document.createElement('option');
-                    opt.value = m.name;
-                    opt.textContent = m.name;
-                    if (m.name === current) opt.selected = true;
-                    sel.appendChild(opt);
-                });
-                if (!current && items.length > 0) sel.value = items[0].name;
-            }
-        });
-    },
-
-    runInference: function () {
-        const model = document.getElementById('inference-model-select').value;
-        const prompt = document.getElementById('inference-prompt').value;
-        const resultBox = document.getElementById('inference-result');
+    runRunInference: function () {
+        const model = document.getElementById('d-inference-model').value;
+        const prompt = document.getElementById('d-inference-prompt').value;
+        const resultBox = document.getElementById('d-inference-result');
+        if (!model) { alert("No model selected"); return; }
 
         resultBox.textContent = "Generating...";
-
         fetch('/api/inference', {
             method: 'POST',
             body: JSON.stringify({ model, prompt }),
             headers: { 'Content-Type': 'application/json' }
         }).then(r => r.json()).then(d => {
-            if (d.error) resultBox.textContent = "Error: " + d.error;
-            else resultBox.textContent = d.text;
+            resultBox.textContent = d.text || d.error;
         });
     },
 
-    // Utils
-    closeModal: function (id) {
-        document.getElementById(id).style.display = 'none';
+    // --- ACTIONS ---
+    stopJob: function () {
+        if (!confirm("Stop training?")) return;
+        fetch('/api/runs/stop', { method: 'POST' }).then(() => {
+            setTimeout(() => this.fetchRunDetails(this.activeRun), 1000);
+        });
+    },
+    resumeJob: function (name) {
+        fetch('/api/runs/resume?name=' + name, { method: 'POST' }).then(() => {
+            setTimeout(() => this.fetchRunDetails(this.activeRun), 1000);
+        });
+    },
+    deleteJob: function (name) {
+        if (!confirm("Delete run data permanently?")) return;
+        fetch('/api/runs/delete?name=' + name, { method: 'DELETE' }).then(() => {
+            this.viewHome(); // Go back
+        });
+    },
+
+    // --- LIBRARY MANAGERS ---
+    fetchConfigs: function () {
+        fetch('/api/configs').then(r => r.json()).then(list => {
+            const ul = document.getElementById('config-list');
+            ul.innerHTML = '';
+            list.forEach(c => {
+                const li = document.createElement('li');
+                li.innerHTML = `<span>${c}</span>`;
+                ul.appendChild(li);
+            });
+        });
+    },
+    fetchDatasets: function () {
+        fetch('/api/datasets').then(r => r.json()).then(list => {
+            const ul = document.getElementById('dataset-list');
+            ul.innerHTML = '';
+            list.forEach(c => {
+                const li = document.createElement('li');
+                li.innerHTML = `<span>${c.name}</span> <span style="color:#666">${c.size_mb} MB</span>`;
+                ul.appendChild(li);
+            });
+        });
+    },
+
+    // --- CREATE/UPLOAD (New Run Modal) ---
+    openNewRunModal: function () {
+        document.getElementById('modal-new-run').style.display = 'block';
+        // Populate dropdowns
+        fetch('/api/configs').then(r => r.json()).then(l => {
+            const s = document.getElementById('new-run-config'); s.innerHTML = '';
+            l.forEach(x => { const o = document.createElement('option'); o.value = x; o.textContent = x; s.appendChild(o); });
+        });
+        fetch('/api/datasets').then(r => r.json()).then(l => {
+            const s = document.getElementById('new-run-dataset'); s.innerHTML = '';
+            l.forEach(x => { const o = document.createElement('option'); o.value = x.name; o.textContent = x.name; s.appendChild(o); });
+        });
+    },
+    startNewRun: function () {
+        const name = document.getElementById('new-run-name').value;
+        const config = document.getElementById('new-run-config').value;
+        const dataset = document.getElementById('new-run-dataset').value;
+        if (!name) return alert("Enter name");
+
+        fetch('/api/runs/start', {
+            method: 'POST',
+            body: JSON.stringify({ run_name: name, config_file: config, data_file: dataset })
+        }).then(r => r.json()).then(d => {
+            if (d.error) alert(d.error);
+            else {
+                document.getElementById('modal-new-run').style.display = 'none';
+                this.viewRun(name); // Go close to the new run
+            }
+        });
+    },
+
+    // --- CHART ---
+    initChart: function () {
+        const ctx = document.getElementById('detail-chart').getContext('2d');
+        this.chart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: [], datasets: [{ label: 'Loss', data: [], borderColor: '#3498db', borderWidth: 2 }] },
+            options: { responsive: true, maintainAspectRatio: false, scales: { x: { display: false }, y: { grid: { color: '#333' } } } }
+        });
+    },
+
+    // --- MODALS (Generic) ---
+    openNewConfigModal: function () { document.getElementById('modal-new-config').style.display = 'block'; },
+    closeModal: function (id) { document.getElementById(id).style.display = 'none'; },
+    createConfig: function () {
+        const f = document.getElementById('new-config-filename').value;
+        const c = document.getElementById('new-config-content').value;
+        fetch('/api/configs/create', { method: 'POST', body: JSON.stringify({ filename: f, content: c }) })
+            .then(() => { this.closeModal('modal-new-config'); this.fetchConfigs(); });
+    },
+    uploadDataset: function () {
+        const f = document.getElementById('dataset-file-input').files[0];
+        if (!f) return;
+        document.getElementById('upload-status').textContent = 'Uploading...';
+        fetch('/api/datasets/upload?name=' + f.name, { method: 'PUT', body: f }).then(() => {
+            document.getElementById('upload-status').textContent = 'Done';
+            this.fetchDatasets();
+        });
     }
 };
 
-// Start
-document.addEventListener('DOMContentLoaded', () => {
-    app.init();
-});
+document.addEventListener('DOMContentLoaded', () => app.init());

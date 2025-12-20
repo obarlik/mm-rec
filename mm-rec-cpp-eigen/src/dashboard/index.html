@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,124 +10,257 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
-        /* Tabs */
-        .tabs {
+        /* Layout */
+        body {
             display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 250px;
+            background: #1a1a1a;
+            border-right: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            border-bottom: 1px solid #333;
+            color: #3498db;
+        }
+
+        .nav-item {
+            padding: 15px 20px;
+            cursor: pointer;
+            color: #888;
+            display: flex;
+            align-items: center;
+            text-decoration: none;
+        }
+
+        .nav-item:hover {
+            background: #252525;
+            color: #fff;
+        }
+
+        .nav-item.active {
+            background: #252525;
+            color: #fff;
+            border-left: 4px solid #3498db;
+        }
+
+        .nav-item i {
+            margin-right: 10px;
+            width: 20px;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #121212;
+            position: relative;
+        }
+
+        .view-section {
+            display: none;
+        }
+
+        .view-section.active {
+            display: block;
+        }
+
+        /* Run Detail Header */
+        .run-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             margin-bottom: 20px;
             border-bottom: 1px solid #333;
+            padding-bottom: 20px;
         }
-        .tab-btn {
-            background: none;
-            border: none;
-            color: #888;
+
+        .run-title {
+            font-size: 1.5rem;
+        }
+
+        .run-status {
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+
+        .status-RUNNING {
+            background: #2ecc71;
+            color: #000;
+        }
+
+        .status-COMPLETED {
+            background: #3498db;
+            color: #fff;
+        }
+
+        .status-STOPPED {
+            background: #f1c40f;
+            color: #000;
+        }
+
+        .status-FAILED {
+            background: #e74c3c;
+            color: #fff;
+        }
+
+        /* Detail Tabs */
+        .detail-tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #444;
+        }
+
+        .detail-tab {
             padding: 10px 20px;
             cursor: pointer;
-            font-size: 1rem;
+            color: #aaa;
+            border-bottom: 2px solid transparent;
         }
-        .tab-btn.active {
+
+        .detail-tab:hover {
             color: #fff;
-            border-bottom: 2px solid #3498db;
         }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
-        
-        /* Modals */
-        .modal {
-            display: none; 
-            position: fixed; 
-            z-index: 1000; 
-            left: 0; top: 0; 
-            width: 100%; height: 100%; 
-            background-color: rgba(0,0,0,0.7); 
+
+        .detail-tab.active {
+            color: #3498db;
+            border-bottom-color: #3498db;
         }
-        .modal-content {
-            background-color: #1e1e1e;
-            margin: 10% auto; 
-            padding: 20px; 
+
+        /* Logs */
+        .log-viewer {
+            background: #000;
+            color: #ccc;
+            font-family: monospace;
+            padding: 15px;
+            height: 500px;
+            overflow-y: scroll;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-size: 0.9rem;
+        }
+
+        /* Config Viewer */
+        .config-viewer {
+            background: #1e1e1e;
+            padding: 15px;
+            font-family: monospace;
+            color: #a9b7c6;
+            white-space: pre;
+            overflow-x: auto;
             border: 1px solid #333;
-            width: 50%; 
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }
-        .close { float: right; font-size: 28px; cursor: pointer; color: #aaa; }
-        .close:hover { color: #fff; }
-        
-        /* Utils */
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; color: #bbb; }
-        .form-group input, .form-group select, .form-group textarea {
-            width: 100%; 
-            padding: 8px; 
-            background: #2b2b2b; 
-            border: 1px solid #444; 
-            color: #fff; 
             border-radius: 4px;
         }
-        .upload-area { border: 2px dashed #444; padding: 20px; text-align: center; border-radius: 8px; font-size: 0.9em;}
-        .grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .result-box { background: #111; padding: 10px; margin-top: 10px; border-radius: 4px; min-height: 50px; font-family: monospace; white-space: pre-wrap; }
-        .item-list { list-style: none; padding: 0; }
-        .item-list li { background: #252525; padding: 10px; margin-bottom: 5px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
-        .btn-small { padding: 4px 8px; font-size: 0.8em; margin-left: 5px; }
+
+        /* Utils */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+        }
+
+        .modal-content {
+            background: #1e1e1e;
+            margin: 10% auto;
+            padding: 20px;
+            width: 50%;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #bbb;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 8px;
+            background: #2b2b2b;
+            border: 1px solid #444;
+            color: #fff;
+            border-radius: 4px;
+        }
+
+        .grid-2col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .item-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .item-list li {
+            background: #252525;
+            padding: 10px;
+            margin-bottom: 5px;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .btn-small {
+            padding: 2px 8px;
+            font-size: 0.8rem;
+            margin-left: 5px;
+            cursor: pointer;
+        }
     </style>
 </head>
+
 <body>
-    <div class="container">
-        <header>
-            <h1>MM-Rec Dashboard</h1>
-            <div id="server-status" class="status-indicator">Connecting...</div>
-        </header>
 
-        <!-- Navigation Tabs -->
-        <div class="tabs">
-            <button class="tab-btn active" onclick="app.switchTab('overview')">Overview</button>
-            <button class="tab-btn" onclick="app.switchTab('configs')">Configs</button>
-            <button class="tab-btn" onclick="app.switchTab('datasets')">Datasets</button>
-            <button class="tab-btn" onclick="app.switchTab('models')">Models</button>
+    <!-- SIDEBAR -->
+    <nav class="sidebar">
+        <div class="sidebar-header">MM-Rec Access</div>
+        <a href="#" class="nav-item active" onclick="app.viewHome()">
+            <i class="fas fa-list"></i> Training Runs
+        </a>
+        <a href="#" class="nav-item" onclick="app.viewLibrary()">
+            <i class="fas fa-book"></i> Library
+        </a>
+        <div style="flex:1"></div>
+        <div style="padding: 20px; color:#666; font-size:0.8rem;" id="server-status">
+            Connecting...
         </div>
+    </nav>
 
-        <!-- TAB: OVERVIEW -->
-        <div id="tab-overview" class="tab-content active">
-            <!-- Stats -->
-            <div class="stats-grid">
-                <div class="card">
-                    <h3>Current Loss</h3>
-                    <div class="value" id="loss-value">--</div>
-                </div>
-                <div class="card">
-                    <h3>Step</h3>
-                    <div class="value" id="step-value">--</div>
-                </div>
-                <div class="card">
-                    <h3>Learning Rate</h3>
-                    <div class="value" id="lr-value">--</div>
-                </div>
-                <div class="card">
-                    <h3>Speed</h3>
-                    <div class="value" id="speed-value">--</div>
-                </div>
-                <div class="card">
-                    <h3>Memory Usage</h3>
-                    <div class="value" id="mem-value">--</div>
-                </div>
-                <div class="card">
-                    <h3>Hybrid Sync Delta</h3>
-                    <div class="value" id="sync-value">--</div>
-                </div>
-            </div>
+    <!-- MAIN CONTENT -->
+    <div class="main-content">
 
-            <!-- Charts -->
-            <div class="charts-container">
-                <div class="chart-card">
-                    <h3>Loss History</h3>
-                    <div class="chart-box" id="loss-chart"></div>
-                </div>
-            </div>
-
-            <!-- Runs -->
+        <!-- VIEW: HOME (RUNS LIST) -->
+        <div id="view-home" class="view-section active">
             <div class="card">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                    <h3>Training Runs</h3>
+                    <h2>Training Runs</h2>
                     <button class="btn-primary" onclick="app.openNewRunModal()">+ New Training</button>
                 </div>
                 <table id="runs-table">
@@ -136,70 +270,120 @@
                             <th>Status</th>
                             <th>Epoch</th>
                             <th>Loss</th>
-                            <th>Best Loss</th>
-                            <th>Size (MB)</th>
-                            <th>Actions</th>
+                            <th>Size</th>
                         </tr>
                     </thead>
-                    <tbody id="runs-body">
-                        <!-- Populated by JS -->
-                    </tbody>
+                    <tbody id="runs-body"></tbody>
                 </table>
             </div>
-
-            <!-- Hardware -->
-            <div class="card">
-                <h3>Hardware Info</h3>
-                <div id="hardware-info" class="info-grid">
-                    <!-- Populated by JS -->
-                </div>
-            </div>
         </div>
 
-        <!-- TAB: CONFIGS -->
-        <div id="tab-configs" class="tab-content">
-            <div class="card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                    <h3>Configurations</h3>
-                    <button class="btn-primary" onclick="app.openNewConfigModal()">+ New Config</button>
-                </div>
-                <ul id="config-list" class="item-list"></ul>
-            </div>
-        </div>
-
-        <!-- TAB: DATASETS -->
-        <div id="tab-datasets" class="tab-content">
-            <div class="card">
-                <h3>Datasets</h3>
-                <div class="upload-area">
-                    <input type="file" id="dataset-file-input">
-                    <button class="btn-secondary" onclick="app.uploadDataset()">Upload Dataset</button>
-                    <span id="upload-status" style="margin-left:10px;"></span>
-                </div>
-                <br>
-                <ul id="dataset-list" class="item-list"></ul>
-            </div>
-        </div>
-
-        <!-- TAB: MODELS -->
-        <div id="tab-models" class="tab-content">
+        <!-- VIEW: LIBRARY -->
+        <div id="view-library" class="view-section">
+            <h2>Library</h2>
             <div class="grid-2col">
+                <!-- Configs -->
                 <div class="card">
-                    <h3>Local Models & Checkpoints</h3>
-                    <ul id="model-list" class="item-list"></ul>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                        <h3>Configurations</h3>
+                        <button class="btn-primary btn-small" onclick="app.openNewConfigModal()">+ Create</button>
+                    </div>
+                    <ul id="config-list" class="item-list"></ul>
                 </div>
+
+                <!-- Datasets -->
                 <div class="card">
-                    <h3>Inference Playground</h3>
-                    <div class="form-group">
-                        <label>Select Model</label>
-                        <select id="inference-model-select"></select>
+                    <h3>Datasets</h3>
+                    <div class="upload-area" style="border:1px dashed #444; padding:10px; margin-bottom:10px;">
+                        <input type="file" id="dataset-file-input">
+                        <button class="btn-secondary btn-small" onclick="app.uploadDataset()">Upload</button>
+                        <span id="upload-status" style="font-size:0.8em; margin-left:5px;"></span>
                     </div>
-                    <div class="form-group">
-                        <label>Prompt</label>
-                        <textarea id="inference-prompt" rows="4" placeholder="Enter text to generate..."></textarea>
+                    <ul id="dataset-list" class="item-list"></ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- VIEW: RUN DETAIL -->
+        <div id="view-run-detail" class="view-section">
+            <!-- Header -->
+            <div class="run-header">
+                <div>
+                    <button onclick="app.viewHome()" class="btn-secondary btn-small" style="margin-right:10px;">&larr;
+                        Back</button>
+                    <span id="detail-run-name" class="run-title">Run Name</span>
+                    <span id="detail-run-status" class="run-status">STATUS</span>
+                </div>
+                <div id="detail-actions">
+                    <!-- Buttons injected via JS -->
+                </div>
+            </div>
+
+            <!-- Sub Tabs -->
+            <div class="detail-tabs">
+                <div class="detail-tab active" onclick="app.switchDetailTab('monitor')">Monitor</div>
+                <div class="detail-tab" onclick="app.switchDetailTab('config')">Configuration</div>
+                <div class="detail-tab" onclick="app.switchDetailTab('logs')">Logs</div>
+                <div class="detail-tab" onclick="app.switchDetailTab('models')">Models & Checkpoints</div>
+            </div>
+
+            <!-- TAB: MONITOR -->
+            <div id="detail-tab-monitor" class="detail-content active">
+                <div class="stats-grid">
+                    <div class="card">
+                        <h3>Loss</h3>
+                        <div class="value" id="d-loss">--</div>
                     </div>
-                    <button class="btn-primary" onclick="app.runInference()">Generate</button>
-                    <div id="inference-result" class="result-box"></div>
+                    <div class="card">
+                        <h3>Step</h3>
+                        <div class="value" id="d-step">--</div>
+                    </div>
+                    <div class="card">
+                        <h3>Speed</h3>
+                        <div class="value" id="d-speed">--</div>
+                    </div>
+                    <div class="card">
+                        <h3>LR</h3>
+                        <div class="value" id="d-lr">--</div>
+                    </div>
+                </div>
+                <div class="chart-container" style="height:300px; margin-top:20px;">
+                    <canvas id="detail-chart"></canvas>
+                </div>
+            </div>
+
+            <!-- TAB: CONFIG -->
+            <div id="detail-tab-config" class="detail-content" style="display:none;">
+                <div class="config-viewer" id="d-config-content">Loading...</div>
+            </div>
+
+            <!-- TAB: LOGS -->
+            <div id="detail-tab-logs" class="detail-content" style="display:none;">
+                <div style="margin-bottom:10px;">
+                    <button class="btn-secondary btn-small" onclick="app.fetchRunLogs()">Refresh Logs</button>
+                    <span style="color:#666; margin-left:10px; font-size:0.8rem;">Showing last 16KB</span>
+                </div>
+                <div class="log-viewer" id="d-log-content">Loading...</div>
+            </div>
+
+            <!-- TAB: MODELS -->
+            <div id="detail-tab-models" class="detail-content" style="display:none;">
+                <div class="grid-2col">
+                    <div class="card">
+                        <h3>Checkpoints</h3>
+                        <ul id="d-model-list" class="item-list"></ul>
+                    </div>
+                    <div class="card">
+                        <h3>Quick Inference</h3>
+                        <select id="d-inference-model" class="form-control"
+                            style="width:100%; margin-bottom:10px;"></select>
+                        <textarea id="d-inference-prompt" rows="3" style="width:100%;"
+                            placeholder="Prompt..."></textarea>
+                        <button onclick="app.runRunInference()" class="btn-primary"
+                            style="margin-top:10px;">Generate</button>
+                        <div id="d-inference-result"
+                            style="background:#000; padding:10px; margin-top:10px; min-height:50px;"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -209,57 +393,27 @@
     <!-- MODAL: NEW RUN -->
     <div id="modal-new-run" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="app.closeModal('modal-new-run')">&times;</span>
+            <span style="float:right; cursor:pointer;" onclick="app.closeModal('modal-new-run')">&times;</span>
             <h2>Start New Training</h2>
-            <div class="form-group">
-                <label>Run Name</label>
-                <input type="text" id="new-run-name" placeholder="run_experiment_1">
-            </div>
-            <div class="form-group">
-                <label>Base Configuration</label>
-                <select id="new-run-config"></select>
-            </div>
-            <div class="form-group">
-                <label>Dataset</label>
-                <select id="new-run-dataset"></select>
-            </div>
-            <div style="text-align:right;">
-                <button class="btn-secondary" onclick="app.closeModal('modal-new-run')">Cancel</button>
-                <button class="btn-primary" onclick="app.startNewRun()">Start Training</button>
-            </div>
+            <div class="form-group"><label>Name</label><input type="text" id="new-run-name"></div>
+            <div class="form-group"><label>Config</label><select id="new-run-config"></select></div>
+            <div class="form-group"><label>Dataset</label><select id="new-run-dataset"></select></div>
+            <button class="btn-primary" onclick="app.startNewRun()">Start</button>
         </div>
     </div>
 
     <!-- MODAL: NEW CONFIG -->
     <div id="modal-new-config" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="app.closeModal('modal-new-config')">&times;</span>
-            <h2>Create New Configuration</h2>
-            <div class="form-group">
-                <label>Filename (e.g. experimental.ini)</label>
-                <input type="text" id="new-config-filename">
-            </div>
-            <div class="form-group">
-                <label>Content (INI Format)</label>
-                <textarea id="new-config-content" rows="10" spellcheck="false">[model]
-vocab_size = 50257
-hidden_dim = 768
-num_layers = 12
-
-[training]
-batch_size = 16
-learning_rate = 3e-4
-max_epochs = 10
-context_length = 1024
-</textarea>
-            </div>
-            <div style="text-align:right;">
-                <button class="btn-secondary" onclick="app.closeModal('modal-new-config')">Cancel</button>
-                <button class="btn-primary" onclick="app.createConfig()">Save Configuration</button>
-            </div>
+            <span style="float:right; cursor:pointer;" onclick="app.closeModal('modal-new-config')">&times;</span>
+            <h2>New Config</h2>
+            <div class="form-group"><label>Filename</label><input type="text" id="new-config-filename"></div>
+            <div class="form-group"><label>Content</label><textarea id="new-config-content" rows="10"></textarea></div>
+            <button class="btn-primary" onclick="app.createConfig()">Save</button>
         </div>
     </div>
 
     <script src="/static/app.js"></script>
 </body>
+
 </html>
