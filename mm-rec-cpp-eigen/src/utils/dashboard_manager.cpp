@@ -133,6 +133,59 @@ void DashboardManager::update_system_stats(size_t mem_mb) {
     stats_.memory_usage_mb = mem_mb;
 }
 
+// --- Helper for Resumable File Serving ---
+static std::string serve_file_with_range(const std::string& path, const std::string& req) {
+    if (!std::filesystem::exists(path)) return mm_rec::net::HttpServer::build_response(404, "text/plain", "Not found");
+    
+    uintmax_t file_size = std::filesystem::file_size(path);
+    size_t range_start = 0;
+    size_t range_end = file_size - 1;
+    bool is_range = false;
+
+    // Parse Range Header
+    size_t range_header_pos = req.find("Range: bytes=");
+    if (range_header_pos != std::string::npos) {
+         is_range = true;
+         size_t start_val = range_header_pos + 13;
+         size_t dash_pos = req.find("-", start_val);
+         size_t end_line = req.find("\r\n", start_val);
+         
+         if (dash_pos != std::string::npos && dash_pos < end_line) {
+             try {
+                 range_start = std::stoull(req.substr(start_val, dash_pos - start_val));
+                 std::string end_str = req.substr(dash_pos + 1, end_line - (dash_pos + 1));
+                 if (!end_str.empty()) range_end = std::stoull(end_str);
+             } catch (...) { is_range = false; }
+         }
+    }
+
+    if (range_start >= file_size || range_end >= file_size || range_start > range_end) {
+         std::string cr = "bytes */" + std::to_string(file_size);
+         return "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: " + cr + "\r\nContent-Length: 0\r\n\r\n";
+    }
+
+    std::ifstream f(path, std::ios::binary);
+    if (!f.good()) return mm_rec::net::HttpServer::build_response(500, "text/plain", "Read error");
+
+    f.seekg(range_start);
+    size_t chunk_size = range_end - range_start + 1;
+    std::vector<char> buffer(chunk_size);
+    f.read(buffer.data(), chunk_size);
+    std::string body(buffer.begin(), buffer.end());
+
+    if (is_range) {
+         std::stringstream header;
+         header << "HTTP/1.1 206 Partial Content\r\n";
+         header << "Content-Type: application/octet-stream\r\n";
+         header << "Content-Length: " << chunk_size << "\r\n";
+         header << "Content-Range: bytes " << range_start << "-" << range_end << "/" << file_size << "\r\n";
+         header << "Access-Control-Allow-Origin: *\r\n\r\n";
+         return header.str() + body;
+    } else {
+         return mm_rec::net::HttpServer::build_response(200, "application/octet-stream", body); 
+    }
+}
+
 void DashboardManager::register_routes() {
     if (!server_) return;
 
@@ -160,6 +213,7 @@ void DashboardManager::register_routes() {
     
     // API Stats
     server_->register_handler("/api/stats", [this](const std::string&) -> std::string {
+
         std::stringstream ss;
         ss << "{";
         {
@@ -704,14 +758,8 @@ void DashboardManager::register_routes() {
              path = "./" + name;
         }
 
-        if (!std::filesystem::exists(path)) return mm_rec::net::HttpServer::build_response(404, "text/plain", "Not found: " + path);
-        
-        std::ifstream f(path, std::ios::binary);
-        if (!f.good()) return mm_rec::net::HttpServer::build_response(500, "text/plain", "Read error");
-        
-        std::stringstream buffer;
-        buffer << f.rdbuf();
-        return mm_rec::net::HttpServer::build_response(200, "application/octet-stream", buffer.str()); 
+    // Use the common helper
+        return serve_file_with_range(path, req);
     });
 
     // API Inference
