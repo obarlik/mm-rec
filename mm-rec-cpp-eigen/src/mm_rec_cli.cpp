@@ -3,6 +3,8 @@
 #include <vector>
 #include <map>
 #include <functional>
+#include <csignal>
+#include <cstdlib>
 #include "mm_rec/utils/logger.h"
 #include "mm_rec/utils/ui.h"
 #include "cli/commands.h"
@@ -11,6 +13,42 @@
 
 using namespace mm_rec;
 using namespace mm_rec::ui;
+
+// ========================================
+// SIGNAL HANDLING FOR GRACEFUL SHUTDOWN
+// ========================================
+// This prevents zombie processes by ensuring clean resource cleanup
+// when the process receives SIGINT (Ctrl+C) or SIGTERM
+
+volatile std::sig_atomic_t g_shutdown_requested = 0;
+
+void signal_handler(int signal) {
+    if (g_shutdown_requested) {
+        // Second signal - force exit
+        std::cerr << "\n[FORCE EXIT] Received signal " << signal << " again. Forcing immediate termination...\n";
+        std::_Exit(1);
+    }
+    
+    g_shutdown_requested = 1;
+    std::cerr << "\n[SHUTDOWN] Received signal " << signal << ". Cleaning up...\n";
+    
+    // Stop dashboard server
+    DashboardManager::instance().stop();
+    
+    std::cerr << "[SHUTDOWN] Cleanup complete. Exiting gracefully.\n";
+    std::exit(0);
+}
+
+void setup_signal_handlers() {
+    // Handle Ctrl+C (SIGINT)
+    std::signal(SIGINT, signal_handler);
+    
+    // Handle termination request (SIGTERM)
+    std::signal(SIGTERM, signal_handler);
+    
+    // Handle quit signal (SIGQUIT)
+    std::signal(SIGQUIT, signal_handler);
+}
 
 void print_usage(const char* prog_name) {
     ui::print_header("MM-Rec CLI Utility");
@@ -27,6 +65,12 @@ void print_usage(const char* prog_name) {
 }
 
 int main(int argc, char* argv[]) {
+    // ========================================
+    // SETUP SIGNAL HANDLERS FIRST
+    // ========================================
+    // This ensures graceful shutdown even if initialization fails
+    setup_signal_handlers();
+    
     // 🔥 AUTO-TUNE: SystemOptimizer
     // By default, we use ALL cores for maximum throughput (1.5 GFLOPS).
     // If the user wants stability/efficiency (0.8 GFLOPS but low heat), they can enable P-Core pinning.

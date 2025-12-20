@@ -150,6 +150,8 @@ private:
         }
 
         std::string response;
+        // Debug logging
+        std::cout << "[HTTP] Path: "" << path << """ << std::endl;
         if (handlers_.count(path)) {
             response = handlers_[path](request);
         } else {

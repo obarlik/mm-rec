@@ -156,6 +156,9 @@ set(DATA_SOURCES
     src/data/data_loader.cpp
     src/data/tokenizer.cpp
 )
+# Embed dashboard assets
+add_subdirectory(src/dashboard)
+
 
 # Main library
 add_library(mm_rec_eigen STATIC 
@@ -167,6 +170,10 @@ add_library(mm_rec_eigen STATIC
     ${JOB_SOURCES}
     ${DATA_SOURCES}
 )
+
+# Include generated dashboard assets
+target_include_directories(mm_rec_eigen PRIVATE ${CMAKE_BINARY_DIR}/src/dashboard)
+
 
 target_link_libraries(mm_rec_eigen
     Eigen3::Eigen

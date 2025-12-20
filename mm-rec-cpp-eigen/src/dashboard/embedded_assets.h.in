@@ -1,0 +1,11 @@
+#pragma once
+
+namespace mm_rec {
+namespace assets {
+
+constexpr char INDEX_HTML[] = "@EMBEDDED_HTML@";
+constexpr char STYLE_CSS[] = "@EMBEDDED_CSS@";
+constexpr char APP_JS[] = "@EMBEDDED_JS@";
+
+} // namespace assets
+} // namespace mm_rec

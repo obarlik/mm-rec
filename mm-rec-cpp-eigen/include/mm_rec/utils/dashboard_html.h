@@ -115,9 +115,9 @@ constexpr char DASHBOARD_HTML[] = R"HTML(
                 <div class="card">
                     <h2>Training Runs</h2>
                     <table><thead><tr>
-                        <th>Name</th><th>Status</th><th>Epoch</th><th>Loss</th><th>Size</th>
+                        <th>Name</th><th>Status</th><th>Epoch</th><th>Loss</th><th>Size</th><th>Actions</th>
                     </tr></thead>
-                    <tbody id="runs-table"><tr><td colspan="5">Loading...</td></tr></tbody></table>
+                    <tbody id="runs-table"><tr><td colspan="6">Loading...</td></tr></tbody></table>
                 </div>
             </div>
         `;
@@ -205,6 +205,29 @@ constexpr char DASHBOARD_HTML[] = R"HTML(
             }
         } catch (e) {}
     }
+    
+    // Run management functions
+    async function resumeRun(name) {
+        if (confirm(`Resume training run: ${name}?`)) {
+            await fetch(`/api/runs/resume/${name}`, { method: 'POST' });
+            router.navigate('/runs'); // Refresh runs view
+        }
+    }
+    
+    async function stopRun(name) {
+        if (confirm(`Stop training run: ${name}?`)) {
+            await fetch(`/api/runs/stop/${name}`, { method: 'POST' });
+            setTimeout(() => router.navigate('/runs'), 500); // Refresh after stop
+        }
+    }
+    
+    async function deleteRun(name) {
+        if (confirm(`Delete training run: ${name}? This cannot be undone!`)) {
+            await fetch(`/api/runs/delete/${name}`, { method: 'DELETE' });
+            router.navigate('/runs'); // Refresh runs view
+        }
+    }
+    
     setInterval(fetchStats, 1000);
     fetchStats();
     </script>
