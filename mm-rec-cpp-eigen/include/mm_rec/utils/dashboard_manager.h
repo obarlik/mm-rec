@@ -61,6 +61,7 @@ private:
     std::mutex history_mtx_;
     std::deque<float> loss_history_;
     const size_t max_history_size_ = 500;
+    std::ofstream history_file_;
 };
 
 } // namespace mm_rec

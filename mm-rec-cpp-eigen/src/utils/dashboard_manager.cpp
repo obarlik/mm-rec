@@ -14,9 +14,12 @@ DashboardManager& DashboardManager::instance() {
 
 DashboardManager::DashboardManager() {
     // Initialize standard/safe values
+    // Open history file in append mode
+    history_file_.open("dashboard_history.csv", std::ios::app);
 }
 
 DashboardManager::~DashboardManager() {
+    if (history_file_.is_open()) history_file_.close();
     stop();
 }
 
@@ -75,6 +78,12 @@ void DashboardManager::update_training_stats(float loss, float lr, float speed, 
     if (loss_history_.size() > max_history_size_) {
         loss_history_.pop_front();
     }
+    
+    // Persist to CSV: step,loss,lr,speed
+    if (history_file_.is_open()) {
+        history_file_ << step << "," << loss << "," << lr << "," << speed << "\n";
+        history_file_.flush();
+    }
 }
 
 void DashboardManager::update_system_stats(size_t mem_mb) {
@@ -129,6 +138,36 @@ void DashboardManager::register_routes() {
         stats_.should_stop = true;
         LOG_INFO("Stop signal received from Dashboard.");
         return mm_rec::net::HttpServer::build_response(200, "text/plain", "Stopping...");
+    });
+
+    // History API
+    server_->register_handler("/api/history", [](const std::string&) -> std::string {
+        std::ifstream f("dashboard_history.csv");
+        std::vector<float> losses;
+        std::string line;
+        while (std::getline(f, line)) {
+            if (line.empty()) continue;
+            std::stringstream ss(line);
+            std::string segment;
+            std::vector<std::string> seglist;
+            while(std::getline(ss, segment, ',')) {
+               seglist.push_back(segment);
+            }
+            if (seglist.size() >= 2) {
+                try {
+                    losses.push_back(std::stof(seglist[1])); // Loss is 2nd column
+                } catch (...) {}
+            }
+        }
+        
+        std::stringstream json;
+        json << "{ \"loss_history\": [";
+        for (size_t i = 0; i < losses.size(); ++i) {
+             json << losses[i] << (i < losses.size() - 1 ? "," : "");
+        }
+        json << "] }";
+        
+        return mm_rec::net::HttpServer::build_response(200, "application/json", json.str());
     });
 }
 

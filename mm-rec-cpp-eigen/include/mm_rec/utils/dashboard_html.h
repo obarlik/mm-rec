@@ -50,6 +50,7 @@ constexpr char DASHBOARD_HTML[] = R"HTML(
                 <h1 style="margin: 0; font-size: 1.5rem;">MM-Rec Training Monitor</h1>
             </div>
             <div style="display: flex; gap: 10px;">
+                <button id="histBtn" class="btn" style="background: #8b5cf6;" onclick="loadHistory()">LOAD HISTORY</button>
                 <button class="btn" style="background: #3b82f6;" onclick="openHwModal()">HARDWARE</button>
                 <button class="btn stop-btn" onclick="stopTraining()">STOP TRAINING</button>
             </div>
@@ -327,7 +328,7 @@ constexpr char DASHBOARD_HTML[] = R"HTML(
                 }
 
                 // Update Loss Chart
-                if (data.history && data.history.length > 0) {
+                if (!showingHistory && data.history && data.history.length > 0) {
                     lossChart.data.labels = data.history.map((_, i) => i);
                     lossChart.data.datasets[0].data = data.history;
                     if (data.avg_history) lossChart.data.datasets[1].data = data.avg_history;
@@ -351,6 +352,41 @@ constexpr char DASHBOARD_HTML[] = R"HTML(
                 
             } catch (e) {
                 console.error("Connection lost", e);
+            }
+        }
+
+        let showingHistory = false;
+        async function loadHistory() {
+            const btn = document.getElementById('histBtn');
+            if (showingHistory) {
+                // Swith back to Live
+                showingHistory = false;
+                btn.innerText = "LOAD HISTORY";
+                btn.style.background = "#8b5cf6";
+                return;
+            }
+
+            btn.innerText = "Loading...";
+            try {
+                const res = await fetch('/api/history');
+                const data = await res.json();
+                if (data.loss_history && data.loss_history.length > 0) {
+                    lossChart.data.labels = data.loss_history.map((_, i) => i);
+                    lossChart.data.datasets[0].data = data.loss_history;
+                    // Optional: Calculate EMA locally or just hide it
+                    lossChart.data.datasets[1].data = []; 
+                    lossChart.update();
+                    
+                    showingHistory = true;
+                    btn.innerText = "LIVE VIEW";
+                    btn.style.background = "#22c55e";
+                } else {
+                    alert("No history found yet.");
+                    btn.innerText = "LOAD HISTORY";
+                }
+            } catch(e) { 
+                console.error(e); 
+                btn.innerText = "ERROR"; 
             }
         }
 
