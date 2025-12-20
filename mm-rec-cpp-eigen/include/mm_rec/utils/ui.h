@@ -172,7 +172,7 @@ inline void print_header(const std::string& title, int width = 60) {
     std::cout << box::VERTICAL;
     for (int i = 0; i < padding; ++i) std::cout << " ";
     std::cout << color::BOLD << color::WHITE << title << color::CYAN;
-    for (int i = 0; i < width - title.length() - padding - 2; ++i) std::cout << " ";
+    for (int i = 0; i < width - static_cast<int>(title.length()) - padding - 2; ++i) std::cout << " ";
     std::cout << box::VERTICAL << "\n";
     
     std::cout << box::BOTTOM_LEFT;

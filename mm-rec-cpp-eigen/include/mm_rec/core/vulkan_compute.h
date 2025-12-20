@@ -271,9 +271,9 @@ public:
             vk.vkDestroyBuffer(vk.device, ctx->bufA, nullptr);
             vk.vkDestroyBuffer(vk.device, ctx->bufB, nullptr);
             vk.vkDestroyBuffer(vk.device, ctx->bufC, nullptr);
-            vk.vkFreeMemory(vk.device, ctx->memA, nullptr);
-            vk.vkFreeMemory(vk.device, ctx->memB, nullptr);
-            vk.vkFreeMemory(vk.device, ctx->memC, nullptr);
+            vk.free_memory(ctx->memA);
+            vk.free_memory(ctx->memB);
+            vk.free_memory(ctx->memC);
             delete ctx;
             return nullptr;
         }
@@ -291,9 +291,9 @@ public:
             vk.vkDestroyBuffer(vk.device, ctx->bufA, nullptr);
             vk.vkDestroyBuffer(vk.device, ctx->bufB, nullptr);
             vk.vkDestroyBuffer(vk.device, ctx->bufC, nullptr);
-            vk.vkFreeMemory(vk.device, ctx->memA, nullptr);
-            vk.vkFreeMemory(vk.device, ctx->memB, nullptr);
-            vk.vkFreeMemory(vk.device, ctx->memC, nullptr);
+            vk.free_memory(ctx->memA);
+            vk.free_memory(ctx->memB);
+            vk.free_memory(ctx->memC);
             delete ctx;
             return nullptr;
         }
@@ -433,9 +433,9 @@ public:
             vk.vkDestroyBuffer(vk.device, ctx->bufA, nullptr);
             vk.vkDestroyBuffer(vk.device, ctx->bufB, nullptr);
             vk.vkDestroyBuffer(vk.device, ctx->bufC, nullptr);
-            vk.vkFreeMemory(vk.device, ctx->memA, nullptr);
-            vk.vkFreeMemory(vk.device, ctx->memB, nullptr);
-            vk.vkFreeMemory(vk.device, ctx->memC, nullptr);
+            vk.free_memory(ctx->memA);
+            vk.free_memory(ctx->memB);
+            vk.free_memory(ctx->memC);
         }
         
         release_gpu_context(ctx);

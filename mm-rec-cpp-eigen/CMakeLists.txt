@@ -74,7 +74,7 @@ function(embed_resource target input_file)
     # Symbol will be: _binary_matmul_spv_start (dots become underscores)
     add_custom_command(
         OUTPUT ${output_file}
-        COMMAND ld -r -b binary -o ${output_file} ${input_name}
+        COMMAND ld -r -b binary -z noexecstack -o ${output_file} ${input_name}
         DEPENDS ${input_file}
         WORKING_DIRECTORY ${input_dir}
         COMMENT "Embedding Resource: ${input_name} -> Object"

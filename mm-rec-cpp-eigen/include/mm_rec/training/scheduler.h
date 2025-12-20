@@ -19,7 +19,7 @@ public:
     virtual float get_lr(int step) const = 0;
     
     // Allow dynamic updating of base LR (for Auto-Rollback)
-    virtual void set_base_lr(float lr) {}
+    virtual void set_base_lr(float) {}
 };
 
 /**

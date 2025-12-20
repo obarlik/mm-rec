@@ -109,21 +109,21 @@ public:
                 
         // Reallocate A if needed
         if (reqA > capA) {
-            if (bufA) { vk.vkDestroyBuffer(vk.device, bufA, nullptr); vk.vkFreeMemory(vk.device, memA, nullptr); }
+            if (bufA) { vk.vkDestroyBuffer(vk.device, bufA, nullptr); vk.free_memory(memA); }
             vk.create_buffer(reqA, bufA, memA);
             capA = reqA;
         }
         
         // Reallocate B if needed
         if (reqB > capB) {
-            if (bufB) { vk.vkDestroyBuffer(vk.device, bufB, nullptr); vk.vkFreeMemory(vk.device, memB, nullptr); }
+            if (bufB) { vk.vkDestroyBuffer(vk.device, bufB, nullptr); vk.free_memory(memB); }
             vk.create_buffer(reqB, bufB, memB);
             capB = reqB;
         }
         
         // Reallocate C if needed
         if (reqC > capC) {
-            if (bufC) { vk.vkDestroyBuffer(vk.device, bufC, nullptr); vk.vkFreeMemory(vk.device, memC, nullptr); }
+            if (bufC) { vk.vkDestroyBuffer(vk.device, bufC, nullptr); vk.free_memory(memC); }
             vk.create_buffer(reqC, bufC, memC);
             capC = reqC;
         }

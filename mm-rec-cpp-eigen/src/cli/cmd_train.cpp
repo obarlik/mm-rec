@@ -134,9 +134,14 @@ int cmd_train(int argc, char* argv[]) {
         else if (key == "warmup_steps") warmup_steps = std::stoi(val);
         
         if (key == "uboo_weight") config.uboo_weight = std::stof(val);
+        if (key == "uboo_weight") config.uboo_weight = std::stof(val);
         else if (key == "max_memory_mb") {
              size_t mb = std::stoul(val);
              MemoryManager::set_global_memory_limit(mb * 1024 * 1024);
+        }
+        else if (key == "vram_reservation_mb") {
+             size_t mb = std::stoul(val);
+             VulkanBackend::get().set_reservation(mb);
         }
     }
     

@@ -24,6 +24,9 @@
 #include <dlfcn.h>
 #include <stdexcept>
 #include <iomanip> // For VRAM formatting
+#include <map>
+#include <mutex>
+#include <atomic>
 
 // --- Vulkan Types (Minimal) ---
 #define VK_MAKE_VERSION(major, minor, patch) \
@@ -482,6 +485,13 @@ private:
     VkResult (*vkMapMemory)(VkDevice, VkDeviceMemory, VkDeviceSize, VkDeviceSize, VkFlags, void**) = nullptr;
     void (*vkUnmapMemory)(VkDevice, VkDeviceMemory) = nullptr;
 
+    // Memory Tracking
+    std::mutex alloc_mutex_;
+    std::map<VkDeviceMemory, VkDeviceSize> allocations_;
+    std::atomic<size_t> allocated_bytes_{0};
+    size_t total_vram_{0};
+    size_t reserved_bytes_{0};
+
     // --- Compute Pipeline Symbols ---
     VkResult (*vkCreateShaderModule)(VkDevice, const void*, const void*, VkShaderModule*) = nullptr; // void* for CreateInfo to lazy struct
     void (*vkDestroyShaderModule)(VkDevice, VkShaderModule, const void*) = nullptr;
@@ -523,6 +533,29 @@ public:
     static VulkanBackend& get() {
         static VulkanBackend backend;
         return backend;
+    }
+    
+    void set_reservation(size_t mb) {
+        reserved_bytes_ = mb * 1024 * 1024;
+        std::cout << "[Vulkan] Reserved VRAM: " << mb << " MB" << std::endl;
+    }
+    
+    void free_memory(VkDeviceMemory memory) {
+        if (!device || !memory) return;
+        
+        // Track
+        {
+            std::lock_guard<std::mutex> lock(alloc_mutex_);
+            auto it = allocations_.find(memory);
+            if (it != allocations_.end()) {
+                allocated_bytes_ -= it->second;
+                allocations_.erase(it);
+            }
+        }
+        
+        if (vkFreeMemory) {
+            vkFreeMemory(device, memory, nullptr);
+        }
     }
     
     // Fence management for async GPU operations
@@ -581,6 +614,16 @@ public:
 
     bool create_buffer(VkDeviceSize size, VkBuffer& buffer, VkDeviceMemory& memory) {
          if(!device) return false;
+         
+         // 1. Check Reservation
+         // (allocated + size) <= (total - reserved)
+         size_t current = allocated_bytes_.load();
+         if (total_vram_ > 0) { 
+             if (current + size > (total_vram_ > reserved_bytes_ ? total_vram_ - reserved_bytes_ : 0)) {
+                 // std::cerr << "⚠️ Vulkan: VRAM Reservation Hit!" << std::endl;
+                 return false; 
+             }
+         }
 
          VkBufferCreateInfo bufferInfo = {};
          bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -598,9 +641,20 @@ public:
          allocInfo.allocationSize = memRequirements.size;
          allocInfo.memoryTypeIndex = catchMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-         if(vkAllocateMemory(device, &allocInfo, nullptr, &memory) != 0) return false;
+         if(vkAllocateMemory(device, &allocInfo, nullptr, &memory) != 0) {
+             vkDestroyBuffer(device, buffer, nullptr);
+             return false;
+         }
 
          vkBindBufferMemory(device, buffer, memory, 0);
+         
+         // Track
+         {
+             std::lock_guard<std::mutex> lock(alloc_mutex_);
+             allocations_[memory] = allocInfo.allocationSize;
+             allocated_bytes_ += allocInfo.allocationSize;
+         }
+         
          return true;
     }
 
@@ -729,16 +783,16 @@ public:
             VkPhysicalDeviceProperties props;
             vkGetPhysicalDeviceProperties(physical_device, &props);
             
-            // Calculate Total VRAM (Heap with DEVICE_LOCAL bit)
-            VkDeviceSize total_vram = 0;
+             // Calculate Total VRAM (Heap with DEVICE_LOCAL bit)
+             total_vram_ = 0;
              for (uint32_t i = 0; i < memory_properties.memoryHeapCount; i++) {
                 if (memory_properties.memoryHeaps[i].flags & 1) { // VK_MEMORY_HEAP_DEVICE_LOCAL_BIT = 1
-                    total_vram += memory_properties.memoryHeaps[i].size;
+                    total_vram_ += memory_properties.memoryHeaps[i].size;
                 }
             }
             
             std::cout << "   GPU: " << props.deviceName << " | VRAM: " 
-                      << std::fixed << std::setprecision(1) << (total_vram / (1024.0*1024.0*1024.0)) << " GB" << std::endl;
+                      << std::fixed << std::setprecision(1) << (total_vram_ / (1024.0*1024.0*1024.0)) << " GB" << std::endl;
             std::cout << "   GPU Threads: " << props.limits.maxComputeWorkGroupInvocations << " (Max Concurrency per Block)" << std::endl;
         }
         
