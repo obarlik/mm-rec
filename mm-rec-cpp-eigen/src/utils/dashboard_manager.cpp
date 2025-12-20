@@ -1,6 +1,7 @@
 #include "mm_rec/utils/dashboard_manager.h"
-#include "mm_rec/utils/dashboard_html.h" // Assuming this exists with HTML content
+#include "mm_rec/utils/dashboard_html.h"
 #include "mm_rec/utils/logger.h"
+#include "mm_rec/utils/ui.h" // [NEW] for console feedback
 #include <sstream>
 #include <iostream>
 
@@ -19,17 +20,38 @@ DashboardManager::~DashboardManager() {
     stop();
 }
 
-bool DashboardManager::start(int port) {
+bool DashboardManager::start(int base_port) {
     if (server_) return true; // Already running
 
-    server_ = std::make_unique<mm_rec::net::HttpServer>(port);
-    register_routes();
-    
-    bool success = server_->start();
-    if (success) {
-        LOG_INFO("Global Dashboard started on port " + std::to_string(port));
-    } else {
-        LOG_INFO("ERROR: Failed to start Global Dashboard on port " + std::to_string(port));
+    int max_retries = 10;
+    bool success = false;
+
+    for (int i = 0; i < max_retries; ++i) {
+        int port = base_port + i;
+        server_ = std::make_unique<mm_rec::net::HttpServer>(port);
+        register_routes();
+        
+        if (server_->start()) {
+            std::string msg = "Global Dashboard started on port " + std::to_string(port);
+            LOG_INFO(msg);
+            mm_rec::ui::success(msg);
+            
+            if (port != base_port) {
+                std::string fallback_msg = "(Port " + std::to_string(base_port) + " was busy)";
+                LOG_INFO(fallback_msg);
+                mm_rec::ui::warning(fallback_msg);
+            }
+            success = true;
+            break;
+        }
+        
+        // Failed, try next
+        server_.reset(); 
+    }
+
+    if (!success) {
+        LOG_INFO("ERROR: Failed to start Global Dashboard on any port " + 
+                 std::to_string(base_port) + "-" + std::to_string(base_port + max_retries - 1));
     }
     return success;
 }
