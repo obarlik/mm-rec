@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <ctime>
 #include <memory>
+#include <mutex>
 #include "mm_rec/jobs/job_training.h"
 
 namespace mm_rec {
@@ -13,8 +14,10 @@ namespace fs = std::filesystem;
 // Static state
 static std::unique_ptr<JobTraining> active_job_ = nullptr;
 static std::string active_run_name_ = "";  // Track which run owns the active job
+static std::mutex run_manager_mutex_;
 
 bool RunManager::start_job(const TrainingJobConfig& config_in) {
+    std::lock_guard<std::mutex> lock(run_manager_mutex_);
     if (active_job_ && active_job_->is_running()) {
         ui::error("Job already running for: " + active_run_name_);
         return false;
@@ -86,12 +89,22 @@ bool RunManager::start_job(const TrainingJobConfig& config_in) {
     }
 }
 
+// In .cpp file, add static mutex
+// static std::mutex run_manager_mutex_; // Moved to top
+
 void RunManager::stop_job() {
+    std::lock_guard<std::mutex> lock(run_manager_mutex_);
     if (active_job_ && active_job_->is_running()) {
+        std::cerr << "[RunManager] Stopping job..." << std::endl;
         active_job_->stop();
+        std::cerr << "[RunManager] Joining job..." << std::endl;
         active_job_->join();
+        std::cerr << "[RunManager] Job joined. Resetting..." << std::endl;
         active_job_.reset();
-        active_run_name_ = "";  // Clear ownership
+        active_run_name_ = "";
+        std::cerr << "[RunManager] Job stopped." << std::endl;
+    } else {
+        std::cerr << "[RunManager] No job to stop." << std::endl;
     }
 }
 

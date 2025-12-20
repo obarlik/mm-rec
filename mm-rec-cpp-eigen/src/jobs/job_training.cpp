@@ -50,8 +50,8 @@ bool JobTraining::start(const TrainingJobConfig& config) {
 void JobTraining::stop() {
     if (running_) {
         stop_signal_ = true;
-        // DashboardManager also needs to know if loop checks it
-        DashboardManager::instance().stop(); 
+        // Do NOT stop the dashboard manager here. It is global.
+        // DashboardManager::instance().stop(); 
     }
 }
 
