@@ -146,6 +146,10 @@ set(UTILS_SOURCES
     src/utils/dashboard_manager.cpp
 )
 
+set(JOB_SOURCES
+    src/jobs/job_training.cpp
+)
+
 set(DATA_SOURCES
     src/data/dataset.cpp
     src/data/data_loader.cpp
@@ -159,6 +163,7 @@ add_library(mm_rec_eigen STATIC
     ${TRAINING_SOURCES}
     ${CONFIG_SOURCES}
     ${UTILS_SOURCES}
+    ${JOB_SOURCES}
     ${DATA_SOURCES}
 )
 
@@ -230,6 +235,7 @@ add_executable(mm_rec
     src/mm_rec_cli.cpp 
     src/cli/cmd_prepare.cpp 
     src/cli/cmd_train.cpp
+    src/cli/cmd_server.cpp
     src/cli/cmd_infer.cpp
     src/cli/cmd_parse_metrics.cpp
     src/cli/cmd_view_trace.cpp

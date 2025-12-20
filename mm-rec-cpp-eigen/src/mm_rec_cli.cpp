@@ -51,10 +51,19 @@ int main(int argc, char* argv[]) {
 
     std::string command = argv[1];
 
+    // Dispatch commands directly for better argument handling
+    if (command == "prepare") {
+        return cmd_prepare_data(argc, argv);
+    } else if (command == "train") {
+        return cmd_train(argc, argv);
+    } else if (command == "server") {
+        return cmd_server(argc, argv);
+    } else if (command == "infer") {
+        return cmd_infer(argc, argv);
+    }
+
+    // For other commands, use the map-based dispatch (adjusting args)
     std::map<std::string, std::function<int(int, char**)>> commands;
-    commands["prepare"] = cmd_prepare;
-    commands["train"] = cmd_train;
-    commands["infer"] = cmd_infer;
     commands["parse-metrics"] = cmd_parse_metrics;
     commands["view-trace"] = cmd_view_trace;
 

@@ -113,7 +113,7 @@ public:
 
 // ... (DataParser classes remain)
 
-int cmd_prepare(int argc, char* argv[]) {
+int cmd_prepare_data(int argc, char* argv[]) {
     if (argc < 3) {
         ui::error("Usage: mm_rec prepare <jsonl_input> <bin_output> [format: alpaca|chat]");
         return 1;
