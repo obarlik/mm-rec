@@ -18,6 +18,7 @@
 #include <sstream>
 #include <atomic>
 #include <thread>
+#include <fstream>
 
 // Unix daemon headers
 #include <unistd.h>
@@ -107,6 +108,13 @@ int cmd_server(int argc, char* argv[]) {
         
         // Clear file mode creation mask
         umask(0);
+
+        // Write PID file
+        std::ofstream pid_file("/tmp/mm_rec_server.pid");
+        if (pid_file.is_open()) {
+            pid_file << getpid();
+            pid_file.close();
+        }
     } else {
         ui::print_header("MM-Rec Interactive Server");
         ui::info("Type 'help' for commands.");

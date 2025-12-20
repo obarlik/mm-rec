@@ -49,18 +49,31 @@ bash "$SCRIPT_DIR/cleanup_silent.sh" 2>/dev/null || true
 # Start server as proper daemon
 echo -e "${COLOR_CYAN}[2/3]${COLOR_RESET} Starting server in daemon mode..."
 
-#  Use setsid to completely detach from terminal
-# This prevents zombie processes by making init (PID 1) the parent
-setsid "$BINARY" server --daemon > "$LOG_FILE" 2>&1 &
+# Remove old PID file if exists (cleanup handled above, extra safety)
+rm -f "$PID_FILE"
 
-# Get the PID
-SERVER_PID=$!
+# Start the binary
+# We don't need 'nohup' or '&' because the binary self-daemonizes (double-fork)
+# But we suppress output to avoid clutter
+"$BINARY" server --daemon > /dev/null 2>&1
 
-# Save PID
-echo $SERVER_PID > "$PID_FILE"
+# Wait for PID file to be created by the daemon
+echo -n "Waiting for daemon..."
+for i in {1..50}; do
+    if [ -f "$PID_FILE" ]; then
+        break
+    fi
+    echo -n "."
+    sleep 0.1
+done
+echo ""
 
-# Wait a bit to check if it started successfully
-sleep 2
+if [ ! -f "$PID_FILE" ]; then
+    echo -e "${COLOR_RED}✗${COLOR_RESET} Timeout waiting for PID file"
+    exit 1
+fi
+
+SERVER_PID=$(cat "$PID_FILE")
 
 if ps -p $SERVER_PID > /dev/null 2>&1; then
     echo -e "${COLOR_GREEN}✓${COLOR_RESET} Server started successfully"
