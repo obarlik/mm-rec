@@ -287,15 +287,69 @@ const app = {
     },
 
     // --- LIBRARY MANAGERS ---
-    fetchConfigs: function () {
+    viewLibrary: function () {
+        this.switchView('library');
+        this.activeRun = null;
+        this.fetchConfigsForEditor();
+        this.fetchDatasets();
+    },
+
+    fetchConfigsForEditor: function () {
         fetch('/api/configs').then(r => r.json()).then(list => {
-            const ul = document.getElementById('config-list');
-            ul.innerHTML = '';
-            list.forEach(c => {
-                const li = document.createElement('li');
-                li.innerHTML = `<span>${c}</span>`;
-                ul.appendChild(li);
+            const ul = document.getElementById('config-list-editor');
+            if (ul) {
+                ul.innerHTML = '';
+                list.forEach(c => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `<span>${c}</span>`;
+                    li.style.cursor = 'pointer';
+                    li.onclick = () => this.loadConfigToEditor(c);
+                    ul.appendChild(li);
+                });
+            }
+        });
+    },
+
+    loadConfigToEditor: function (name) {
+        document.getElementById('editor-filename').textContent = name;
+        document.getElementById('btn-save-as').disabled = false;
+
+        const editor = document.getElementById('config-editor-content');
+        editor.value = "Loading...";
+        editor.disabled = true;
+
+        fetch(`/api/configs/read?name=${name}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) editor.value = "Error: " + data.error;
+                else {
+                    editor.value = data.content;
+                    editor.disabled = false;
+                }
             });
+    },
+
+    openSaveConfigModal: function () {
+        document.getElementById('modal-save-config').style.display = 'block';
+    },
+
+    saveConfigAs: function () {
+        const filename = document.getElementById('save-config-filename').value;
+        const content = document.getElementById('config-editor-content').value;
+
+        if (!filename) { alert("Enter filename"); return; }
+
+        fetch('/api/configs/create', {
+            method: 'POST',
+            body: JSON.stringify({ filename: filename, content: content })
+        }).then(r => r.json()).then(d => {
+            if (d.error) alert(d.error);
+            else {
+                this.closeModal('modal-save-config');
+                this.fetchConfigsForEditor(); // Refresh list
+                this.loadConfigToEditor(d.file); // Select new file
+                alert("Saved!");
+            }
         });
     },
     fetchDatasets: function () {
@@ -318,6 +372,9 @@ const app = {
             const s = document.getElementById('new-run-config'); s.innerHTML = '';
             l.forEach(x => { const o = document.createElement('option'); o.value = x; o.textContent = x; s.appendChild(o); });
         });
+
+        // Ensure Customize button exists or add it dynamically if missing in HTML (Doing it in HTML is better)
+
         fetch('/api/datasets').then(r => r.json()).then(l => {
             const s = document.getElementById('new-run-dataset'); s.innerHTML = '';
             l.forEach(x => { const o = document.createElement('option'); o.value = x.name; o.textContent = x.name; s.appendChild(o); });
@@ -339,6 +396,14 @@ const app = {
                 this.viewRun(name); // Go close to the new run
             }
         });
+    },
+
+    customizeSelectedConfig: function () {
+        const configName = document.getElementById('new-run-config').value;
+        if (!configName) return;
+        this.closeModal('modal-new-run');
+        this.viewLibrary();
+        setTimeout(() => this.loadConfigToEditor(configName), 100); // Small delay to allow view switch
     },
 
     // --- CHART ---

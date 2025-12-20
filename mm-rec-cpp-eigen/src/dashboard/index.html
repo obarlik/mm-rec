@@ -294,13 +294,40 @@
         <div id="view-library" class="view-section">
             <h2>Library</h2>
             <div class="grid-2col">
-                <!-- Configs -->
-                <div class="card">
+                <!-- Configs (Editor Mode) -->
+                <div class="card" style="grid-column: span 2;">
                     <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
-                        <h3>Configurations</h3>
-                        <button class="btn-primary btn-small" onclick="app.openNewConfigModal()">+ Create</button>
+                        <h3>Configuration Editor</h3>
+                        <div>
+                            <button class="btn-secondary" onclick="app.openNewConfigModal()">+ New Empty</button>
+                        </div>
                     </div>
-                    <ul id="config-list" class="item-list"></ul>
+
+                    <div class="grid-2col" style="grid-template-columns: 1fr 2fr;">
+                        <!-- List -->
+                        <div style="border-right:1px solid #333; padding-right:15px;">
+                            <h4 style="margin-top:0; color:#888;">Templates</h4>
+                            <ul id="config-list-editor" class="item-list" style="height:400px; overflow-y:auto;">
+                                <!-- Populated by JS -->
+                            </ul>
+                        </div>
+
+                        <!-- Editor -->
+                        <div style="padding-left:15px; display:flex; flex-direction:column;">
+                            <div
+                                style="display:flex; justify-content:space-between; margin-bottom:10px; align-items:center;">
+                                <span id="editor-filename" style="font-weight:bold; color:#3498db;">Select a
+                                    template...</span>
+                                <div>
+                                    <button id="btn-save-as" class="btn-primary" onclick="app.openSaveConfigModal()"
+                                        disabled>Save As New...</button>
+                                </div>
+                            </div>
+                            <textarea id="config-editor-content"
+                                style="flex:1; background:#111; color:#ccc; font-family:monospace; padding:10px; border:1px solid #444; resize:none;"
+                                disabled></textarea>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Datasets -->
@@ -402,13 +429,34 @@
 
     </div>
 
+    <!-- MODAL: SAVE CONFIG AS -->
+    <div id="modal-save-config" class="modal">
+        <div class="modal-content" style="width:400px;">
+            <h3>Save Configuration As</h3>
+            <div class="form-group">
+                <label>New Filename (e.g. my_run.ini)</label>
+                <input type="text" id="save-config-filename" placeholder="custom_run.ini">
+            </div>
+            <div style="text-align:right; margin-top:20px;">
+                <button class="btn-secondary" onclick="app.closeModal('modal-save-config')">Cancel</button>
+                <button class="btn-primary" onclick="app.saveConfigAs()">Save</button>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL: NEW RUN -->
     <div id="modal-new-run" class="modal">
         <div class="modal-content">
             <span style="float:right; cursor:pointer;" onclick="app.closeModal('modal-new-run')">&times;</span>
             <h2>Start New Training</h2>
             <div class="form-group"><label>Name</label><input type="text" id="new-run-name"></div>
-            <div class="form-group"><label>Config</label><select id="new-run-config"></select></div>
+            <div class="form-group">
+                <label>Configuration Template</label>
+                <div style="display:flex; gap:10px;">
+                    <select id="new-run-config" style="flex:1;"></select>
+                    <button class="btn-secondary" onclick="app.customizeSelectedConfig()">Customize</button>
+                </div>
+            </div>
             <div class="form-group"><label>Dataset</label><select id="new-run-dataset"></select></div>
             <button class="btn-primary" onclick="app.startNewRun()">Start</button>
         </div>

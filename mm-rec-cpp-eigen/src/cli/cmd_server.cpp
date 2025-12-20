@@ -61,7 +61,7 @@ void print_help() {
 int cmd_server(int argc, char* argv[]) {
     // 1. Initialize Global Config
     auto& app_config = mm_rec::Config::instance();
-    app_config.load_from_file("server_config.ini");
+    app_config.load_from_file("config.ini");
     app_config.load_from_env();
     app_config.parse_args(argc, argv);
     

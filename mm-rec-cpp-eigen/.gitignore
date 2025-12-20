@@ -49,4 +49,5 @@ compile_commands.json
 
 # Debug
 symbols.txt
-server_config.ini
+# server_config.ini # Deprecated
+config.ini

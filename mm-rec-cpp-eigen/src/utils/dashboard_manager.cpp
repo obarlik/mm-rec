@@ -313,7 +313,14 @@ void DashboardManager::register_routes() {
         // 2. Prepare config object
         TrainingJobConfig job_config;
         job_config.run_name = name;
-        job_config.config_path = config_file; // Pass source, RunManager will isolate
+        
+        // Resolve Config Path
+        std::string resolved_config = config_file;
+        if (std::filesystem::exists("configs/" + config_file)) {
+            resolved_config = "configs/" + config_file;
+        }
+        
+        job_config.config_path = resolved_config; // Pass source, RunManager will isolate
         job_config.data_path = data_file;     // Pass source, RunManager will isolate
 
         // 4. Start
@@ -498,16 +505,56 @@ void DashboardManager::register_routes() {
         ss << "[";
         bool first = true;
         try {
-            for (const auto& entry : std::filesystem::directory_iterator(".")) {
-                if (entry.path().extension() == ".ini") {
-                    if (!first) ss << ",";
-                    ss << "\"" << entry.path().filename().string() << "\"";
-                    first = false;
+            if (std::filesystem::exists("configs")) {
+                for (const auto& entry : std::filesystem::directory_iterator("configs")) {
+                    std::string params = entry.path().extension().string();
+                    if (params == ".ini" || params == ".txt") {
+                        if (!first) ss << ",";
+                        ss << "\"" << entry.path().filename().string() << "\"";
+                        first = false;
+                    }
                 }
             }
         } catch (...) {}
         ss << "]";
         return mm_rec::net::HttpServer::build_response(200, "application/json", ss.str());
+    });
+    
+    // API Read Config
+    server_->register_handler("/api/configs/read", [](const std::string& req) -> std::string {
+        std::string first_line = req.substr(0, req.find("\r\n"));
+        size_t q_pos = first_line.find("?name=");
+        if (q_pos == std::string::npos) return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing name parameter\"}");
+         
+        size_t end_pos = first_line.find(" ", q_pos);
+        std::string filename = first_line.substr(q_pos + 6, end_pos - (q_pos + 6));
+         
+        if (filename.find("/") != std::string::npos || filename.find("..") != std::string::npos) {
+             return mm_rec::net::HttpServer::build_response(403, "application/json", "{\"error\": \"Invalid filename\"}");
+        }
+
+        std::string path = "configs/" + filename;
+        if (!std::filesystem::exists(path)) {
+            return mm_rec::net::HttpServer::build_response(404, "application/json", "{\"error\": \"Config not found\"}");
+        }
+        
+        std::ifstream f(path);
+        if (!f.good()) return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Read error\"}");
+        
+        std::stringstream buffer;
+        buffer << f.rdbuf();
+        
+        std::string content = buffer.str();
+        std::string json_content;
+         for (char c : content) {
+             if (c == '"') json_content += "\\\"";
+             else if (c == '\n') json_content += "\\n";
+             else if (c == '\r') {}
+             else if (c == '\\') json_content += "\\\\";
+             else json_content += c;
+         }
+         
+         return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"content\": \"" + json_content + "\"}");
     });
 
     // API Create Config
@@ -546,7 +593,10 @@ void DashboardManager::register_routes() {
             return mm_rec::net::HttpServer::build_response(403, "application/json", "{\"error\": \"Invalid filename\"}");
         }
 
-        std::ofstream file(filename);
+        std::filesystem::create_directories("configs"); // Ensure exists
+        std::string full_path = "configs/" + filename;
+
+        std::ofstream file(full_path);
         if (!file.good()) {
             return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Failed to write file\"}");
         }
