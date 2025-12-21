@@ -3,17 +3,18 @@
  * Trainer Implementation
  */
 
+// chunk 1: includes
 #include "mm_rec/training/trainer.h"
 #include "mm_rec/model/mm_rec_model.h"
 #include "mm_rec/training/gradient_utils.h"
-#include "mm_rec/training/forward_cache.h" // Keep this, it's used
-#include "mm_rec/training/optimizer.h" // Keep this, it's used
-#include "mm_rec/training/uboo_loss.h" // Keep this, it's used
+#include "mm_rec/training/forward_cache.h"
+#include "mm_rec/training/optimizer.h"
+#include "mm_rec/training/uboo_loss.h"
 #include "mm_rec/core/memory_manager.h"
 #include "mm_rec/business/metrics.h"
 #include "mm_rec/infrastructure/logger.h"
 #include "mm_rec/infrastructure/event_bus.h"
-#include "mm_rec/application/dashboard_html.h"
+// removed dashboard_html.h
 #include "mm_rec/core/vulkan_backend.h"
 #include <iostream>
 #include <cstring>  // memcpy
@@ -34,9 +35,10 @@ namespace {
 
 namespace mm_rec {
 
-Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
+Trainer::Trainer(MMRecModel& model, const TrainingConfig& config, ITrainingMonitor& monitor)
     : model_(model),
       config_(config),
+      training_monitor_(monitor),
       step_(0)
 {
     // Create learning rate scheduler
@@ -60,185 +62,9 @@ Trainer::Trainer(MMRecModel& model, const TrainingConfig& config)
         LOG_INFO("Creating SGD Optimizer (LR=" + std::to_string(config.learning_rate) + ")");
         optimizer_ = std::make_unique<SGD>(config.learning_rate);
     }
-    
-    // Initialize Dashboard
-    dashboard_server_ = std::make_unique<net::HttpServer>(8080);
-    
-    // Serve HTML
-    dashboard_server_->register_handler("/", [](const net::Request&, std::shared_ptr<net::Response> res) {
-        res->set_header("Content-Type", "text/html");
-        res->send(ui::DASHBOARD_HTML);
-    });
-    
-    // Try ports 8080 to 8090
-    int port = 8080;
-    while (port < 8090) {
-        dashboard_server_ = std::make_unique<net::HttpServer>(port);
-        
-        // Re-register handlers (since we created a new server instance)
-        // Note: Ideally HttpServer should allow dynamic binding, but our simple impl needs reconstruction.
-        // Let's refactor slightly to separate setup from binding?
-        // Or just lazy lambda registration. Pity I have to duplicate registration code.
-        // Let's just try to bind. If fail, recreate.
-        
-        // Refactored approach: helper method
-        setup_dashboard_handlers();
-        
-        if (dashboard_server_->start()) {
-            LOG_UI("📊 Dashboard active at http://localhost:" + std::to_string(port));
-            break;
-        } else {
-            // Port busy, try next
-            port++;
-        }
-    }
-    
-    if (port == 8090) {
-        LOG_UI("⚠️  Failed to start Dashboard (all ports 8080-8089 busy).");
-    }
 }
 
-void Trainer::setup_dashboard_handlers() {
-    // Serve HTML
-    dashboard_server_->register_handler("/", [](const net::Request&, std::shared_ptr<net::Response> res) {
-        res->set_header("Content-Type", "text/html");
-        res->send(ui::DASHBOARD_HTML);
-    });
-    
-    // API: Stop
-    dashboard_server_->register_handler("/api/stop", [this](const net::Request&, std::shared_ptr<net::Response> res) {
-        this->stop_requested_ = true;
-        LOG_UI("🛑 Stop requested via Dashboard!");
-        res->set_header("Content-Type", "application/json");
-        res->send("{\"status\": \"stopping\"}");
-    });
-    // API: Hardware Info
-    dashboard_server_->register_handler("/api/hardware", [](const net::Request&, std::shared_ptr<net::Response> res) {
-        std::stringstream json;
-        json << "{";
-        
-        // 1. CPU Model
-        std::string cpu_model = "Unknown";
-        std::ifstream cpuinfo("/proc/cpuinfo");
-        if (cpuinfo.is_open()) {
-            std::string line;
-            while(std::getline(cpuinfo, line)) {
-                if (line.find("model name") != std::string::npos) {
-                     size_t pos = line.find(":");
-                     if (pos != std::string::npos) cpu_model = line.substr(pos + 2);
-                     break; 
-                }
-            }
-        }
-        json << "\"cpu_model\": \"" << cpu_model << "\", ";
-        
-        // 2. Cores
-        json << "\"cores_logical\": " << std::thread::hardware_concurrency() << ", ";
-        
-        // 3. RAM
-        long mem_total_kb = 0;
-        std::ifstream meminfo("/proc/meminfo");
-         if (meminfo.is_open()) {
-            std::string line;
-            while(std::getline(meminfo, line)) {
-                if (line.find("MemTotal") != std::string::npos) {
-                     sscanf(line.c_str(), "MemTotal: %ld kB", &mem_total_kb);
-                     break; 
-                }
-            }
-        }
-        json << "\"mem_total_mb\": " << (mem_total_kb / 1024) << ", ";
-        
-        // 4. SIMD & Arch
-        std::string simd = "Basic";
-        #ifdef __AVX512F__
-            simd = "AVX-512";
-        #elif defined(__AVX2__)
-            simd = "AVX2";
-        #elif defined(__AVX__)
-            simd = "AVX";
-        #endif
-        json << "\"simd\": \"" << simd << "\", ";
-        json << "\"arch\": \"x86_64\", "; // Assuming x86_64 for Linux env
-        
-        // 5. GPU/Compute
-        bool vk_ready = VulkanBackend::get().is_ready();
-        if (vk_ready) {
-             json << "\"compute_device\": \"Hybrid (CPU + Vulkan iGPU)\"";
-        } else {
-             json << "\"compute_device\": \"CPU Only (AVX-" << simd << ")\"";
-        }
-        
-        json << "}";
-        res->set_header("Content-Type", "application/json");
-        res->send(json.str());
-    });
-    
-    // API: Stats
-    dashboard_server_->register_handler("/api/stats", [this](const net::Request&, std::shared_ptr<net::Response> res) {
-        std::lock_guard<std::mutex> lock(this->stats_mutex_);
-        std::stringstream json;
-        json << "{";
-        json << "\"epoch\": " << (this->step_ / 1000) << ", "; // Approximate
-        json << "\"step\": " << this->step_ << ", ";
-        json << "\"total_steps\": " << this->config_.total_steps << ", "; 
-        json << "\"lr\": " << this->get_current_lr() << ", ";
-        json << "\"speed\": " << this->current_speed_ << ", ";
-        json << "\"mem\": " << (this->mem_history_.empty() ? 0.0f : this->mem_history_.back()) << ", ";
-        json << "\"loss\": " << (this->loss_history_.empty() ? 0.0f : this->loss_history_.back()) << ", ";
-        
-        json << "\"history\": [";
-        for (size_t i = 0; i < this->loss_history_.size(); ++i) {
-            json << this->loss_history_[i];
-            if (i < this->loss_history_.size() - 1) json << ",";
-        }
-        json << "], ";
-        
-        json << "\"avg_history\": [";
-        for (size_t i = 0; i < this->avg_loss_history_.size(); ++i) {
-            json << this->avg_loss_history_[i];
-            if (i < this->avg_loss_history_.size() - 1) json << ",";
-        }
-        json << "], ";
-
-        json << "\"grad_norm_history\": [";
-        for (size_t i = 0; i < this->grad_norm_history_.size(); ++i) {
-            json << this->grad_norm_history_[i];
-            if (i < this->grad_norm_history_.size() - 1) json << ",";
-        }
-        json << "], ";
-
-        json << "\"lr_history\": [";
-        for (size_t i = 0; i < this->lr_history_.size(); ++i) {
-            json << this->lr_history_[i];
-            if (i < this->lr_history_.size() - 1) json << ",";
-        }
-        json << "], ";
-
-        json << "\"data_stall_history\": [";
-        for (size_t i = 0; i < this->data_stall_history_.size(); ++i) {
-            json << this->data_stall_history_[i];
-            if (i < this->data_stall_history_.size() - 1) json << ",";
-        }
-        json << "], ";
-
-        json << "\"moe_loss_history\": [";
-        for (size_t i = 0; i < this->moe_loss_history_.size(); ++i) {
-            json << this->moe_loss_history_[i];
-            if (i < this->moe_loss_history_.size() - 1) json << ",";
-        }
-        json << "]"; // End of metrics
-        json << "}"; // End of object
-        res->set_header("Content-Type", "application/json");
-        res->send(json.str());
-    });
-}
-
-Trainer::~Trainer() {
-    if (dashboard_server_) {
-        dashboard_server_->stop();
-    }
-}
+Trainer::~Trainer() {}
 
 // Vectorized training step (Full Batch GPU Offload)
 float Trainer::train_step(const TrainingBatch& batch, float data_stall_ms, float speed_tps, float mem_mb) {
@@ -324,7 +150,17 @@ float Trainer::train_step(const TrainingBatch& batch, float data_stall_ms, float
     
     // Update dashboard stats
     // Update dashboard stats
-    update_stats(total_step_loss, speed_tps, grad_norm, current_lr, data_stall_ms, 0.0f, mem_mb); // Speed/Mem passed from CLI
+    // Update dashboard stats
+    TrainingStats stats;
+    stats.step = step_;
+    stats.loss = total_step_loss;
+    stats.current_lr = current_lr;
+    stats.speed_tps = speed_tps;
+    stats.grad_norm = grad_norm;
+    stats.data_stall_ms = data_stall_ms;
+    stats.mem_mb = mem_mb;
+    
+    training_monitor_.on_step_complete(stats);
     
     // Emit training event for SSE (every 10 steps to reduce overhead)
     if (step_ % 10 == 0) {
@@ -426,42 +262,8 @@ float Trainer::get_current_lr() const {
     return scheduler_->get_lr(step_);
 }
 
-void Trainer::update_stats(float loss, float speed, float grad_norm, float lr, float data_stall_ms, float moe_loss, float mem_mb) {
-    std::lock_guard<std::mutex> lock(stats_mutex_);
-    
-    // Raw Loss (Increased history for full graph visualization)
-    if (loss_history_.size() >= 10000) loss_history_.pop_front();
-    loss_history_.push_back(loss);
-    
-    // Grad Norm
-    if (grad_norm_history_.size() >= 10000) grad_norm_history_.pop_front();
-    grad_norm_history_.push_back(grad_norm);
-    
-    // LR
-    if (lr_history_.size() >= 10000) lr_history_.pop_front();
-    lr_history_.push_back(lr);
-
-    // Data Stall
-    if (data_stall_history_.size() >= 10000) data_stall_history_.pop_front();
-    data_stall_history_.push_back(data_stall_ms);
-
-    // MoE Loss
-    if (moe_loss_history_.size() >= 10000) moe_loss_history_.pop_front();
-    moe_loss_history_.push_back(moe_loss);
-
-    // Memory
-    if (mem_history_.size() >= 10000) mem_history_.pop_front();
-    mem_history_.push_back(mem_mb);
-    
-    // Speed
-    if (speed > 0) current_speed_ = speed;
-    
-    // EMA Calculation & History
-    if (current_ema_ == 0.0f) current_ema_ = loss;
-    else current_ema_ = current_ema_ * 0.95f + loss * 0.05f;
-    
-    if (avg_loss_history_.size() >= 10000) avg_loss_history_.pop_front();
-    avg_loss_history_.push_back(current_ema_);
+bool Trainer::should_stop() const {
+    return training_monitor_.should_stop();
 }
 
 } // namespace mm_rec

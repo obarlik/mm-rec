@@ -14,7 +14,7 @@
 #include <deque>
 #include <atomic>
 #include <mutex>
-#include "mm_rec/infrastructure/http_server.h"
+#include "mm_rec/application/i_training_monitor.h"
 
 namespace mm_rec {
 
@@ -53,13 +53,9 @@ struct TrainingConfig {
  */
 class Trainer {
 public:
-    Trainer(MMRecModel& model, const TrainingConfig& config);
+    Trainer(MMRecModel& model, const TrainingConfig& config, ITrainingMonitor& monitor);
     ~Trainer();
     
-    /**
-     * Train for one batch
-     * Returns average loss for the batch
-     */
     /**
      * Train for one batch
      * Returns average loss for the batch
@@ -104,33 +100,17 @@ public:
         if (optimizer_) optimizer_->set_lr(new_lr); // Immediate effect
     }
     
-    // Dashboard control
-    bool should_stop() const { return stop_requested_; }
-    void update_stats(float loss, float speed, float grad_norm, float lr, float data_stall_ms, float moe_loss, float mem_mb);
+    // Dashboard control (Proxy to Monitor)
+    bool should_stop() const;
     
 private:
     MMRecModel& model_;
     TrainingConfig config_;
+    ITrainingMonitor& training_monitor_; // Injected Dependency
+    
     std::unique_ptr<LRScheduler> scheduler_;
     std::unique_ptr<Optimizer> optimizer_;
     int step_;
-    
-    std::unique_ptr<net::HttpServer> dashboard_server_;
-    std::atomic<bool> stop_requested_{false};
-    void setup_dashboard_handlers();
-    
-    // Stats for API (Protected by mutex)
-    mutable std::mutex stats_mutex_;
-    std::deque<float> loss_history_;
-    std::deque<float> avg_loss_history_; // EMA History
-    std::deque<float> grad_norm_history_;
-    std::deque<float> lr_history_;
-    std::deque<float> data_stall_history_;
-    std::deque<float> moe_loss_history_;
-    std::deque<float> mem_history_;
-    
-    float current_speed_ = 0.0f;
-    float current_ema_ = 0.0f; // Helper for calculation
 };
 
 } // namespace mm_rec

@@ -10,6 +10,10 @@
 #include "mm_rec/infrastructure/http_server.h"      // For HttpServer registration
 #include "mm_rec/business/diagnostic_manager.h"
 #include "mm_rec/business/alert_manager.h"
+#include "mm_rec/infrastructure/metrics_exporter.h"
+#include "mm_rec/infrastructure/i_metrics_exporter.h" // Added Interface
+#include "mm_rec/business/i_checkpoint_manager.h"   // Added ICheckpointManager
+#include "mm_rec/business/checkpoint.h"             // Added CheckpointManager
 
 // Forward declaration to avoid circular dependency
 namespace mm_rec { class DashboardManager; }
@@ -109,6 +113,10 @@ public:
             
             return std::make_shared<mm_rec::net::HttpServer>(config);
         });
+
+        // Metrics Exporter (Background Writer) - Transient (Stateful per job)
+        // Bind Interface -> Implementation
+        container.bind_transient<infrastructure::IMetricsExporter, infrastructure::MetricsExporter>();
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // BUSINESS LOGIC LAYER (Domain Services)
@@ -124,6 +132,9 @@ public:
         
         // Alert Generation & System Health Monitoring
         container.bind_singleton<diagnostics::IAlertManager, diagnostics::AlertManager>();
+
+        // Model Checkpointing (Save/Load)
+        container.bind_singleton<ICheckpointManager, CheckpointManager>(); // Added Registration
         
         // Future domain services (examples):
         // container.bind_singleton<IUserService, UserService>();

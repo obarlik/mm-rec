@@ -17,10 +17,13 @@
 #include "mm_rec/training/gradient_utils.h"
 #include "mm_rec/training/sample_tracker.h"
 #include "mm_rec/business/checkpoint.h"
+#include "mm_rec/business/i_checkpoint_manager.h" // Interface
 #include "mm_rec/core/memory_manager.h"
 #include "mm_rec/infrastructure/logger.h"
 #include "mm_rec/utils/ui.h"            
 #include "mm_rec/business/metrics.h"
+#include "mm_rec/infrastructure/i_metrics_exporter.h" // [NEW]
+#include "mm_rec/application/service_configurator.h" // For DI
 #include "mm_rec/core/vulkan_backend.h"
 #include "mm_rec/core/auto_tuner.h"     // [RESTORED]
 #include "mm_rec/data/data_loader.h"   // [RESTORED]
@@ -170,6 +173,9 @@ int cmd_train(int argc, char* argv[]) {
     LOG_INFO("Config Loaded: Hard Threshold = " + std::to_string(hard_threshold));
     LOG_INFO("               Batch Size = " + std::to_string(batch_size));
 
+    // DI Resolution
+    auto checkpoint_manager = ServiceConfigurator::container().resolve<ICheckpointManager>();
+
     // --- 5. Data Pipeline ---
     ui::info("Loading dataset: " + data_path);
     if (!std::filesystem::exists(data_path)) {
@@ -208,7 +214,7 @@ int cmd_train(int argc, char* argv[]) {
     train_config.easy_threshold = easy_threshold;
     train_config.hard_threshold = hard_threshold;
     
-    Trainer trainer(model, train_config);
+    Trainer trainer(model, train_config, DashboardManager::instance());
     
     MemoryManager::instance().mark_persistent();
     
@@ -221,7 +227,7 @@ int cmd_train(int argc, char* argv[]) {
     try {
         if (std::ifstream(latest_ckpt_path).good()) {
             CheckpointMetadata loaded_meta;
-            CheckpointManager::load_checkpoint(latest_ckpt_path, model, loaded_meta);
+            checkpoint_manager->load_checkpoint(latest_ckpt_path, model, loaded_meta);
             start_epoch = loaded_meta.epoch + 1;
             best_loss = loaded_meta.loss;
             ui::success("Resumed from Epoch " + std::to_string(loaded_meta.epoch) + " (Loss: " + std::to_string(loaded_meta.loss) + ")");
@@ -237,13 +243,16 @@ int cmd_train(int argc, char* argv[]) {
         CheckpointMetadata init_meta;
         init_meta.epoch = 0;
         init_meta.learning_rate = learning_rate;
-        CheckpointManager::save_checkpoint(latest_ckpt_path, model, init_meta);
+        checkpoint_manager->save_checkpoint(latest_ckpt_path, model, init_meta);
     }
 
     // --- 8. Metrics (Redirect to Run Dir) ---
     bool enable_metrics = true;
     for(int i=0; i<argc; ++i) if(std::string(argv[i]) == "--no-metrics") enable_metrics = false;
     
+    // --- Metrics Exporter (Infra) ---
+    auto metrics_exporter = ServiceConfigurator::container().resolve<infrastructure::IMetricsExporter>();
+
     if (enable_metrics) {
         // Configure Dashboard History Path
         DashboardManager::instance().set_history_path(run_dir + "/dashboard_history.csv");
@@ -251,7 +260,7 @@ int cmd_train(int argc, char* argv[]) {
         MetricsSamplingConfig sampling;
         sampling.enabled = true;
         sampling.interval = 10;
-        MetricsManager::instance().start_writer(run_dir + "/training_metrics.bin", sampling);
+        metrics_exporter->start(run_dir + "/training_metrics.bin", sampling);
         ui::info("Metrics logging enabled -> " + run_dir);
     }
 
@@ -304,7 +313,7 @@ int cmd_train(int argc, char* argv[]) {
             if (!std::isfinite(loss) || loss > 100.0f) {
                 ui::error("Explosion detected! Rolling back...");
                 CheckpointMetadata meta;
-                CheckpointManager::load_checkpoint(latest_ckpt_path, model, meta);
+                checkpoint_manager->load_checkpoint(latest_ckpt_path, model, meta);
                 learning_rate *= 0.5f;
                 trainer.update_learning_rate(learning_rate);
                 MemoryManager::instance().reset_arena();
@@ -316,7 +325,7 @@ int cmd_train(int argc, char* argv[]) {
             global_step++;
             
             // Update Dashboard (GLOBAL)
-            DashboardManager::instance().update_training_stats(loss, trainer.get_current_lr(), speed_tps, global_step);
+            // DashboardManager::instance().update_training_stats(...); // Handled by Trainer
             DashboardManager::instance().update_system_stats((int)mem_mb);
 
             // Update Console
@@ -345,12 +354,12 @@ int cmd_train(int argc, char* argv[]) {
         meta.loss = (epoch_step_count > 0) ? epoch_loss / epoch_step_count : 0.0f;
         meta.learning_rate = learning_rate;
         
-        CheckpointManager::save_checkpoint(latest_ckpt_path, model, meta);
+        checkpoint_manager->save_checkpoint(latest_ckpt_path, model, meta);
         ui::info("Saved checkpoint: " + latest_ckpt_path);
         
         if (meta.loss < best_loss) {
             best_loss = meta.loss;
-            CheckpointManager::save_checkpoint(best_ckpt_path, model, meta);
+            checkpoint_manager->save_checkpoint(best_ckpt_path, model, meta);
             ui::success("New best loss: " + std::to_string(best_loss));
         }
     }
@@ -359,9 +368,9 @@ int cmd_train(int argc, char* argv[]) {
     CheckpointMetadata final_meta;
     final_meta.epoch = max_iterations;
     final_meta.learning_rate = learning_rate;
-    CheckpointManager::save_checkpoint(run_dir + "/kernel_adaptive_final.bin", model, final_meta);
+    checkpoint_manager->save_checkpoint(run_dir + "/kernel_adaptive_final.bin", model, final_meta);
 
-    MetricsManager::instance().stop_writer();
+    metrics_exporter->stop();
     Logger::instance().stop_writer();
     // DashboardManager::instance().stop(); // Don't stop it if we want it global! User might want to see valid results.
     // Actually, user said it should always be active.

@@ -1,12 +1,18 @@
 // Example: cmd_train.cpp'ye eklenecek metrik kayıtları
 
-#include "mm_rec/utils/metrics.h"
+#include "mm_rec/business/metrics.h"
+#include "mm_rec/infrastructure/i_metrics_exporter.h"
+#include "mm_rec/application/service_configurator.h" // For DI
 
 int cmd_train(int argc, char* argv[]) {
     // ... existing code ...
     
-    // Start metrics writer (async, non-blocking)
-    MetricsManager::instance().start_writer("training_metrics.jsonl");
+    // 0. Initialize Services
+    mm_rec::ServiceConfigurator::initialize();
+
+    // 1. Setup Exporter (Background Thread) - Resolved via DI
+    auto exporter = mm_rec::ServiceConfigurator::container().resolve<mm_rec::infrastructure::IMetricsExporter>();
+    exporter->start("example_metrics.bin");
     
     for (int iteration = start_epoch; iteration <= max_iterations; ++iteration) {
         // ... batch loop ...
@@ -35,7 +41,8 @@ int cmd_train(int argc, char* argv[]) {
     }
     
     // Stop writer (flushes remaining events)
-    MetricsManager::instance().stop_writer();
+    // Stop writer (flushes remaining events)
+    exporter->stop();
     
     return 0;
 }

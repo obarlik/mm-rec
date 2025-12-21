@@ -32,10 +32,6 @@ struct InferenceState {
 };
 static InferenceState g_inference;
 
-DashboardManager& DashboardManager::instance() {
-    static DashboardManager instance;
-    return instance;
-}
 
 DashboardManager::DashboardManager() {
     // Initialize standard/safe values
@@ -172,20 +168,38 @@ void DashboardManager::stop() {
     }
 }
 
-void DashboardManager::update_training_stats(float loss, float lr, float speed, int step) {
-    stats_.current_loss = loss;
-    stats_.current_lr = lr;
-    stats_.current_speed = speed;
-    stats_.current_step = step;
+void DashboardManager::update_training_stats(const TrainingStats& stats) {
+    stats_.current_loss = stats.loss;
+    stats_.current_lr = stats.current_lr;
+    stats_.current_speed = stats.speed_tps;
+    stats_.current_step = stats.step;
     
     std::lock_guard<std::mutex> lock(history_mtx_);
-    loss_history_.push_back(loss);
-    if (loss_history_.size() > max_history_size_) {
-        loss_history_.pop_front();
-    }
     
-    // Log Training Stats to Metrics
-    mm_rec::MetricsManager::record(mm_rec::MetricType::TRAINING_STEP, loss, lr, step, "STEP");
+    // Helper lambda to push and pop
+    auto update_deque = [&](std::deque<float>& dq, float val) {
+        dq.push_back(val);
+        if (dq.size() > max_history_size_) dq.pop_front();
+    };
+
+    update_deque(loss_history_, stats.loss);
+    update_deque(lr_history_, stats.current_lr);
+    update_deque(grad_norm_history_, stats.grad_norm);
+    update_deque(data_stall_history_, stats.data_stall_ms);
+    update_deque(moe_loss_history_, stats.moe_loss);
+    update_deque(mem_history_, stats.mem_mb);
+
+    // EMA Calculation for avg_loss
+    float current_ema = 0.0f;
+    if (!avg_loss_history_.empty()) current_ema = avg_loss_history_.back();
+    
+    if (current_ema == 0.0f) current_ema = stats.loss;
+    else current_ema = current_ema * 0.95f + stats.loss * 0.05f;
+    
+    update_deque(avg_loss_history_, current_ema);
+    
+    // Log Training Stats to Metrics (Legacy)
+    mm_rec::MetricsManager::record(mm_rec::MetricType::TRAINING_STEP, stats.loss, stats.current_lr, stats.step, "STEP");
     
     // Log Hybrid Stats
     float ratio = mm_rec::DynamicBalancer::get_gpu_ratio();
@@ -201,6 +215,16 @@ void DashboardManager::update_training_stats(float loss, float lr, float speed, 
 
 void DashboardManager::update_system_stats(size_t mem_mb) {
     stats_.memory_usage_mb = mem_mb;
+}
+
+// ITrainingMonitor Implementation
+void DashboardManager::on_step_complete(const TrainingStats& stats) {
+    update_training_stats(stats);
+    update_system_stats((size_t)stats.mem_mb);
+}
+
+bool DashboardManager::should_stop() {
+    return stats_.should_stop.load(std::memory_order_acquire);
 }
 
 // --- Helper for Resumable File Serving ---
@@ -314,12 +338,23 @@ void DashboardManager::register_routes() {
         ss << "\"epoch\": 1,"; 
         
         std::lock_guard<std::mutex> lock(history_mtx_);
-        ss << "\"history\": [";
-        for(size_t i=0; i<loss_history_.size(); ++i) {
-            ss << loss_history_[i] << (i < loss_history_.size()-1 ? "," : "");
-        }
-        ss << "],";
-        ss << "\"avg_history\": []";
+        
+        auto write_arr = [&](const std::string& key, const std::deque<float>& dq) {
+            ss << "\"" << key << "\": [";
+            for(size_t i=0; i<dq.size(); ++i) {
+                ss << dq[i] << (i < dq.size()-1 ? "," : "");
+            }
+            ss << "]";
+        };
+
+        write_arr("history", loss_history_); ss << ",";
+        write_arr("avg_history", avg_loss_history_); ss << ",";
+        write_arr("grad_norm_history", grad_norm_history_); ss << ",";
+        write_arr("lr_history", lr_history_); ss << ",";
+        write_arr("data_stall_history", data_stall_history_); ss << ",";
+        write_arr("moe_loss_history", moe_loss_history_); ss << ",";
+        write_arr("mem_history", mem_history_); // No trailing comma before closing }
+        
         ss << "}";
         
         res->set_header("Content-Type", "application/json");

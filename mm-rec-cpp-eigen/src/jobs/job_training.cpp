@@ -4,6 +4,7 @@
 #include "mm_rec/training/trainer.h"
 #include "mm_rec/training/gradient_utils.h"
 #include "mm_rec/business/checkpoint.h"
+#include "mm_rec/business/i_checkpoint_manager.h" // Interface
 #include "mm_rec/core/memory_manager.h"
 #include "mm_rec/infrastructure/logger.h"
 #include "mm_rec/utils/ui.h"
@@ -13,6 +14,9 @@
 #include "mm_rec/data/data_loader.h"
 #include "mm_rec/data/dataset.h"
 #include "mm_rec/application/dashboard_manager.h"
+#include "mm_rec/application/dashboard_manager.h"
+#include "mm_rec/infrastructure/i_metrics_exporter.h" // Interface
+#include "mm_rec/application/service_configurator.h" // For DI resolution
 
 #include <iostream>
 #include <fstream>
@@ -63,6 +67,12 @@ void JobTraining::join() {
 }
 
 void JobTraining::run_internal(TrainingJobConfig config) {
+    // Declared here to be visible for cleanup in finally/end of function
+    // DI: Resolve from container (Transient = new instance)
+    std::shared_ptr<infrastructure::IMetricsExporter> metrics_exporter = 
+        ServiceConfigurator::container().resolve<infrastructure::IMetricsExporter>();
+    auto checkpoint_manager = ServiceConfigurator::container().resolve<ICheckpointManager>();
+
     try {
         // --- Setup Run Directory ---
         std::string runs_dir = "runs";
@@ -175,7 +185,7 @@ void JobTraining::run_internal(TrainingJobConfig config) {
         train_config.easy_threshold = easy_threshold;
         train_config.hard_threshold = hard_threshold;
         
-        Trainer trainer(model, train_config);
+        Trainer trainer(model, train_config, DashboardManager::instance());
         
         MemoryManager::instance().mark_persistent();
 
@@ -188,7 +198,7 @@ void JobTraining::run_internal(TrainingJobConfig config) {
         try {
             if (std::ifstream(latest_ckpt_path).good()) {
                 CheckpointMetadata loaded_meta;
-                CheckpointManager::load_checkpoint(latest_ckpt_path, model, loaded_meta);
+                checkpoint_manager->load_checkpoint(latest_ckpt_path, model, loaded_meta);
                 start_epoch = loaded_meta.epoch + 1;
                 best_loss = loaded_meta.loss;
                 ui::success("Resumed from Epoch " + std::to_string(loaded_meta.epoch) + " (Loss: " + std::to_string(loaded_meta.loss) + ")");
@@ -199,15 +209,16 @@ void JobTraining::run_internal(TrainingJobConfig config) {
             CheckpointMetadata init_meta;
             init_meta.epoch = 0;
             init_meta.learning_rate = learning_rate;
-            CheckpointManager::save_checkpoint(latest_ckpt_path, model, init_meta);
+            checkpoint_manager->save_checkpoint(latest_ckpt_path, model, init_meta);
         }
         
-        // --- Metrics ---
+        // --- Metrics Exporter (Infra) ---
+        // infrastructure::MetricsExporter metrics_exporter; // Moved to function scope
         if (config.enable_metrics) {
             MetricsSamplingConfig sampling;
             sampling.enabled = true;
             sampling.interval = 10;
-            MetricsManager::instance().start_writer(run_dir + "/training_metrics.bin", sampling);
+            metrics_exporter->start(run_dir + "/training_metrics.bin", sampling);
         }
 
         // --- Loop ---
@@ -246,7 +257,7 @@ void JobTraining::run_internal(TrainingJobConfig config) {
                 if (!std::isfinite(loss) || loss > 100.0f) {
                     ui::error("Explosion! Rolling back...");
                     CheckpointMetadata meta;
-                    CheckpointManager::load_checkpoint(latest_ckpt_path, model, meta);
+                    checkpoint_manager->load_checkpoint(latest_ckpt_path, model, meta);
                     learning_rate *= 0.5f;
                     trainer.update_learning_rate(learning_rate);
                     MemoryManager::instance().reset_arena();
@@ -257,7 +268,7 @@ void JobTraining::run_internal(TrainingJobConfig config) {
                 epoch_step_count++;
                 global_step++;
                 
-                DashboardManager::instance().update_training_stats(loss, trainer.get_current_lr(), speed_tps, global_step);
+                // DashboardManager::instance().update_training_stats(...); // Handled by Trainer
                 DashboardManager::instance().update_system_stats((int)mem_mb);
 
                 if (batch_idx % 10 == 0) {
@@ -281,11 +292,11 @@ void JobTraining::run_internal(TrainingJobConfig config) {
             meta.epoch = iteration;
             meta.loss = (epoch_step_count > 0) ? epoch_loss / epoch_step_count : 0.0f;
             meta.learning_rate = learning_rate;
-            CheckpointManager::save_checkpoint(latest_ckpt_path, model, meta);
+            checkpoint_manager->save_checkpoint(latest_ckpt_path, model, meta);
             
             if (meta.loss < best_loss) {
                 best_loss = meta.loss;
-                CheckpointManager::save_checkpoint(best_ckpt_path, model, meta);
+                checkpoint_manager->save_checkpoint(best_ckpt_path, model, meta);
             }
         }
         
@@ -294,7 +305,7 @@ void JobTraining::run_internal(TrainingJobConfig config) {
             CheckpointMetadata final_meta;
             final_meta.epoch = max_iterations;
             final_meta.learning_rate = learning_rate;
-            CheckpointManager::save_checkpoint(run_dir + "/kernel_adaptive_final.bin", model, final_meta);
+            checkpoint_manager->save_checkpoint(run_dir + "/kernel_adaptive_final.bin", model, final_meta);
             ui::success("Training Completed");
         } else {
             ui::warning("Training Aborted by User");
@@ -306,7 +317,10 @@ void JobTraining::run_internal(TrainingJobConfig config) {
     }
 
     // === CLEANUP: Prevent State Leakage Between Runs ===
-    MetricsManager::instance().stop_writer();
+    // === CLEANUP: Prevent State Leakage Between Runs ===
+    if (config.enable_metrics) {
+        metrics_exporter->stop();
+    }
     Logger::instance().stop_writer();
     
     // Force memory cleanup (clear all arenas, release blocks to global pool)

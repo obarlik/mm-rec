@@ -11,6 +11,7 @@
 #include "mm_rec/jobs/job_training.h"
 #include "mm_rec/application/dashboard_manager.h"
 #include "mm_rec/infrastructure/logger.h"
+#include "mm_rec/infrastructure/metrics_exporter.h" // [NEW]
 #include "mm_rec/utils/ui.h"
 #include "mm_rec/core/vulkan_backend.h"
 

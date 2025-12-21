@@ -2,6 +2,7 @@
 
 #include "mm_rec/infrastructure/http_server.h"
 #include "mm_rec/infrastructure/di_container.h"
+#include "mm_rec/application/i_training_monitor.h" // Interface
 #include <atomic>
 #include <mutex>
 #include <deque>
@@ -29,9 +30,16 @@ struct DashboardStats {
     std::string current_run_name; // Not atomic, but set once at start
 };
 
-class DashboardManager {
+class DashboardManager : public ITrainingMonitor { // ITrainingMonitor Implementation
 public:
-    static DashboardManager& instance();
+    void on_step_complete(const TrainingStats& stats) override;
+    bool should_stop() override;
+
+    // Singleton Access (Legacy support)
+    static DashboardManager& instance() {
+        static std::shared_ptr<DashboardManager> inst = std::make_shared<DashboardManager>();
+        return *inst;
+    }
 
     // Start the dashboard server
     bool start(int port = 8085) {
@@ -52,7 +60,7 @@ public:
          stats_.current_run_name.clear();
     }
     
-    void update_training_stats(float loss, float lr, float speed, int step);
+    void update_training_stats(const TrainingStats& stats);
     void update_system_stats(size_t mem_mb);
     
     // Accessors
@@ -83,8 +91,18 @@ private:
     
     // History for graphs
     std::mutex history_mtx_;
+    const size_t max_history_size_ = 10000;
+    // Trainer had 10000. If we want full history, we should increase.
+    // However, DashboardManager logic implies it's for live view.
+    // Let's match Trainer's logic or use a reasonable buffer. 10000 is safer for long runs.
+    
     std::deque<float> loss_history_;
-    const size_t max_history_size_ = 500;
+    std::deque<float> avg_loss_history_;
+    std::deque<float> grad_norm_history_;
+    std::deque<float> lr_history_;
+    std::deque<float> data_stall_history_;
+    std::deque<float> moe_loss_history_;
+    std::deque<float> mem_history_;
     std::ofstream history_file_;
 };
 

@@ -7,7 +7,11 @@
 #include "mm_rec/config/model_config.h"
 #include "mm_rec/data/tokenizer.h"
 #include "mm_rec/business/checkpoint.h"
+#include "mm_rec/business/i_checkpoint_manager.h" // Interface
+#include "mm_rec/business/metric_types.h"
 #include "mm_rec/business/metrics.h"  // Zero-overhead metrics
+#include "mm_rec/infrastructure/i_metrics_exporter.h"
+#include "mm_rec/application/service_configurator.h" // For DI
 #include "mm_rec/infrastructure/logger.h"
 #include "mm_rec/utils/ui.h"
 #include "commands.h"
@@ -46,9 +50,15 @@ int cmd_infer(int argc, char* argv[]) {
     Logger::instance().start_writer("inference.log", LogLevel::INFO);
     ui::print_header("MM-Rec Inference Engine");
     
+    // Create exporter in scope
+    auto metrics_exporter = mm_rec::ServiceConfigurator::container().resolve<mm_rec::infrastructure::IMetricsExporter>();
+    
+    // Resolve CheckpointManager
+    auto checkpoint_manager = mm_rec::ServiceConfigurator::container().resolve<mm_rec::ICheckpointManager>();
+
     if (enable_metrics) {
-        MetricsManager::instance().start_writer("inference_metrics.bin");
-        LOG_INFO("Metrics enabled → inference_metrics.bin");
+        metrics_exporter->start("inference_metrics.jsonl");
+        LOG_INFO("Metrics enabled → inference_metrics.jsonl");
     }
 
     // 1. Load Config
@@ -104,7 +114,7 @@ int cmd_infer(int argc, char* argv[]) {
     
     auto load_start = std::chrono::high_resolution_clock::now();
     try {
-        CheckpointManager::load_checkpoint(model_path, model, metadata);
+        checkpoint_manager->load_checkpoint(model_path, model, metadata);
         auto load_end = std::chrono::high_resolution_clock::now();
         float load_time_ms = std::chrono::duration<float, std::milli>(load_end - load_start).count();
         
@@ -222,7 +232,7 @@ int cmd_infer(int argc, char* argv[]) {
     stats.finish();
     
     if (enable_metrics) {
-        MetricsManager::instance().stop_writer();
+        metrics_exporter->stop();
     }
     
     Logger::instance().stop_writer();
