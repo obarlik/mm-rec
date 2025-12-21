@@ -37,6 +37,12 @@ template<> float Config::get<float>(const std::string& key, const float& default
     try { return std::stof(val); } catch (...) { return default_val; }
 }
 
+template<> double Config::get<double>(const std::string& key, const double& default_val) const {
+    std::string val = get_raw(key);
+    if (val.empty()) return default_val;
+    try { return std::stod(val); } catch (...) { return default_val; }
+}
+
 template<> bool Config::get<bool>(const std::string& key, const bool& default_val) const {
     std::string val = get_raw(key);
     if (val.empty()) return default_val;

@@ -1,11 +1,13 @@
 #pragma once
 
+#include "mm_rec/utils/service_layers.h"  // Service layer classification guide
 #include "mm_rec/utils/di_container.h"
 #include "mm_rec/utils/event_bus.h"
 #include "mm_rec/utils/metrics.h"
 #include "mm_rec/utils/logger.h"
 #include "mm_rec/utils/config.h"
 #include "mm_rec/utils/request_context.h"
+#include "mm_rec/utils/http_server.h"      // For HttpServer registration
 #include "mm_rec/utils/diagnostic_manager.h"
 #include "mm_rec/utils/alert_manager.h"
 
@@ -64,47 +66,96 @@ public:
      * Called once at application startup.
      */
     static void configure_services(DIContainer& container) {
-        // ========================================
-        // Core Infrastructure Services (Singleton)
-        // ========================================
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // INFRASTRUCTURE LAYER (Stable Platform Services)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // These are framework/platform services that are:
+        // - Stable and rarely change
+        // - No business logic
+        // - Single obvious implementation
+        // - Can be used as concrete classes (no interface needed)
         
-        // Logger - app-wide logging (interface-based)
-        container.bind_singleton<ILogger, Logger>();
-        
-        // Config - configuration management
+        // Configuration Management (key-value store)
         container.bind_singleton<Config>();
         
-        // Event Bus - pub/sub communication
+        // Event Bus (internal pub/sub messaging)
         container.bind_singleton<EventBus>();
         
-        // Metrics tracking
+        // Metrics Collection (stats tracking)
         container.bind_singleton<MetricsManager>();
         
-        // Dashboard manager - web UI
-        container.bind_singleton<DashboardManager>();
+        // Logging (interface for pluggable destinations: file, console, remote)
+        container.bind_singleton<ILogger, Logger>();
         
-        // Diagnostic & Alert Management (Operations Dashboard) - Interface-based!
+        // HTTP Server (for dashboard and APIs)
+        // Config-driven: reads from config instead of hard-coded values
+        container.bind_singleton<mm_rec::net::HttpServer>([](DIContainer& c) {
+            auto cfg = c.resolve<Config>();
+            
+            // Infrastructure Config (Domain reads, Infrastructure executes)
+            int port = cfg->get_int("server.port", 8085);
+            int threads = cfg->get_int("server.threads", 4);
+            int timeout = cfg->get_int("server.timeout", 3);
+            int max_conn = cfg->get_int("server.max_connections", 100);
+            int rate_limit = cfg->get_int("server.rate_limit", 1000);
+            
+            // Create config struct
+            mm_rec::net::HttpServerConfig config;
+            config.port = port;
+            config.threads = threads;
+            config.timeout_sec = timeout;
+            config.max_connections = max_conn;
+            config.max_req_per_min = rate_limit;
+            
+            return std::make_shared<mm_rec::net::HttpServer>(config);
+        });
+        
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // BUSINESS LOGIC LAYER (Domain Services)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // These are domain-specific services that:
+        // - Contain business rules and logic
+        // - May have multiple implementations
+        // - Need mocking in unit tests
+        // - MUST use interface-based registration
+        
+        // Diagnostic Tracing & Error Management
         container.bind_singleton<diagnostics::IDiagnosticManager, diagnostics::DiagnosticManager>();
+        
+        // Alert Generation & System Health Monitoring
         container.bind_singleton<diagnostics::IAlertManager, diagnostics::AlertManager>();
         
-        // ========================================
-        // HTTP Request-Scoped Services
-        // ========================================
+        // Future domain services (examples):
+        // container.bind_singleton<IUserService, UserService>();
+        // container.bind_singleton<IOrderService, OrderService>();
+        // container.bind_singleton<IPaymentService, StripePaymentService>();
         
-        // Request context - timing, tracing, metadata (per HTTP request)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // APPLICATION LAYER (Facades / Coordinators)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // These services compose and coordinate other services
+        // Facade pattern - dependencies are INJECTED (not owned)
+        
+        // Dashboard (depends on HttpServer via DI)
+        container.bind_singleton<DashboardManager>([](DIContainer& c) {
+            auto server = c.resolve<mm_rec::net::HttpServer>();
+            return std::make_shared<DashboardManager>(server);
+        });
+        
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // REQUEST-SCOPED SERVICES (Per-Request State)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // These services are created fresh for each HTTP request:
+        // - Hold per-request data (correlation ID, timing, etc.)
+        // - Lifetime managed by request scope
+        // - Usually concrete (just data holders)
+        
+        // HTTP Request Context (timing, tracing, correlation)
         container.bind_scoped<mm_rec::net::RequestContext>();
         
-        // Add more request-scoped services:
-        // container.bind_scoped<UserService>();
-        // container.bind_scoped<AuthService>();
-        
-        // ========================================
-        // Transient Services (New instance each time)
-        // ========================================
-        
-        // Example transient services
-        // container.bind_transient<EmailService>();
-        // container.bind_transient<ValidationService>();
+        // Additional request-scoped services (examples):
+        // container.bind_scoped<UserContext>();
+        // container.bind_scoped<AuthContext>();
     }
     
     /**

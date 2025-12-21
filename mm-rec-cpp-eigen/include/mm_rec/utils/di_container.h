@@ -98,6 +98,20 @@ public:
     }
 
     /**
+     * Bind interface to factory function (with DIContainer access) as singleton.
+     */
+    template<typename Interface>
+    void bind_singleton(std::function<std::shared_ptr<Interface>(DIContainer&)> factory) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        
+        bindings_[std::type_index(typeid(Interface))] = {
+            Singleton,
+            [this, factory]() { return std::static_pointer_cast<void>(factory(*this)); },
+            nullptr
+        };
+    }
+
+    /**
      * Bind interface to implementation as transient.
      * New instance created on every resolve() call.
      */

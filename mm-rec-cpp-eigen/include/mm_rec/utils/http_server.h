@@ -106,8 +106,42 @@ public:
 #endif
     }
     
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // FLUENT CONFIGURATION API
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Infrastructure provides flexible configuration via method chaining
+    
+    HttpServer* set_timeout(int seconds) {
+        config_.timeout_sec = seconds;
+        return this;
+    }
+    
+    HttpServer* set_max_connections(int max) {
+        config_.max_connections = max;
+        // Note: ConnectionManager can't be reassigned (contains mutex)
+        // TODO: Add ConnectionManager::set_max_connections() method
+        return this;
+    }
+    
+    HttpServer* set_rate_limit(int max_req_per_min, int throttle_ms = 0) {
+        config_.max_req_per_min = max_req_per_min;
+        config_.throttle_ms = throttle_ms;
+        // Note: TrafficManager can't be reassigned (contains mutex)
+        // TODO: Add TrafficManager::set_rate_limit() method
+        return this;
+    }
+    
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // QUERY METHODS
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
     int port() const { return config_.port; }
+    bool is_running() const { return running_; }
 
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // ROUTE REGISTRATION
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
     void register_handler(const std::string& path, Handler handler) {
         std::lock_guard<std::mutex> lock(handlers_mutex_);
         handlers_[path] = handler;

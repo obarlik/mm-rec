@@ -67,8 +67,16 @@ public:
     }
 
     // DI-friendly: Public constructor
+    // DI-friendly: Public constructor
     Config() = default;
     ~Config() = default;
+    
+    // Typed convenience getters (explicit methods for common types)
+    // defined inline below specializations to avoid instantiation errors
+    int get_int(const std::string& key, int default_val = 0) const;
+    bool get_bool(const std::string& key, bool default_val = false) const;
+    double get_double(const std::string& key, double default_val = 0.0) const;
+    std::string get_string(const std::string& key, const std::string& default_val = "") const;
 
 private:
     // Internal string-based storage helpers
@@ -79,11 +87,29 @@ private:
     std::map<std::string, std::string> settings_;
 };
 
-// Template Specializations (implemented in header or explicit instantiation)
+// Template Specializations (must be declared BEFORE usage in inline methods)
 template<> int Config::get<int>(const std::string& key, const int& default_val) const;
 template<> float Config::get<float>(const std::string& key, const float& default_val) const;
+template<> double Config::get<double>(const std::string& key, const double& default_val) const;
 template<> bool Config::get<bool>(const std::string& key, const bool& default_val) const;
 template<> std::string Config::get<std::string>(const std::string& key, const std::string& default_val) const;
+
+// Inline Implementations (now safe to call specializations)
+inline int Config::get_int(const std::string& key, int default_val) const {
+    return get<int>(key, default_val);
+}
+
+inline bool Config::get_bool(const std::string& key, bool default_val) const {
+    return get<bool>(key, default_val);
+}
+
+inline double Config::get_double(const std::string& key, double default_val) const {
+    return get<double>(key, default_val);
+}
+
+inline std::string Config::get_string(const std::string& key, const std::string& default_val) const {
+    return get<std::string>(key, default_val);
+}
 
 template<typename T>
 void Config::set(const std::string& key, const T& value) {

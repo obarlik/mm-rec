@@ -2,16 +2,31 @@
 
 #include <string>
 #include <vector>
-#include <mutex>
-#include <chrono>
+#include <deque>
 #include <map>
+#include <mutex>
+#include <optional>
+#include <chrono>
+#include <atomic> // Added for std::atomic
 
 namespace mm_rec {
 namespace diagnostics {
 
+// Statistics struct for diagnostic metrics
+struct Statistics {
+    uint64_t total_requests = 0;
+    uint64_t total_errors = 0;
+    uint64_t total_traces_collected = 0;
+    uint64_t total_traces_dropped = 0;
+    size_t error_traces_in_memory = 0;
+    double error_rate = 0.0;
+    bool tracing_enabled = false;
+    int traces_collected = 0;  // For compatibility
+    int traces_dropped = 0;    // For compatibility
+};
+
 /**
- * Error Trace Record
- * Stores full diagnostic trace for a failed request.
+ * Error Trace - captured diagnostic information
  */
 struct ErrorTrace {
     std::string correlation_id;
@@ -187,18 +202,8 @@ public:
         total_traces_dropped_ += count;
     }
     
-    struct Statistics {
-        uint64_t total_requests;
-        uint64_t total_errors;
-        uint64_t total_traces_collected;
-        uint64_t total_traces_dropped;
-        size_t error_traces_in_memory;
-        double error_rate;
-        bool tracing_enabled;
-    };
-    
-    Statistics get_statistics() const {
-        std::lock_guard<std::mutex> lock(traces_mutex_);
+    Statistics get_statistics() const override {
+        std::lock_guard<std::mutex> lock(traces_mutex_); // Lock for error_traces_.size()
         
         Statistics stats;
         stats.total_requests = total_requests_.load();

@@ -62,8 +62,8 @@ public:
     // Raw access if needed
     DashboardStats& stats() { return stats_; }
 
-    // DI-friendly: Public constructors
-    DashboardManager();
+    // DI-friendly: Constructor with dependencies
+    DashboardManager(std::shared_ptr<mm_rec::net::HttpServer> server);
     ~DashboardManager();
 
 private:
@@ -73,7 +73,8 @@ private:
 
     void register_routes();
 
-    std::unique_ptr<mm_rec::net::HttpServer> server_;
+    // Injected dependencies (not owned!)
+    std::shared_ptr<mm_rec::net::HttpServer> server_;
     DashboardStats stats_;
     
     // History for graphs

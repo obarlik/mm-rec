@@ -8,9 +8,11 @@
 #include <vector>
 #include <thread>
 #include <mutex>
+#include <sstream> // Added
+#include <ctime>   // Added
+#include <cstdlib> // Added
 
-// Forward declaration
-namespace mm_rec { namespace net { class RequestContext; } }
+#include "mm_rec/utils/request_context.h" // Full include for RequestContext methods
 
 #include <cstring>
 #include <filesystem>
@@ -273,7 +275,8 @@ public:
                 }
             }
             
-            current_request_context_->add_trace(level_str, component, msg);
+            // TODO: Re-enable when RequestContext is fully defined
+            // current_request_context_->add_trace(level_str, component, msg);
         }
         
         // UI level: Write to stdout immediately (users expect instant feedback)
@@ -358,7 +361,8 @@ public:
     
 private:
     // Thread-local RequestContext for automatic diagnostic tracing
-    static thread_local mm_rec::net::RequestContext* current_request_context_;
+    // Thread-local context for request tracking
+    inline static thread_local mm_rec::net::RequestContext* current_request_context_ = nullptr;
     
     void register_buffer(LogBuffer* buf) {
         std::lock_guard<std::mutex> lock(registry_mutex_);
