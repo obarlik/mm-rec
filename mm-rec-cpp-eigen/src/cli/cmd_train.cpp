@@ -25,6 +25,7 @@
 #include "mm_rec/infrastructure/i_metrics_exporter.h" // [NEW]
 #include "mm_rec/application/service_configurator.h" // For DI
 #include "mm_rec/core/vulkan_backend.h"
+#include "mm_rec/core/i_compute_backend.h" // Interface
 #include "mm_rec/core/auto_tuner.h"     // [RESTORED]
 #include "mm_rec/data/data_loader.h"
 #include "mm_rec/data/i_data_loader.h" // Interface
@@ -81,6 +82,13 @@ int cmd_train(int argc, char* argv[]) {
     std::string runs_dir = "runs";
     std::string run_dir = runs_dir + "/" + run_name;
     
+    // DI Resolution (Early)
+    auto compute_backend = ServiceConfigurator::container().resolve<IComputeBackend>();
+    // We defer others until needed or resolve them here too? 
+    // Let's resolve all here for clarity.
+    auto checkpoint_manager = ServiceConfigurator::container().resolve<ICheckpointManager>();
+    auto data_loader_factory = ServiceConfigurator::container().resolve<IDataLoaderFactory>();
+    
     if (!fs::exists(runs_dir)) fs::create_directory(runs_dir);
     if (!fs::exists(run_dir)) fs::create_directory(run_dir);
     else {
@@ -94,7 +102,7 @@ int cmd_train(int argc, char* argv[]) {
     ui::info("Run Directory: " + run_dir);
 
     // --- 2. Initialize Backend & Hardware ---
-    if (VulkanBackend::get().init()) {
+    if (compute_backend->init()) {
          ui::success("GPU Backend Enabled (Full Power Mode)");
     } else {
          ui::warning("GPU Backend Failed. Using CPU.");
@@ -167,17 +175,13 @@ int cmd_train(int argc, char* argv[]) {
         }
         else if (key == "vram_reservation_mb") {
              size_t mb = std::stoul(val);
-             VulkanBackend::get().set_reservation(mb);
+             compute_backend->set_reservation(mb);
         }
     }
     
     LOG_INFO("Config Loaded: Hard Threshold = " + std::to_string(hard_threshold));
     LOG_INFO("               Batch Size = " + std::to_string(batch_size));
 
-    // DI Resolution
-    // DI Resolution
-    auto checkpoint_manager = ServiceConfigurator::container().resolve<ICheckpointManager>();
-    auto data_loader_factory = ServiceConfigurator::container().resolve<IDataLoaderFactory>();
 
     // --- 5. Data Pipeline ---
     ui::info("Loading dataset: " + data_path);

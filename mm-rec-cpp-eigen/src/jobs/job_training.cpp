@@ -10,6 +10,7 @@
 #include "mm_rec/utils/ui.h"
 #include "mm_rec/business/metrics.h"
 #include "mm_rec/core/vulkan_backend.h"
+#include "mm_rec/core/i_compute_backend.h" // Interface
 #include "mm_rec/core/auto_tuner.h"
 #include "mm_rec/data/data_loader.h"
 #include "mm_rec/data/i_data_loader.h" // Interface
@@ -74,6 +75,7 @@ void JobTraining::run_internal(TrainingJobConfig config) {
         ServiceConfigurator::container().resolve<infrastructure::IMetricsExporter>();
     auto checkpoint_manager = ServiceConfigurator::container().resolve<ICheckpointManager>();
     auto data_loader_factory = ServiceConfigurator::container().resolve<IDataLoaderFactory>();
+    auto compute_backend = ServiceConfigurator::container().resolve<IComputeBackend>();
 
     try {
         // --- Setup Run Directory ---
@@ -88,7 +90,7 @@ void JobTraining::run_internal(TrainingJobConfig config) {
         ui::info("Job Started: " + config.run_name);
         
         // --- Backend ---
-        if (VulkanBackend::get().init()) {
+        if (compute_backend->init()) {
              ui::success("GPU Backend Active");
         } else {
              ui::warning("Using CPU Backend");
@@ -159,7 +161,7 @@ void JobTraining::run_internal(TrainingJobConfig config) {
             }
             else if (key == "vram_reservation_mb") {
                  size_t mb = std::stoul(val);
-                 VulkanBackend::get().set_reservation(mb);
+                 compute_backend->set_reservation(mb);
             }
         }
         

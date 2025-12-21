@@ -12,21 +12,12 @@
 #include <dlfcn.h>
 #include <stdexcept>
 #include <cstring>
-#include <iostream>
-#include <vector>
-#include <dlfcn.h>
-#include <stdexcept>
-#include <cstring>
-#include <cstring>
 #include <cstdint>
-#include <vector>
-#include <iostream>
-#include <dlfcn.h>
-#include <stdexcept>
 #include <iomanip> // For VRAM formatting
 #include <map>
 #include <mutex>
 #include <atomic>
+#include "mm_rec/core/i_compute_backend.h" // Interface
 
 // --- Vulkan Types (Minimal) ---
 #define VK_MAKE_VERSION(major, minor, patch) \
@@ -451,7 +442,7 @@ const VkDeviceSize VK_WHOLE_SIZE = (~0ULL);
 
 namespace mm_rec {
 
-class VulkanBackend {
+class VulkanBackend : public IComputeBackend {
     friend class VulkanCompute;
     friend class VulkanMatrixOp;
     friend class PipelineCache;
@@ -464,6 +455,7 @@ private:
     VkPhysicalDeviceMemoryProperties memory_properties;
     uint32_t compute_queue_family_index = 0;
 
+    // ... (Private function pointers remain same) ...
     // --- Function Pointers ---
     VkResult (*vkCreateInstance)(const VkInstanceCreateInfo*, const void*, VkInstance*) = nullptr;
     void (*vkDestroyInstance)(VkInstance, const void*) = nullptr; 
@@ -529,22 +521,22 @@ private:
     VkResult (*vkResetFences)(VkDevice, uint32_t, const VkFence*) = nullptr;
 
 public:
-    inline bool is_ready() const { return device != nullptr; }
+    inline bool is_ready() const override { return device != nullptr; }
 
     static VulkanBackend& get() {
         static VulkanBackend backend;
         return backend;
     }
     
-    void set_reservation(size_t mb) {
+    void set_reservation(size_t mb) override {
         reserved_bytes_ = mb * 1024 * 1024;
         std::cout << "[Vulkan] Reserved VRAM: " << mb << " MB" << std::endl;
     }
 
-    std::string get_device_name() const { return device_name_; }
-    size_t get_total_vram() const { return total_vram_; }
+    std::string get_device_name() const override { return device_name_; }
+    size_t get_total_vram() const override { return total_vram_; }
     
-    void free_memory(VkDeviceMemory memory) {
+    void free_memory(VkDeviceMemory memory) override {
         if (!device || !memory) return;
         
         // Track
@@ -563,7 +555,7 @@ public:
     }
     
     // Fence management for async GPU operations
-    VkFence create_fence() {
+    VkFence create_fence() override {
         if (!device || !vkCreateFence) return nullptr;
         
         struct VkFenceCreateInfo {
@@ -579,25 +571,25 @@ public:
         return fence;
     }
     
-    void wait_fence(VkFence fence, uint64_t timeout = UINT64_MAX) {
+    void wait_fence(VkFence fence, uint64_t timeout = (~0ULL)) override {
         if (fence && vkWaitForFences) {
             vkWaitForFences(device, 1, &fence, 1, timeout);
         }
     }
     
-    void reset_fence(VkFence fence) {
+    void reset_fence(VkFence fence) override {
         if (fence && vkResetFences) {
             vkResetFences(device, 1, &fence);
         }
     }
     
-    void destroy_fence(VkFence fence) {
+    void destroy_fence(VkFence fence) override {
         if (fence && vkDestroyFence) {
             vkDestroyFence(device, fence, nullptr);
         }
     }
 
-    ~VulkanBackend() {
+    ~VulkanBackend() override {
         if (device && vkDestroyDevice) vkDestroyDevice(device, nullptr);
         if (instance && vkDestroyInstance) vkDestroyInstance(instance, nullptr);
         if (lib_handle) dlclose(lib_handle);
@@ -616,7 +608,7 @@ public:
         throw std::runtime_error("Vulkan: Could not find suitable memory type!");
     }
 
-    bool create_buffer(VkDeviceSize size, VkBuffer& buffer, VkDeviceMemory& memory) {
+    bool create_buffer(VkDeviceSize size, VkBuffer& buffer, VkDeviceMemory& memory) override {
          if(!device) return false;
          
          // 1. Check Reservation
@@ -663,7 +655,7 @@ public:
     }
 
 
-    bool init() {
+    bool init() override {
         if (lib_handle) return true; // Already init
 
         // 1. Dynamic Load

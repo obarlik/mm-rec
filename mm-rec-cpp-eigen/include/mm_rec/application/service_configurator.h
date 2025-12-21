@@ -16,6 +16,8 @@
 #include "mm_rec/business/checkpoint.h"             // Added CheckpointManager
 #include "mm_rec/data/i_data_loader.h"              // Added IDataLoaderFactory
 #include "mm_rec/data/data_loader.h"                // Added DataLoaderFactory
+#include "mm_rec/core/i_compute_backend.h"          // Added IComputeBackend
+#include "mm_rec/core/vulkan_backend.h"             // Added VulkanBackend Implementation
 
 // Forward declaration to avoid circular dependency
 namespace mm_rec { class DashboardManager; }
@@ -140,6 +142,9 @@ public:
 
         // Data Loader Factory (Creates DataLoaders with params)
         container.bind_singleton<IDataLoaderFactory, DataLoaderFactory>();
+
+        // Hardware Abstraction (Compute Backend)
+        container.bind_singleton<IComputeBackend, VulkanBackend>();
         
         // Future domain services (examples):
         // container.bind_singleton<IUserService, UserService>();
