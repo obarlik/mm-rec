@@ -16,7 +16,7 @@ echo -e "\n${GREEN}[2/3] Training Nano Model...${NC}"
 # Clear old checkpoints to verify training from scratch
 rm -f checkpoint_latest.bin checkpoint_best.bin
 # Use the built executable
-./build/mm_rec train config_nano.txt nano_data.bin
+./mm_rec.bin train config_nano.txt nano_data.bin
 
 # 3. Infer (using the newly created checkpoint)
 echo -e "\n${GREEN}[3/3] Testing Inference...${NC}"
@@ -24,6 +24,6 @@ echo -e "\n${GREEN}[3/3] Testing Inference...${NC}"
 # Tokenizer maps "0" -> ID 4 (since 0-3 are special).
 # Data uses 4..11. So promptecho "[3/3] Testing Inference (BPE Mode)..."
 # Pass vocab.json. cmd_infer will look for merges.txt in the same dir.
-./build/mm_rec infer config_nano.txt checkpoint_best.bin vocab.json "0 1 2" 
+./mm_rec.bin infer config_nano.txt checkpoint_best.bin vocab.json "0 1 2" 
 
 echo -e "\n${GREEN}✅ Cycle Complete!${NC}"

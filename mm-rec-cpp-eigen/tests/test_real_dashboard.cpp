@@ -29,13 +29,22 @@ int main(int argc, char** argv) {
         return 1;
     }
     
-    std::cout << "✓ Dashboard started. Testing connection...\n";
+    std::cout << "✓ Dashboard started successfully.\n";
     
-    // Keep alive for manual testing
-    std::cout << "Run: curl http://localhost:" << port << "\n";
-    std::cout << "Press Enter to exit...\n";
-    
-    std::cin.get();
+    // Check if running in automated mode (no args or specific flag)
+    bool automated = true;
+    if (argc > 1 && std::string(argv[1]) == "--interactive") {
+        automated = false;
+    }
+
+    if (automated) {
+        std::cout << "Automated mode: Sleeping 1s then stopping...\n";
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    } else {
+        std::cout << "Interactive mode: Press Enter to exit...\n";
+        std::cout << "Run: curl http://localhost:" << port << "\n";
+        std::cin.get();
+    }
     
     mm_rec::DashboardManager::instance().stop();
     return 0;

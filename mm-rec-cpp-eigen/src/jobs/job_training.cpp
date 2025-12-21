@@ -89,6 +89,7 @@ void JobTraining::run_internal(TrainingJobConfig config) {
 
         // --- Load Config ---
         MMRecModelConfig model_config;
+
         // Default values
         float learning_rate = 0.01f;
         std::string optimizer_type = "sgd";
@@ -163,6 +164,7 @@ void JobTraining::run_internal(TrainingJobConfig config) {
 
         // --- Model ---
         MMRecModel model(model_config);
+        
         TrainingConfig train_config;
         train_config.learning_rate = learning_rate;
         train_config.batch_size = batch_size;
@@ -172,7 +174,9 @@ void JobTraining::run_internal(TrainingJobConfig config) {
         train_config.grad_clip_norm = grad_clip_norm;
         train_config.easy_threshold = easy_threshold;
         train_config.hard_threshold = hard_threshold;
+        
         Trainer trainer(model, train_config);
+        
         MemoryManager::instance().mark_persistent();
 
         // --- Checkpoint Resume ---
