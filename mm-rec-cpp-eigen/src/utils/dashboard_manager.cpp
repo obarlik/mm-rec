@@ -10,6 +10,7 @@
 #include "mm_rec/data/tokenizer.h"
 #include "mm_rec/utils/checkpoint.h"
 #include "mm_rec/utils/middlewares.h" // New include
+#include "mm_rec/utils/event_bus.h"    // EventBus for SSE
 #include <sstream>
 #include <iostream>
 #include <filesystem>
@@ -74,6 +75,19 @@ bool DashboardManager::start(const net::HttpServerConfig& base_config) {
             server_->use(mm_rec::net::Middlewares::Metrics);
             // 3. Logger (Logs final result and timing)
             server_->use(mm_rec::net::Middlewares::Logger);
+            
+            // Connect EventBus to SSE broadcasting
+            mm_rec::EventBus::instance().on("training.step", [this](const mm_rec::EventData& data) {
+                server_->broadcast_sse("training.step", mm_rec::to_json(data));
+            });
+            
+            mm_rec::EventBus::instance().on("training.started", [this](const mm_rec::EventData& data) {
+                server_->broadcast_sse("training.started", mm_rec::to_json(data));
+            });
+            
+            mm_rec::EventBus::instance().on("training.stopped", [this](const mm_rec::EventData& data) {
+                server_->broadcast_sse("training.stopped", mm_rec::to_json(data));
+            });
             
             register_routes();
             
@@ -909,6 +923,32 @@ void DashboardManager::register_routes() {
 
         // Use the common helper
         serve_file_with_range(path, req, res);
+    });
+
+    // --- SSE Real-time Events ---
+    
+    server_->register_handler("/api/events", [this](const auto& req, std::shared_ptr<mm_rec::net::Response> res) {
+        res->enable_sse();
+        server_->register_sse_client(res);
+        
+        // Send initial connection event
+        res->send_event("connected", "{\"status\": \"ready\", \"timestamp\": " + std::to_string(std::time(nullptr)) + "}");
+        
+        // Keep connection alive with heartbeat
+        // This handler blocks but on a ThreadPool thread, so it's OK
+        while (req.is_connected()) {
+            std::this_thread::sleep_for(std::chrono::seconds(30));
+            
+            // Send ping to keep connection alive and detect client disconnect
+            try {
+                res->send_event("ping", "{\"timestamp\": " + std::to_string(std::time(nullptr)) + "}");
+            } catch (...) {
+                // Client disconnected
+                break;
+            }
+        }
+        
+        // Client disconnected, will be cleaned up by weak_ptr
     });
 
     // API Inference

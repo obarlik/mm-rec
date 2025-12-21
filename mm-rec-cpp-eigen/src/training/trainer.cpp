@@ -12,6 +12,7 @@
 #include "mm_rec/core/memory_manager.h"
 #include "mm_rec/utils/metrics.h"
 #include "mm_rec/utils/logger.h"
+#include "mm_rec/utils/event_bus.h"
 #include "mm_rec/utils/dashboard_html.h"
 #include "mm_rec/core/vulkan_backend.h"
 #include <iostream>
@@ -324,6 +325,18 @@ float Trainer::train_step(const TrainingBatch& batch, float data_stall_ms, float
     // Update dashboard stats
     // Update dashboard stats
     update_stats(total_step_loss, speed_tps, grad_norm, current_lr, data_stall_ms, 0.0f, mem_mb); // Speed/Mem passed from CLI
+    
+    // Emit training event for SSE (every 10 steps to reduce overhead)
+    if (step_ % 10 == 0) {
+        EventBus::instance().emit("training.step", {
+            {"step", std::to_string(step_)},
+            {"loss", std::to_string(total_step_loss)},
+            {"lr", std::to_string(current_lr)},
+            {"grad_norm", std::to_string(grad_norm)},
+            {"speed", std::to_string(speed_tps)},
+            {"mem_mb", std::to_string(mem_mb)}
+        });
+    }
     
     // 7. Cleanup
     MemoryManager::instance().clear_persistent();

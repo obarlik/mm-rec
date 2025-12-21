@@ -5,6 +5,7 @@
 #include "mm_rec/utils/connection_manager.h" // New
 #include "mm_rec/utils/traffic_manager.h"    // New
 #include "mm_rec/utils/response.h" // New include
+#include "mm_rec/utils/di_container.h" // DI Support
 #include <string>
 #include <functional>
 #include <map>
@@ -47,11 +48,27 @@ struct HttpServerConfig {
 };
 
 
+
 struct Request {
     std::string method;
     std::string path;
     std::string body;
     std::function<bool()> is_connected;
+    
+    // DI Support: Scope for dependency injection
+    mm_rec::Scope* scope = nullptr;
+    
+    /**
+     * Resolve service from DI container (scoped to this request).
+     * Usage: auto service = req.get<IUserService>();
+     */
+    template<typename T>
+    std::shared_ptr<T> get() const {
+        if (!scope) {
+            throw std::runtime_error("DI Scope not available. Did you forget to add ScopeMiddleware?");
+        }
+        return scope->template resolve<T>();
+    }
 };
 
 class HttpServer {
@@ -102,6 +119,44 @@ public:
     void use(Middleware middleware) {
         std::lock_guard<std::mutex> lock(middlewares_mutex_);
         middlewares_.push_back(middleware);
+    }
+
+    // --- SSE Client Management ---
+    
+    void register_sse_client(std::shared_ptr<Response> res) {
+        std::lock_guard<std::mutex> lock(sse_mutex_);
+        sse_clients_.push_back(res);
+    }
+
+    void broadcast_sse(const std::string& event, const std::string& data) {
+        std::lock_guard<std::mutex> lock(sse_mutex_);
+        
+        // Remove disconnected clients
+        sse_clients_.erase(
+            std::remove_if(sse_clients_.begin(), sse_clients_.end(),
+                [](const std::weak_ptr<Response>& wp) { return wp.expired(); }),
+            sse_clients_.end()
+        );
+
+        // Broadcast to remaining clients
+        for (auto& weak_res : sse_clients_) {
+            if (auto res = weak_res.lock()) {
+                try {
+                    res->send_event(event, data);
+                } catch (...) {
+                    // Client disconnected, will be cleaned up next time
+                }
+            }
+        }
+    }
+
+    void cleanup_sse_clients() {
+        std::lock_guard<std::mutex> lock(sse_mutex_);
+        sse_clients_.erase(
+            std::remove_if(sse_clients_.begin(), sse_clients_.end(),
+                [](const std::weak_ptr<Response>& wp) { return wp.expired(); }),
+            sse_clients_.end()
+        );
     }
 
     bool start() {
@@ -206,7 +261,13 @@ private:
     std::map<std::string, Handler> handlers_;
     std::mutex handlers_mutex_;
     std::vector<Middleware> middlewares_;
-    std::mutex middlewares_mutex_;
+    std::mutex middlewares_mutex_
+
+;
+    
+    // SSE client tracking
+    std::vector<std::weak_ptr<Response>> sse_clients_;
+    std::mutex sse_mutex_;
     
     // Components
     ThreadPool pool_;
