@@ -1,5 +1,5 @@
-#include "mm_rec/utils/dashboard_manager.h"
-#include "mm_rec/utils/logger.h"
+#include "mm_rec/application/dashboard_manager.h"
+#include "mm_rec/infrastructure/logger.h"
 #include <iostream>
 #include <thread>
 #include <chrono>

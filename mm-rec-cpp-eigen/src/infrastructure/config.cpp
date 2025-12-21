@@ -1,4 +1,4 @@
-#include "mm_rec/utils/config.h"
+#include "mm_rec/infrastructure/config.h"
 #include <fstream>
 #include <sstream>
 #include <iostream>

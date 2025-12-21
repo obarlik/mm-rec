@@ -1,6 +1,6 @@
 // Example: Interface-Based Dependency Injection (Best Practice)
 
-#include "mm_rec/utils/di_container.h"
+#include "mm_rec/infrastructure/di_container.h"
 #include <iostream>
 #include <vector>
 

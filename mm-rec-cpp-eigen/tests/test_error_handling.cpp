@@ -3,7 +3,7 @@
  */
 
 #include "mm_rec/core/tensor.h"
-#include "mm_rec/utils/error_handling.h"
+#include "mm_rec/infrastructure/error_handling.h"
 #include <iostream>
 #include <cassert>
 #include <cmath>

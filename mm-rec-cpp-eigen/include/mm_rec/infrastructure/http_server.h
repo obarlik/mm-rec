@@ -1,11 +1,11 @@
 #pragma once
 
-#include "mm_rec/utils/logger.h"
-#include "mm_rec/utils/thread_pool.h" 
-#include "mm_rec/utils/connection_manager.h" // New
-#include "mm_rec/utils/traffic_manager.h"    // New
-#include "mm_rec/utils/response.h" // New include
-#include "mm_rec/utils/di_container.h" // DI Support
+#include "mm_rec/infrastructure/logger.h"
+#include "mm_rec/infrastructure/thread_pool.h" 
+#include "mm_rec/infrastructure/connection_manager.h" // New
+#include "mm_rec/infrastructure/traffic_manager.h"    // New
+#include "mm_rec/infrastructure/response.h" // New include
+#include "mm_rec/infrastructure/di_container.h" // DI Support
 #include <string>
 #include <functional>
 #include <map>

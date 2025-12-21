@@ -9,7 +9,7 @@
  */
 
 #include "mm_rec/core/compressed_tensor.h"
-#include "mm_rec/utils/system_optimizer.h"
+#include "mm_rec/infrastructure/system_optimizer.h"
 #include "mm_rec/core/vulkan_backend.h"
 #include <iostream>
 #include <vector>

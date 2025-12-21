@@ -1,7 +1,7 @@
 // Demo: Memory Protection in Diagnostic Logging
 
-#include "mm_rec/utils/request_context.h"
-#include "mm_rec/utils/service_configurator.h"
+#include "mm_rec/infrastructure/request_context.h"
+#include "mm_rec/application/service_configurator.h"
 #include <iostream>
 
 using namespace mm_rec;

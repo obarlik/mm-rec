@@ -21,14 +21,14 @@
 #include <fcntl.h>
 #endif
 
-#include "mm_rec/utils/logger.h"
-#include "mm_rec/utils/http_server.h"
-#include "mm_rec/utils/dashboard_manager.h"
-#include "mm_rec/utils/config.h"
+#include "mm_rec/infrastructure/logger.h"
+#include "mm_rec/infrastructure/http_server.h"
+#include "mm_rec/application/dashboard_manager.h"
+#include "mm_rec/infrastructure/config.h"
 #include "mm_rec/utils/ui.h"
 #include "cli/commands.h"
 #include "mm_rec/jobs/job_training.h"
-#include "mm_rec/utils/run_manager.h" 
+#include "mm_rec/application/run_manager.h" 
 
 using namespace mm_rec;
 using namespace mm_rec::ui;

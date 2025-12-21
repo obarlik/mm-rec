@@ -1,15 +1,15 @@
 #pragma once
 
-#include "mm_rec/utils/service_layers.h"  // Service layer classification guide
-#include "mm_rec/utils/di_container.h"
-#include "mm_rec/utils/event_bus.h"
-#include "mm_rec/utils/metrics.h"
-#include "mm_rec/utils/logger.h"
-#include "mm_rec/utils/config.h"
-#include "mm_rec/utils/request_context.h"
-#include "mm_rec/utils/http_server.h"      // For HttpServer registration
-#include "mm_rec/utils/diagnostic_manager.h"
-#include "mm_rec/utils/alert_manager.h"
+#include "mm_rec/infrastructure/service_layers.h"  // Service layer classification guide
+#include "mm_rec/infrastructure/di_container.h"
+#include "mm_rec/infrastructure/event_bus.h"
+#include "mm_rec/business/metrics.h"
+#include "mm_rec/infrastructure/logger.h"
+#include "mm_rec/infrastructure/config.h"
+#include "mm_rec/infrastructure/request_context.h"
+#include "mm_rec/infrastructure/http_server.h"      // For HttpServer registration
+#include "mm_rec/business/diagnostic_manager.h"
+#include "mm_rec/business/alert_manager.h"
 
 // Forward declaration to avoid circular dependency
 namespace mm_rec { class DashboardManager; }
@@ -182,4 +182,4 @@ private:
 } // namespace mm_rec
 
 // Include DashboardManager after ServiceConfigurator to avoid circular dependency
-#include "mm_rec/utils/dashboard_manager.h"
+#include "mm_rec/application/dashboard_manager.h"

@@ -1,7 +1,7 @@
 #include "commands.h"
 #include "mm_rec/utils/ui.h"
-#include "mm_rec/utils/logger.h"
-#include "mm_rec/utils/http_server.h"
+#include "mm_rec/infrastructure/logger.h"
+#include "mm_rec/infrastructure/http_server.h"
 
 #include <iostream>
 #include <fstream>

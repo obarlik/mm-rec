@@ -16,16 +16,16 @@
 #include "mm_rec/training/trainer.h"
 #include "mm_rec/training/gradient_utils.h"
 #include "mm_rec/training/sample_tracker.h"
-#include "mm_rec/utils/checkpoint.h"
+#include "mm_rec/business/checkpoint.h"
 #include "mm_rec/core/memory_manager.h"
-#include "mm_rec/utils/logger.h"
+#include "mm_rec/infrastructure/logger.h"
 #include "mm_rec/utils/ui.h"            
-#include "mm_rec/utils/metrics.h"
+#include "mm_rec/business/metrics.h"
 #include "mm_rec/core/vulkan_backend.h"
 #include "mm_rec/core/auto_tuner.h"     // [RESTORED]
 #include "mm_rec/data/data_loader.h"   // [RESTORED]
 #include "mm_rec/data/dataset.h"
-#include "mm_rec/utils/dashboard_manager.h" // [NEW] Using global dashboard
+#include "mm_rec/application/dashboard_manager.h" // [NEW] Using global dashboard
 
 #include <iostream>
 #include <iomanip>

@@ -1,17 +1,17 @@
-#include "mm_rec/utils/dashboard_manager.h"
+#include "mm_rec/application/dashboard_manager.h"
 #include "embedded_assets.h"
-#include "mm_rec/utils/logger.h"
+#include "mm_rec/infrastructure/logger.h"
 #include "mm_rec/utils/ui.h"
-#include "mm_rec/utils/run_manager.h"
+#include "mm_rec/application/run_manager.h"
 #include "mm_rec/core/vulkan_backend.h"
 #include "mm_rec/core/dynamic_balancer.h"
-#include "mm_rec/utils/metrics.h"
+#include "mm_rec/business/metrics.h"
 #include "mm_rec/model/mm_rec_model.h"
 #include "mm_rec/data/tokenizer.h"
-#include "mm_rec/utils/checkpoint.h"
-#include "mm_rec/utils/middlewares.h" // New include
-#include "mm_rec/utils/event_bus.h"    // EventBus for SSE
-#include "mm_rec/utils/service_configurator.h" // DI Configuration
+#include "mm_rec/business/checkpoint.h"
+#include "mm_rec/infrastructure/middlewares.h" // New include
+#include "mm_rec/infrastructure/event_bus.h"    // EventBus for SSE
+#include "mm_rec/application/service_configurator.h" // DI Configuration
 #include <sstream>
 #include <iostream>
 #include <filesystem>
@@ -41,6 +41,11 @@ DashboardManager::DashboardManager() {
     // Initialize standard/safe values
 }
 
+DashboardManager::DashboardManager(std::shared_ptr<mm_rec::net::HttpServer> server) 
+    : server_(server) {
+    // Initialize safe values
+}
+
 void DashboardManager::set_history_path(const std::string& path) {
     std::lock_guard<std::mutex> lock(history_mtx_);
     if (history_file_.is_open()) {
@@ -55,8 +60,19 @@ DashboardManager::~DashboardManager() {
 }
 
 bool DashboardManager::start(const net::HttpServerConfig& base_config) {
-    if (server_) return true; // Already running
+    // If server is injected (via DI), use it directly
+    if (server_) {
+        // If not running, configure and start
+        if (!server_->is_running()) {
+            register_routes();
+            // Note: If using DI, port comes from Config, ignoring base_config argument here
+            // unless we want to force it. Assuming DI config is authoritative.
+            return server_->start();
+        }
+        return true; // Already running
+    }
 
+    // Legacy/Manual fallback: Create server with retries
     // User requested range: 8085-8089 (5 ports)
     int max_retries = 5; 
     bool success = false;

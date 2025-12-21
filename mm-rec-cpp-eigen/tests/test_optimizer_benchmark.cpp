@@ -8,7 +8,7 @@
  * Workload: Heavy FP32 Vector FMA (Fused Multiply-Add) with Barriers.
  */
 
-#include "mm_rec/utils/system_optimizer.h"
+#include "mm_rec/infrastructure/system_optimizer.h"
 #include <iostream>
 #include <vector>
 #include <chrono>

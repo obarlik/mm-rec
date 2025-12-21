@@ -1,7 +1,7 @@
 #pragma once
 
-#include "mm_rec/utils/http_server.h"
-#include "mm_rec/utils/di_container.h"
+#include "mm_rec/infrastructure/http_server.h"
+#include "mm_rec/infrastructure/di_container.h"
 #include <atomic>
 #include <mutex>
 #include <deque>
@@ -64,6 +64,10 @@ public:
 
     // DI-friendly: Constructor with dependencies
     DashboardManager(std::shared_ptr<mm_rec::net::HttpServer> server);
+    
+    // Legacy/Default constructor
+    DashboardManager();
+    
     ~DashboardManager();
 
 private:

@@ -6,9 +6,9 @@
 #include "mm_rec/model/mm_rec_model.h"
 #include "mm_rec/config/model_config.h"
 #include "mm_rec/data/tokenizer.h"
-#include "mm_rec/utils/checkpoint.h"
-#include "mm_rec/utils/metrics.h"  // Zero-overhead metrics
-#include "mm_rec/utils/logger.h"
+#include "mm_rec/business/checkpoint.h"
+#include "mm_rec/business/metrics.h"  // Zero-overhead metrics
+#include "mm_rec/infrastructure/logger.h"
 #include "mm_rec/utils/ui.h"
 #include "commands.h"
 

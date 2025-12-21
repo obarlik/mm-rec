@@ -2,7 +2,7 @@
  * Checkpoint Manager Implementation
  */
 
-#include "mm_rec/utils/checkpoint.h"
+#include "mm_rec/business/checkpoint.h"
 #include <fstream>
 #include <stdexcept>
 #include <cstring>

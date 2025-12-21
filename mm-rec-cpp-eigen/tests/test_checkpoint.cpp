@@ -2,7 +2,7 @@
  * Test: Checkpoint Management
  */
 
-#include "mm_rec/utils/checkpoint.h"
+#include "mm_rec/business/checkpoint.h"
 #include "mm_rec/model/mm_rec_model.h"
 #include <iostream>
 #include <cassert>

@@ -5,11 +5,11 @@
 #include <functional>
 #include <csignal>
 #include <cstdlib>
-#include "mm_rec/utils/logger.h"
+#include "mm_rec/infrastructure/logger.h"
 #include "mm_rec/utils/ui.h"
 #include "cli/commands.h"
-#include "mm_rec/utils/system_optimizer.h"
-#include "mm_rec/utils/dashboard_manager.h" // [NEW]
+#include "mm_rec/infrastructure/system_optimizer.h"
+#include "mm_rec/application/dashboard_manager.h" // [NEW]
 
 using namespace mm_rec;
 using namespace mm_rec::ui;

@@ -1,6 +1,6 @@
 // Example: Custom Constructor with Factory Pattern
 
-#include "mm_rec/utils/di_container.h"
+#include "mm_rec/infrastructure/di_container.h"
 #include <iostream>
 #include <string>
 

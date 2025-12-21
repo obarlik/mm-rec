@@ -2,7 +2,7 @@
  * Session Manager Implementation
  */
 
-#include "mm_rec/utils/session.h"
+#include "mm_rec/application/session.h"
 #include <fstream>
 #include <stdexcept>
 #include <cstring>

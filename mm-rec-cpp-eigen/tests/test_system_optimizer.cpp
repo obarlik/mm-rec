@@ -7,7 +7,7 @@
  * 3. OpenMP threads match the pin count.
  */
 
-#include "mm_rec/utils/system_optimizer.h"
+#include "mm_rec/infrastructure/system_optimizer.h"
 #include <iostream>
 #include <cassert>
 #include <sched.h>

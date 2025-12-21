@@ -10,7 +10,7 @@
 #include <vector>
 #include <cstdint>
 #include <cmath>
-#include "mm_rec/utils/error_handling.h"
+#include "mm_rec/infrastructure/error_handling.h"
 
 namespace mm_rec {
 

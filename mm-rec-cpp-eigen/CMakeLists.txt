@@ -168,12 +168,18 @@ set(CONFIG_SOURCES
     src/config/model_config.cpp
 )
 
-set(UTILS_SOURCES
-    src/utils/session.cpp
-    src/utils/checkpoint.cpp
-    src/utils/dashboard_manager.cpp
-    src/utils/run_manager.cpp
-    src/utils/config.cpp
+set(INFRASTRUCTURE_SOURCES
+    src/infrastructure/config.cpp
+)
+
+set(BUSINESS_SOURCES
+    src/business/checkpoint.cpp
+)
+
+set(APPLICATION_SOURCES
+    src/application/dashboard_manager.cpp
+    src/application/run_manager.cpp
+    src/application/session.cpp
 )
 
 set(JOB_SOURCES
@@ -195,7 +201,9 @@ add_library(mm_rec_eigen STATIC
     ${MODEL_SOURCES}
     ${TRAINING_SOURCES}
     ${CONFIG_SOURCES}
-    ${UTILS_SOURCES}
+    ${INFRASTRUCTURE_SOURCES}
+    ${BUSINESS_SOURCES}
+    ${APPLICATION_SOURCES}
     ${JOB_SOURCES}
     ${DATA_SOURCES}
 )
@@ -320,10 +328,10 @@ add_executable(test_pool_thread_safety tests/test_pool_thread_safety.cpp)
 target_link_libraries(test_pool_thread_safety mm_rec_eigen)
 add_test(NAME test_pool_thread_safety COMMAND test_pool_thread_safety)
 
-# Full Server Structure Test
-add_executable(test_mmrec_server_structure tests/test_mmrec_server_structure.cpp)
-target_link_libraries(test_mmrec_server_structure mm_rec_eigen)
-add_test(NAME test_mmrec_server_structure COMMAND test_mmrec_server_structure)
+# Config verification test
+add_executable(test_config_driven_server tests/test_config_driven_server.cpp)
+target_link_libraries(test_config_driven_server mm_rec_eigen)
+add_test(NAME test_config_driven_server COMMAND test_config_driven_server)
 
 # REAL DashboardManager Test
 add_executable(test_real_dashboard tests/test_real_dashboard.cpp)

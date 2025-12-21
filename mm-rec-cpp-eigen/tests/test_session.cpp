@@ -2,7 +2,7 @@
  * Test: Session Persistence
  */
 
-#include "mm_rec/utils/session.h"
+#include "mm_rec/application/session.h"
 #include <iostream>
 #include <cassert>
 #include <cmath>

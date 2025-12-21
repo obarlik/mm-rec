@@ -1,8 +1,8 @@
 #pragma once
 
-#include "mm_rec/utils/http_server.h"
-#include "mm_rec/utils/logger.h"
-#include "mm_rec/utils/metrics.h"
+#include "mm_rec/infrastructure/http_server.h"
+#include "mm_rec/infrastructure/logger.h"
+#include "mm_rec/business/metrics.h"
 #include <chrono>
 
 namespace mm_rec {

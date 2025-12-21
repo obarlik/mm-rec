@@ -2,7 +2,7 @@
  * Parse Metrics Command - Convert binary metrics to human-readable format
  */
 
-#include "mm_rec/utils/metrics.h"
+#include "mm_rec/business/metrics.h"
 #include "commands.h"
 
 #include <iostream>
@@ -15,7 +15,7 @@
 #include <algorithm> // For std::min/max
 #include <sstream> // For std::stringstream
 
-#include "mm_rec/utils/logger.h"
+#include "mm_rec/infrastructure/logger.h"
 #include "mm_rec/utils/ui.h"
 
 using namespace mm_rec;

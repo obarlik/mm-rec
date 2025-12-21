@@ -14,7 +14,7 @@
 #include <deque>
 #include <atomic>
 #include <mutex>
-#include "mm_rec/utils/http_server.h"
+#include "mm_rec/infrastructure/http_server.h"
 
 namespace mm_rec {
 

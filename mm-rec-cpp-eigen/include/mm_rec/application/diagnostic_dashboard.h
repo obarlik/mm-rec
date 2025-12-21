@@ -2,9 +2,9 @@
 
 #pragma once
 
-#include "mm_rec/utils/diagnostic_manager.h"
-#include "mm_rec/utils/alert_manager.h"
-#include "mm_rec/utils/http_server.h"
+#include "mm_rec/business/diagnostic_manager.h"
+#include "mm_rec/business/alert_manager.h"
+#include "mm_rec/infrastructure/http_server.h"
 #include <sstream>
 
 using namespace mm_rec;

@@ -1,6 +1,6 @@
 #include "mm_rec/core/auto_tuner.h"
 #include "mm_rec/core/vulkan_compute.h"
-#include "mm_rec/utils/system_optimizer.h"
+#include "mm_rec/infrastructure/system_optimizer.h"
 #include <iostream>
 #include <iomanip>
 #include <chrono>

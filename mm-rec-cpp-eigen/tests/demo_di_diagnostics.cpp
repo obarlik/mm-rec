@@ -1,8 +1,8 @@
 // Example: Using Diagnostic Services with DI
 
-#include "mm_rec/utils/service_configurator.h"
-#include "mm_rec/utils/diagnostic_dashboard.h"
-#include "mm_rec/utils/http_server.h"
+#include "mm_rec/application/service_configurator.h"
+#include "mm_rec/application/diagnostic_dashboard.h"
+#include "mm_rec/infrastructure/http_server.h"
 
 using namespace mm_rec;
 using namespace mm_rec::diagnostics;

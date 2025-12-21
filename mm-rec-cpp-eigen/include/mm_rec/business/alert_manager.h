@@ -1,6 +1,6 @@
 #pragma once
 
-#include "mm_rec/utils/diagnostic_manager.h"
+#include "mm_rec/business/diagnostic_manager.h"
 #include <queue>
 #include <chrono>
 

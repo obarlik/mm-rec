@@ -1,5 +1,5 @@
-#include "mm_rec/utils/http_server.h"
-#include "mm_rec/utils/di_container.h"
+#include "mm_rec/infrastructure/http_server.h"
+#include "mm_rec/infrastructure/di_container.h"
 #include <iostream>
 
 using namespace mm_rec;

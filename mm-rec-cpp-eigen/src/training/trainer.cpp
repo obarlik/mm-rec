@@ -10,10 +10,10 @@
 #include "mm_rec/training/optimizer.h" // Keep this, it's used
 #include "mm_rec/training/uboo_loss.h" // Keep this, it's used
 #include "mm_rec/core/memory_manager.h"
-#include "mm_rec/utils/metrics.h"
-#include "mm_rec/utils/logger.h"
-#include "mm_rec/utils/event_bus.h"
-#include "mm_rec/utils/dashboard_html.h"
+#include "mm_rec/business/metrics.h"
+#include "mm_rec/infrastructure/logger.h"
+#include "mm_rec/infrastructure/event_bus.h"
+#include "mm_rec/application/dashboard_html.h"
 #include "mm_rec/core/vulkan_backend.h"
 #include <iostream>
 #include <cstring>  // memcpy

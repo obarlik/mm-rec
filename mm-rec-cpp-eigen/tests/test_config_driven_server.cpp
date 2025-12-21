@@ -1,10 +1,10 @@
 #include <iostream>
 #include <cassert>
 #include <memory>
-#include "mm_rec/utils/di_container.h"
-#include "mm_rec/utils/service_configurator.h"
-#include "mm_rec/utils/config.h"
-#include "mm_rec/utils/http_server.h"
+#include "mm_rec/infrastructure/di_container.h"
+#include "mm_rec/application/service_configurator.h"
+#include "mm_rec/infrastructure/config.h"
+#include "mm_rec/infrastructure/http_server.h"
 
 using namespace mm_rec;
 using namespace mm_rec::net;
