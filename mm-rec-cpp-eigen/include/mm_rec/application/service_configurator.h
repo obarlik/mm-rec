@@ -14,6 +14,8 @@
 #include "mm_rec/infrastructure/i_metrics_exporter.h" // Added Interface
 #include "mm_rec/business/i_checkpoint_manager.h"   // Added ICheckpointManager
 #include "mm_rec/business/checkpoint.h"             // Added CheckpointManager
+#include "mm_rec/data/i_data_loader.h"              // Added IDataLoaderFactory
+#include "mm_rec/data/data_loader.h"                // Added DataLoaderFactory
 
 // Forward declaration to avoid circular dependency
 namespace mm_rec { class DashboardManager; }
@@ -134,7 +136,10 @@ public:
         container.bind_singleton<diagnostics::IAlertManager, diagnostics::AlertManager>();
 
         // Model Checkpointing (Save/Load)
-        container.bind_singleton<ICheckpointManager, CheckpointManager>(); // Added Registration
+        container.bind_singleton<ICheckpointManager, CheckpointManager>(); 
+
+        // Data Loader Factory (Creates DataLoaders with params)
+        container.bind_singleton<IDataLoaderFactory, DataLoaderFactory>();
         
         // Future domain services (examples):
         // container.bind_singleton<IUserService, UserService>();

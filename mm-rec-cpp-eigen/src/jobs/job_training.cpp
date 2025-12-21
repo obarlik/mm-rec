@@ -12,6 +12,7 @@
 #include "mm_rec/core/vulkan_backend.h"
 #include "mm_rec/core/auto_tuner.h"
 #include "mm_rec/data/data_loader.h"
+#include "mm_rec/data/i_data_loader.h" // Interface
 #include "mm_rec/data/dataset.h"
 #include "mm_rec/application/dashboard_manager.h"
 #include "mm_rec/application/dashboard_manager.h"
@@ -72,6 +73,7 @@ void JobTraining::run_internal(TrainingJobConfig config) {
     std::shared_ptr<infrastructure::IMetricsExporter> metrics_exporter = 
         ServiceConfigurator::container().resolve<infrastructure::IMetricsExporter>();
     auto checkpoint_manager = ServiceConfigurator::container().resolve<ICheckpointManager>();
+    auto data_loader_factory = ServiceConfigurator::container().resolve<IDataLoaderFactory>();
 
     try {
         // --- Setup Run Directory ---
@@ -167,9 +169,12 @@ void JobTraining::run_internal(TrainingJobConfig config) {
             running_ = false;
             return;
         }
+
         auto dataset = std::make_shared<Dataset>(config.data_path);
-        DataLoader loader(dataset, batch_size, max_seq_len, true, 4);
-        int64_t total_batches = loader.total_batches();
+        // data_loader_factory->create_loader returns std::unique_ptr<IDataLoader>
+        auto loader = data_loader_factory->create_loader(dataset, batch_size, max_seq_len, true, 4);
+        
+        int64_t total_batches = loader->total_batches(); // arrow syntax
         DashboardManager::instance().stats().total_steps = total_batches * max_iterations;
 
         // --- Model ---
@@ -235,10 +240,10 @@ void JobTraining::run_internal(TrainingJobConfig config) {
             auto step_end_time = std::chrono::high_resolution_clock::now();
             
             TrainingBatch batch;
-            loader.reset();
+            loader->reset(); // arrow syntax
             int64_t batch_idx = 0;
             
-            while(loader.next(batch)) {
+            while(loader->next(batch)) { // arrow syntax
                 if (stop_signal_ || DashboardManager::instance().should_stop()) break;
                 
                 auto step_start_time = std::chrono::high_resolution_clock::now();

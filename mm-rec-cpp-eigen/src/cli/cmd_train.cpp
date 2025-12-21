@@ -26,7 +26,8 @@
 #include "mm_rec/application/service_configurator.h" // For DI
 #include "mm_rec/core/vulkan_backend.h"
 #include "mm_rec/core/auto_tuner.h"     // [RESTORED]
-#include "mm_rec/data/data_loader.h"   // [RESTORED]
+#include "mm_rec/data/data_loader.h"
+#include "mm_rec/data/i_data_loader.h" // Interface
 #include "mm_rec/data/dataset.h"
 #include "mm_rec/application/dashboard_manager.h" // [NEW] Using global dashboard
 
@@ -174,7 +175,9 @@ int cmd_train(int argc, char* argv[]) {
     LOG_INFO("               Batch Size = " + std::to_string(batch_size));
 
     // DI Resolution
+    // DI Resolution
     auto checkpoint_manager = ServiceConfigurator::container().resolve<ICheckpointManager>();
+    auto data_loader_factory = ServiceConfigurator::container().resolve<IDataLoaderFactory>();
 
     // --- 5. Data Pipeline ---
     ui::info("Loading dataset: " + data_path);
@@ -195,8 +198,10 @@ int cmd_train(int argc, char* argv[]) {
     // Let's use DataLoader but consume it manually or let DataLoader yield batches and we filter them?
     // DataLoader yields a TrainingBatch. We can just use that.
     
-    DataLoader loader(dataset, batch_size, max_seq_len, true, 4);
-    int64_t total_batches = loader.total_batches();
+    // data_loader_factory->create_loader returns std::unique_ptr<IDataLoader>
+    auto loader = data_loader_factory->create_loader(dataset, batch_size, max_seq_len, true, 4);
+    
+    int64_t total_batches = loader->total_batches(); // arrow syntax
     DashboardManager::instance().stats().total_steps = total_batches * max_iterations;
 
     ui::info("Dataset ready. Batches per epoch: " + std::to_string(total_batches));
@@ -279,10 +284,10 @@ int cmd_train(int argc, char* argv[]) {
         auto step_end_time = std::chrono::high_resolution_clock::now();
         
         TrainingBatch batch;
-        loader.reset();
+        loader->reset(); // arrow syntax
         
         int64_t batch_idx = 0;
-        while(loader.next(batch)) {
+        while(loader->next(batch)) { // arrow syntax
             if (DashboardManager::instance().should_stop()) break;
 
             // Stall time
