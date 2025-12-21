@@ -6,6 +6,8 @@
 #include "mm_rec/utils/logger.h"
 #include "mm_rec/utils/config.h"
 #include "mm_rec/utils/request_context.h"
+#include "mm_rec/utils/diagnostic_manager.h"
+#include "mm_rec/utils/alert_manager.h"
 
 // Forward declaration to avoid circular dependency
 namespace mm_rec { class DashboardManager; }
@@ -78,8 +80,12 @@ public:
         // Metrics tracking
         container.bind_singleton<MetricsManager>();
         
-        // Dashboard manager - web UI (registered in production, not in demos)
-        // container.bind_singleton<DashboardManager>();
+        // Dashboard manager - web UI
+        container.bind_singleton<DashboardManager>();
+        
+        // Diagnostic & Alert Management (Operations Dashboard)
+        container.bind_singleton<diagnostics::DiagnosticManager>();
+        container.bind_singleton<diagnostics::AlertManager>();
         
         // ========================================
         // HTTP Request-Scoped Services

@@ -54,14 +54,9 @@ private:
     std::atomic<uint64_t> total_traces_collected_{0};
     std::atomic<uint64_t> total_traces_dropped_{0};
     
-    // Singleton
-    DiagnosticManager() = default;
-    
 public:
-    static DiagnosticManager& instance() {
-        static DiagnosticManager inst;
-        return inst;
-    }
+    // DI-friendly: Public constructor
+    DiagnosticManager() = default;
     
     // ========================================
     // Configuration

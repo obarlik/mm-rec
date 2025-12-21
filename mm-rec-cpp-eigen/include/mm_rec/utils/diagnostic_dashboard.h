@@ -38,10 +38,9 @@ inline std::string get_ops_dashboard_html() {
  *   GET  /api/performance/metrics        - Get performance metrics
  *   GET  /api/logs/recent                - Get recent logs
  */
-inline void register_diagnostic_endpoints(HttpServer* server) {
-    auto& diag_mgr = DiagnosticManager::instance();
-    auto& alert_mgr = AlertManager::instance();
-    
+inline void register_diagnostic_endpoints(HttpServer* server, 
+                                          DiagnosticManager* diag_mgr,
+                                          AlertManager* alert_mgr) {
     // ========================================
     // GET /ops - Operations Dashboard UI
     // ========================================

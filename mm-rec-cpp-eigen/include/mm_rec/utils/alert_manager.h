@@ -96,14 +96,9 @@ private:
     mutable std::mutex logs_mutex_;
     size_t max_logs_ = 10000;  // Keep last 10K log entries
     
-    // Singleton
-    AlertManager() = default;
-    
 public:
-    static AlertManager& instance() {
-        static AlertManager inst;
-        return inst;
-    }
+    // DI-friendly: Public constructor
+    AlertManager() = default;
     
     // ========================================
     // Alert Management
@@ -306,10 +301,12 @@ public:
     
     /**
      * Check system health and generate alerts if needed.
+     * Requires DiagnosticManager to be injected separately.
      */
-    void check_health() {
-        auto& diag_mgr = DiagnosticManager::instance();
-        auto stats = diag_mgr.get_statistics();
+    void check_health(DiagnosticManager* diag_mgr) {
+        if (!diag_mgr) return;
+        
+        auto stats = diag_mgr->get_statistics();
         
         // Check error rate
         if (stats.error_rate > error_rate_threshold_) {
