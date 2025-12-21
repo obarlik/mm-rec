@@ -66,8 +66,8 @@ public:
         // Core Infrastructure Services (Singleton)
         // ========================================
         
-        // Logger - app-wide logging
-        container.bind_singleton<Logger>();
+        // Logger - app-wide logging (interface-based)
+        container.bind_singleton<ILogger, Logger>();
         
         // Config - configuration management
         container.bind_singleton<Config>();

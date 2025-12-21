@@ -8,6 +8,10 @@
 #include <vector>
 #include <thread>
 #include <mutex>
+
+// Forward declaration
+namespace mm_rec { namespace net { class RequestContext; } }
+
 #include <cstring>
 #include <filesystem>
 #include <iomanip>
@@ -138,10 +142,70 @@ private:
 };
 
 /**
- * Global Logger
+ * Logger Interface for Dependency Injection
+ * 
+ * Abstract interface to enable:
+ * - Testability (inject MockLogger)
+ * - Flexibility (FileLogger, NetworkLogger, etc.)
+ * - SOLID principles (Dependency Inversion)
  */
-class Logger {
+class ILogger {
 public:
+    virtual ~ILogger() = default;
+    
+    // Core logging methods
+    virtual void log(LogLevel level, const char* msg) = 0;
+    virtual void log(LogLevel level, const std::string& msg) = 0;
+    
+    // Convenience methods
+    virtual void ui(const char* msg) = 0;
+    virtual void info(const char* msg) = 0;
+    virtual void warning(const char* msg) = 0;
+    virtual void error(const char* msg) = 0;
+    virtual void debug(const char* msg) = 0;
+    
+    virtual void ui(const std::string& msg) = 0;
+    virtual void info(const std::string& msg) = 0;
+    virtual void warning(const std::string& msg) = 0;
+    virtual void error(const std::string& msg) = 0;
+    virtual void debug(const std::string& msg) = 0;
+    
+    // Writer control
+    virtual void start_writer(const std::string& log_file = "mm_rec.log", 
+                             LogLevel max_level = LogLevel::INFO) = 0;
+    virtual void stop_writer() = 0;
+    
+    // RequestContext integration (optional, default no-op)
+    virtual void set_request_context(mm_rec::net::RequestContext* ctx) {}
+};
+
+/**
+ * Console Logger Implementation (Production)
+ * 
+ * Lock-free, high-performance logger with async file writing.
+ * Can be used via:
+ * 1. DI Container: auto logger = container.resolve<ILogger>();
+ * 2. Singleton (backward compat): Logger::instance()
+ */
+class Logger : public ILogger {
+public:
+    // DI-friendly: Public constructor
+    Logger() = default;
+    
+    /**
+     * Set current RequestContext for automatic diagnostic tracing.
+     * Called by DI middleware to enable auto-trace.
+     * 
+     * Usage:
+     *   logger->set_request_context(ctx.get());
+     *   logger->info("Processing user");  // Auto-added to ctx diagnostic trace!
+     *   logger->set_request_context(nullptr);  // Clear after request
+     */
+    void set_request_context(mm_rec::net::RequestContext* ctx) override {
+        current_request_context_ = ctx;
+    }
+
+    // Singleton access (backward compatibility)
     static Logger& instance() {
         static Logger inst;
         return inst;
@@ -161,7 +225,7 @@ public:
     }
     
     // Fast logging (inline, essentially free)
-    static inline void log(LogLevel level, const char* msg) {
+    void log(LogLevel level, const char* msg) override {
         auto& logger = instance();
         
         // Skip if writer not running (zero overhead when disabled)
@@ -172,6 +236,44 @@ public:
         // Filter by level
         if (static_cast<uint8_t>(level) > static_cast<uint8_t>(logger.max_level_)) {
             return;  // Level too verbose, skip
+        }
+        
+        // ========================================
+        // AUTOMATIC DIAGNOSTIC TRACE
+        // ========================================
+        // If RequestContext is available (in HTTP request scope),
+        // automatically add to diagnostic trace buffer.
+        if (current_request_context_ != nullptr) {
+            std::string level_str;
+            switch (level) {
+                case LogLevel::UI: level_str = "UI"; break;
+                case LogLevel::INFO: level_str = "INFO"; break;
+                case LogLevel::WARNING: level_str = "WARN"; break;
+                case LogLevel::ERROR: level_str = "ERROR"; break;
+                case LogLevel::DEBUG: level_str = "DEBUG"; break;
+            }
+            
+            // Extract component from message (first word after brackets, or "App")
+            std::string component = "App";
+            std::string msg_str(msg);
+            
+            // Try to extract component from log prefix [COR:xxx|TR:yyy]
+            size_t bracket_end = msg_str.find(']');
+            if (bracket_end != std::string::npos && bracket_end < msg_str.length() - 1) {
+                size_t component_start = bracket_end + 2;  // Skip "] "
+                size_t component_end = msg_str.find(':', component_start);
+                if (component_end != std::string::npos && component_end < component_start + 20) {
+                    component = msg_str.substr(component_start, component_end - component_start);
+                } else {
+                    // Use first word after bracket
+                    component_end = msg_str.find(' ', component_start);
+                    if (component_end != std::string::npos && component_end < component_start + 20) {
+                        component = msg_str.substr(component_start, component_end - component_start);
+                    }
+                }
+            }
+            
+            current_request_context_->add_trace(level_str, component, msg);
         }
         
         // UI level: Write to stdout immediately (users expect instant feedback)
@@ -185,24 +287,26 @@ public:
     }
     
     // String overload
-    static inline void log(LogLevel level, const std::string& msg) {
+    void log(LogLevel level, const std::string& msg) override {
         log(level, msg.c_str());
     }
     
     // Convenience methods
-    static void ui(const char* msg)    { log(LogLevel::UI, msg); }
-    static void info(const char* msg)  { log(LogLevel::INFO, msg); }
-    static void debug(const char* msg) { log(LogLevel::DEBUG, msg); }
+    void ui(const char* msg) override    { log(LogLevel::UI, msg); }
+    void info(const char* msg) override  { log(LogLevel::INFO, msg); }
+    void warning(const char* msg) override { log(LogLevel::WARNING, msg); }
+    void error(const char* msg) override { log(LogLevel::ERROR, msg); }
+    void debug(const char* msg) override { log(LogLevel::DEBUG, msg); }
     
-    static void ui(const std::string& msg)    { log(LogLevel::UI, msg); }
-    static void info(const std::string& msg)  { log(LogLevel::INFO, msg); }
-    static void warning(const std::string& msg) { log(LogLevel::WARNING, msg); }
-    static void error(const std::string& msg)   { log(LogLevel::ERROR, msg); }
-    static void debug(const std::string& msg) { log(LogLevel::DEBUG, msg); }
+    void ui(const std::string& msg) override    { log(LogLevel::UI, msg); }
+    void info(const std::string& msg) override  { log(LogLevel::INFO, msg); }
+    void warning(const std::string& msg) override { log(LogLevel::WARNING, msg); }
+    void error(const std::string& msg) override   { log(LogLevel::ERROR, msg); }
+    void debug(const std::string& msg) override { log(LogLevel::DEBUG, msg); }
     
     // Start background writer
     void start_writer(const std::string& log_file = "mm_rec.log", 
-                     LogLevel max_level = LogLevel::INFO) {
+                     LogLevel max_level = LogLevel::INFO) override {
         if (writer_running_.load(std::memory_order_acquire)) return;
         
         log_file_path_ = log_file;
@@ -216,7 +320,7 @@ public:
     }
     
     // Stop background writer
-    void stop_writer() {
+    void stop_writer() override {
         if (!writer_running_.exchange(false)) return;
         
         if (writer_thread_ && writer_thread_->joinable()) {
@@ -228,8 +332,23 @@ public:
         flush_all();
     }
     
-    // DI-friendly: Public constructor
-    Logger() = default;
+    // ========================================
+    // Static Helpers (Backward Compatibility)
+    // ========================================
+    
+    // Static wrappers for convenience macros (LOG_INFO, etc.)
+    static void s_log(LogLevel level, const char* msg) { instance().log(level, msg); }
+    static void s_log(LogLevel level, const std::string& msg) { instance().log(level, msg); }
+    static void s_ui(const char* msg) { instance().ui(msg); }
+    static void s_info(const char* msg) { instance().info(msg); }
+    static void s_warning(const char* msg) { instance().warning(msg); }
+    static void s_error(const char* msg) { instance().error(msg); }
+    static void s_debug(const char* msg) { instance().debug(msg); }
+    static void s_ui(const std::string& msg) { instance().ui(msg); }
+    static void s_info(const std::string& msg) { instance().info(msg); }
+    static void s_warning(const std::string& msg) { instance().warning(msg); }
+    static void s_error(const std::string& msg) { instance().error(msg); }
+    static void s_debug(const std::string& msg) { instance().debug(msg); }
     
     // Minimal destructor - immortal pattern
     ~Logger() {
@@ -238,6 +357,9 @@ public:
     }
     
 private:
+    // Thread-local RequestContext for automatic diagnostic tracing
+    static thread_local mm_rec::net::RequestContext* current_request_context_;
+    
     void register_buffer(LogBuffer* buf) {
         std::lock_guard<std::mutex> lock(registry_mutex_);
         buffers_.push_back(buf);
@@ -340,11 +462,11 @@ private:
     std::vector<LogBuffer*> buffers_;
 };
 
-// Convenience macros
-#define LOG_UI(msg)    mm_rec::Logger::ui(msg)
-#define LOG_INFO(msg)  mm_rec::Logger::info(msg)
-#define LOG_WARN(msg)  mm_rec::Logger::warning(msg)
-#define LOG_ERROR(msg) mm_rec::Logger::error(msg)
-#define LOG_DEBUG(msg) mm_rec::Logger::debug(msg)
+// Convenience macros (backward compatibility)
+#define LOG_UI(msg)    mm_rec::Logger::s_ui(msg)
+#define LOG_INFO(msg)  mm_rec::Logger::s_info(msg)
+#define LOG_WARN(msg)  mm_rec::Logger::s_warning(msg)
+#define LOG_ERROR(msg) mm_rec::Logger::s_error(msg)
+#define LOG_DEBUG(msg) mm_rec::Logger::s_debug(msg)
 
 } // namespace mm_rec
