@@ -21,6 +21,10 @@
 #include "mm_rec/application/i_run_manager.h"
 #include "mm_rec/application/run_manager.h"
 
+// Strategy / Factory
+#include "mm_rec/training/i_optimizer_factory.h"
+#include "mm_rec/training/optimizer_factory.h"
+
 // Forward declaration to avoid circular dependency
 namespace mm_rec { class DashboardManager; }
 

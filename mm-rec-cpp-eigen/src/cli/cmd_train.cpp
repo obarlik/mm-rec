@@ -29,6 +29,7 @@
 #include "mm_rec/core/auto_tuner.h"     // [RESTORED]
 #include "mm_rec/data/data_loader.h"
 #include "mm_rec/data/i_data_loader.h" // Interface
+#include "mm_rec/training/i_optimizer_factory.h" // Interface
 #include "mm_rec/data/dataset.h"
 #include "mm_rec/application/dashboard_manager.h" // [NEW] Using global dashboard
 
@@ -88,6 +89,7 @@ int cmd_train(int argc, char* argv[]) {
     // Let's resolve all here for clarity.
     auto checkpoint_manager = ServiceConfigurator::container().resolve<ICheckpointManager>();
     auto data_loader_factory = ServiceConfigurator::container().resolve<IDataLoaderFactory>();
+    auto optimizer_factory = ServiceConfigurator::container().resolve<IOptimizerFactory>();
     
     if (!fs::exists(runs_dir)) fs::create_directory(runs_dir);
     if (!fs::exists(run_dir)) fs::create_directory(run_dir);
@@ -223,7 +225,7 @@ int cmd_train(int argc, char* argv[]) {
     train_config.easy_threshold = easy_threshold;
     train_config.hard_threshold = hard_threshold;
     
-    Trainer trainer(model, train_config, DashboardManager::instance());
+    Trainer trainer(model, train_config, DashboardManager::instance(), optimizer_factory);
     
     MemoryManager::instance().mark_persistent();
     

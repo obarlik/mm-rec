@@ -9,6 +9,7 @@
 #include "mm_rec/training/gradient_utils.h"
 #include "mm_rec/training/forward_cache.h"
 #include "mm_rec/training/optimizer.h"
+#include "mm_rec/training/i_optimizer_factory.h" // Interface
 #include "mm_rec/training/uboo_loss.h"
 #include "mm_rec/core/memory_manager.h"
 #include "mm_rec/business/metrics.h"
@@ -35,10 +36,12 @@ namespace {
 
 namespace mm_rec {
 
-Trainer::Trainer(MMRecModel& model, const TrainingConfig& config, ITrainingMonitor& monitor)
+Trainer::Trainer(MMRecModel& model, const TrainingConfig& config, ITrainingMonitor& monitor, 
+                 std::shared_ptr<IOptimizerFactory> optimizer_factory)
     : model_(model),
       config_(config),
       training_monitor_(monitor),
+      optimizer_factory_(optimizer_factory),
       step_(0)
 {
     // Create learning rate scheduler
@@ -49,19 +52,7 @@ Trainer::Trainer(MMRecModel& model, const TrainingConfig& config, ITrainingMonit
         config.learning_rate * 0.01f  // min_lr
     );
     
-    if (config.optimizer_type == "flux") {
-        LOG_INFO("Creating Flux Optimizer (Adaptive Complexity Scaling)");
-        optimizer_ = std::make_unique<Flux>(config.learning_rate, 0.9f, 0.999f, 1e-8f, config.weight_decay);
-    } else if (config.optimizer_type == "adamw") {
-        LOG_INFO("Creating AdamW Optimizer (LR=" + std::to_string(config.learning_rate) + ", WD=" + std::to_string(config.weight_decay) + ")");
-        optimizer_ = std::make_unique<AdamW>(config.learning_rate, 0.9f, 0.999f, 1e-8f, config.weight_decay);
-    } else if (config.optimizer_type == "adam") {
-        LOG_INFO("Creating Adam Optimizer (LR=" + std::to_string(config.learning_rate) + ")");
-        optimizer_ = std::make_unique<Adam>(config.learning_rate);
-    } else {
-        LOG_INFO("Creating SGD Optimizer (LR=" + std::to_string(config.learning_rate) + ")");
-        optimizer_ = std::make_unique<SGD>(config.learning_rate);
-    }
+    optimizer_ = optimizer_factory_->create_optimizer(config);
 }
 
 Trainer::~Trainer() {}

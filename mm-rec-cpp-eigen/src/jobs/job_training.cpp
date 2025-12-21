@@ -20,6 +20,7 @@
 #include "mm_rec/infrastructure/i_metrics_exporter.h" // Interface
 #include "mm_rec/application/service_configurator.h" // For DI resolution
 #include "mm_rec/application/i_run_manager.h"      // IRunManager Interface
+#include "mm_rec/training/i_optimizer_factory.h"   // IOptimizerFactory Iterface
 
 #include <iostream>
 #include <fstream>
@@ -78,6 +79,7 @@ void JobTraining::run_internal(TrainingJobConfig config) {
     auto data_loader_factory = ServiceConfigurator::container().resolve<IDataLoaderFactory>();
     auto compute_backend = ServiceConfigurator::container().resolve<IComputeBackend>();
     auto run_manager = ServiceConfigurator::container().resolve<IRunManager>();
+    auto optimizer_factory = ServiceConfigurator::container().resolve<IOptimizerFactory>();
 
     try {
         // --- Setup Run Directory ---
@@ -194,7 +196,7 @@ void JobTraining::run_internal(TrainingJobConfig config) {
         train_config.easy_threshold = easy_threshold;
         train_config.hard_threshold = hard_threshold;
         
-        Trainer trainer(model, train_config, DashboardManager::instance());
+        Trainer trainer(model, train_config, DashboardManager::instance(), optimizer_factory);
         
         MemoryManager::instance().mark_persistent();
 
