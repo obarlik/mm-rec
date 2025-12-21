@@ -361,8 +361,9 @@ target_link_libraries(test_igpu mm_rec_eigen ${CMAKE_DL_LIBS}) # Link dl for dlo
 add_test(NAME test_igpu COMMAND test_igpu)
 
 add_executable(test_vulkan_probe tests/test_vulkan_probe.cpp)
-target_link_libraries(test_vulkan_probe ${CMAKE_DL_LIBS})
+target_link_libraries(test_vulkan_probe mm_rec_eigen ${CMAKE_DL_LIBS})
 add_test(NAME test_vulkan_probe COMMAND test_vulkan_probe)
+
 
 add_executable(test_compression_benchmark tests/test_compression_benchmark.cpp)
 target_compile_options(test_compression_benchmark PRIVATE -mf16c -mavx2)
