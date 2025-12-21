@@ -259,6 +259,9 @@ public:
         flush_all();
     }
     
+    // DI-friendly: Public constructor
+    MetricsManager() = default;
+    
     // Minimal destructor - just signal stop, don't touch anything
     // Intentionally leak thread to avoid static destruction issues
     ~MetricsManager() {
@@ -267,8 +270,6 @@ public:
     }
     
 private:
-    MetricsManager() = default;
-    
     void register_buffer(MetricsBuffer* buf) {
         std::lock_guard<std::mutex> lock(registry_mutex_);
         buffers_.push_back(buf);

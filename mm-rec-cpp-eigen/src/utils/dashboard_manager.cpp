@@ -11,6 +11,7 @@
 #include "mm_rec/utils/checkpoint.h"
 #include "mm_rec/utils/middlewares.h" // New include
 #include "mm_rec/utils/event_bus.h"    // EventBus for SSE
+#include "mm_rec/utils/service_configurator.h" // DI Configuration
 #include <sstream>
 #include <iostream>
 #include <filesystem>
@@ -68,7 +69,35 @@ bool DashboardManager::start(const net::HttpServerConfig& base_config) {
         try {
             server_ = std::make_unique<mm_rec::net::HttpServer>(current_config);
             
-            // Register Middlewares (Order: Last added is Outermost)
+            // === Dependency Injection Setup ===
+            // Initialize global DI container (once, at app startup)
+            static bool di_initialized = false;
+            if (!di_initialized) {
+                mm_rec::ServiceConfigurator::initialize();
+                
+                // Register DashboardManager in production (not in demos to avoid linking issues)
+                mm_rec::ServiceConfigurator::container().bind_singleton<DashboardManager>();
+                
+                di_initialized = true;
+            }
+            
+            // === Middleware Registration ===
+            // (Order: Last added is Outermost)
+            
+            // 0. DI Scope Middleware (Outermost - creates scope for request)
+            server_->use([](const mm_rec::net::Request& req, std::shared_ptr<mm_rec::net::Response> res, auto next) {
+                // Create DI scope for this request (using global container)
+                mm_rec::Scope request_scope(mm_rec::ServiceConfigurator::container());
+                
+                // Attach scope to request for handlers to use
+                const_cast<mm_rec::net::Request&>(req).scope = &request_scope;
+                
+                // Call next middleware/handler
+                next(req, res);
+                
+                // Scope destroyed here (RAII) - scoped services cleaned up
+            });
+            
             // 1. Security (Modifies response headers)
             server_->use(mm_rec::net::Middlewares::Security);
             // 2. Metrics (Records latency)

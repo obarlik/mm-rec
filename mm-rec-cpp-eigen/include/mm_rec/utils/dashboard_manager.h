@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mm_rec/utils/http_server.h"
+#include "mm_rec/utils/di_container.h"
 #include <atomic>
 #include <mutex>
 #include <deque>
@@ -61,10 +62,11 @@ public:
     // Raw access if needed
     DashboardStats& stats() { return stats_; }
 
-private:
+    // DI-friendly: Public constructors
     DashboardManager();
     ~DashboardManager();
 
+private:
     // Non-copyable
     DashboardManager(const DashboardManager&) = delete;
     DashboardManager& operator=(const DashboardManager&) = delete;

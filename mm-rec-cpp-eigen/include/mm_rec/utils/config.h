@@ -66,10 +66,11 @@ public:
         return Section(*this, prefix);
     }
 
-private:
+    // DI-friendly: Public constructor
     Config() = default;
     ~Config() = default;
-    
+
+private:
     // Internal string-based storage helpers
     std::string get_raw(const std::string& key) const;
     void set_raw(const std::string& key, const std::string& val);

@@ -228,6 +228,9 @@ public:
         flush_all();
     }
     
+    // DI-friendly: Public constructor
+    Logger() = default;
+    
     // Minimal destructor - immortal pattern
     ~Logger() {
         writer_running_.store(false, std::memory_order_release);
@@ -235,8 +238,6 @@ public:
     }
     
 private:
-    Logger() = default;
-    
     void register_buffer(LogBuffer* buf) {
         std::lock_guard<std::mutex> lock(registry_mutex_);
         buffers_.push_back(buf);

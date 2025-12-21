@@ -50,10 +50,18 @@ public:
     using Handler = std::function<void(const EventData&)>;
     using Subscription = size_t;
 
-    // Singleton access
+    // DI-friendly: Public constructor
+    EventBus() = default;
+    ~EventBus() = default;
+    
+    // Non-copyable
+    EventBus(const EventBus&) = delete;
+    EventBus& operator=(const EventBus&) = delete;
+
+    // Singleton access (for backward compatibility)
     static EventBus& instance() {
-        static EventBus instance;
-        return instance;
+        static EventBus inst;
+        return inst;
     }
 
     // Subscribe to event
@@ -117,11 +125,6 @@ public:
     }
 
 private:
-    EventBus() = default;
-    ~EventBus() = default;
-    EventBus(const EventBus&) = delete;
-    EventBus& operator=(const EventBus&) = delete;
-
     std::map<std::string, std::vector<std::pair<Subscription, Handler>>> listeners_;
     std::mutex mutex_;
     Subscription next_id_ = 0;
