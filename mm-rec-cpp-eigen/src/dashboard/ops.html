@@ -1,0 +1,504 @@
+<!-- Operations Dashboard - Early Warning & Monitoring -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Operations Dashboard - MM-REC</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: white;
+            font-size: 32px;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            gap: 20px;
+        }
+        
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        
+        .card-full { grid-column: span 12; }
+        .card-half { grid-column: span 6; }
+        .card-third { grid-column: span 4; }
+        
+        /* Alerts */
+        .alerts-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .alert {
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            animation: slideIn 0.3s ease;
+        }
+        
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .alert-critical {
+            background: #fed7d7;
+            border-left: 4px solid #f56565;
+        }
+        
+        .alert-error {
+            background: #feebc8;
+            border-left: 4px solid #ed8936;
+        }
+        
+        .alert-warning {
+            background: #fefcbf;
+            border-left: 4px solid #ecc94b;
+        }
+        
+        .alert-info {
+            background: #bee3f8;
+            border-left: 4px solid #4299e1;
+        }
+        
+        .alert-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+        
+        .alert-content {
+            flex: 1;
+        }
+        
+        .alert-title {
+            font-weight: bold;
+            margin-bottom: 4px;
+            color: #2d3748;
+        }
+        
+        .alert-message {
+            font-size: 14px;
+            color: #4a5568;
+        }
+        
+        .alert-time {
+            font-size: 12px;
+            color: #718096;
+            margin-top: 4px;
+        }
+        
+        /* Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 16px;
+        }
+        
+        .stat-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            opacity: 0.9;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        
+        .stat-value {
+            font-size: 32px;
+            font-weight: bold;
+        }
+        
+        .stat-trend {
+            font-size: 14px;
+            margin-top: 4px;
+            opacity: 0.8;
+        }
+        
+        /* Performance Chart */
+        .perf-metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: #f7fafc;
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+        
+        .perf-label {
+            font-weight: 600;
+            color: #2d3748;
+        }
+        
+        .perf-value {
+            font-size: 18px;
+            color: #667eea;
+            font-weight: bold;
+        }
+        
+        /* Logs */
+        .log-viewer {
+            background: #1a202c;
+            border-radius: 8px;
+            padding: 16px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Monaco', monospace;
+            font-size: 13px;
+        }
+        
+        .log-entry {
+            padding: 8px;
+            border-bottom: 1px solid #2d3748;
+            display: flex;
+            gap: 12px;
+        }
+        
+        .log-time {
+            color: #718096;
+            flex-shrink: 0;
+        }
+        
+        .log-level {
+            font-weight: bold;
+            flex-shrink: 0;
+            width: 60px;
+        }
+        
+        .log-level-ERROR { color: #fc8181; }
+        .log-level-WARN { color: #f6ad55; }
+        .log-level-INFO { color: #63b3ed; }
+        .log-level-DEBUG { color: #68d391; }
+        
+        .log-component {
+            color: #b794f4;
+            flex-shrink: 0;
+            width: 120px;
+        }
+        
+        .log-message {
+            color: #e2e8f0;
+            flex: 1;
+        }
+        
+        /* Status Indicator */
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .status-healthy { background: #48bb78; }
+        .status-warning { background: #ecc94b; }
+        .status-critical { background: #f56565; }
+        
+        /* Buttons */
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        
+        .btn:hover {
+            background: #5a67d8;
+            transform: translateY(-1px);
+        }
+        
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+        
+        h2 {
+            color: #2d3748;
+            font-size: 20px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .badge {
+            background: #fc8181;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>
+            <span class="status-indicator status-healthy" id="system-status"></span>
+            🚨 Operations Dashboard - Early Warning System
+        </h1>
+        
+        <div class="dashboard-grid">
+            <!-- Active Alerts -->
+            <div class="card card-full">
+                <h2>
+                    🔔 Active Alerts 
+                    <span class="badge" id="alert-count">0</span>
+                </h2>
+                <div class="alerts-container" id="alerts-container">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+            
+            <!-- Key Performance Metrics -->
+            <div class="card card-half">
+                <h2>⚡ Performance Metrics</h2>
+                <div id="perf-metrics">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+            
+            <!-- System Health -->
+            <div class="card card-half">
+                <h2>💊 System Health</h2>
+                <div class="stats-grid" id="health-stats">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+            
+            <!-- Real-time Log Stream -->
+            <div class="card card-full">
+                <h2>
+                    📝 Real-time Logs
+                    <button class="btn btn-small" onclick="clearLogs()">Clear</button>
+                </h2>
+                <div class="log-viewer" id="log-viewer">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Alert severity icons
+        const ALERT_ICONS = {
+            CRITICAL: '🔴',
+            ERROR: '🟠',
+            WARNING: '🟡',
+            INFO: '🔵'
+        };
+        
+        // Format timestamp
+        function formatTime(timestamp) {
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleTimeString();
+        }
+        
+        // Format duration
+        function formatDuration(ms) {
+            if (ms < 1000) return ms.toFixed(0) + 'ms';
+            return (ms / 1000).toFixed(2) + 's';
+        }
+        
+        // Load alerts
+        async function loadAlerts() {
+            // TODO: Fetch from /api/alerts
+            const mockAlerts = [
+                {
+                    level: 'ERROR',
+                    title: 'High Error Rate',
+                    message: 'Error rate is 8.5% (threshold: 5%)',
+                    timestamp: Date.now() / 1000,
+                    acknowledged: false
+                },
+                {
+                    level: 'WARNING',
+                    title: 'Slow Response Times',
+                    message: 'P95 response time is 1.2s (threshold: 1s)',
+                    timestamp: Date.now() / 1000 - 120,
+                    acknowledged: false
+                }
+            ];
+            
+            const container = document.getElementById('alerts-container');
+            document.getElementById('alert-count').textContent = mockAlerts.length;
+            
+            if (mockAlerts.length === 0) {
+                container.innerHTML = '<div style="color: #718096; text-align: center; padding: 40px;">✅ No active alerts - System healthy!</div>';
+                return;
+            }
+            
+            container.innerHTML = mockAlerts.map(alert => `
+                <div class="alert alert-${alert.level.toLowerCase()}">
+                    <div class="alert-icon">${ALERT_ICONS[alert.level]}</div>
+                    <div class="alert-content">
+                        <div class="alert-title">${alert.title}</div>
+                        <div class="alert-message">${alert.message}</div>
+                        <div class="alert-time">${formatTime(alert.timestamp)}</div>
+                    </div>
+                </div>
+            `).join('');
+            
+            // Update system status
+            const hasError = mockAlerts.some(a => a.level === 'ERROR' || a.level === 'CRITICAL');
+            const hasWarning = mockAlerts.some(a => a.level === 'WARNING');
+            const statusEl = document.getElementById('system-status');
+            statusEl.className = 'status-indicator ' + 
+                (hasError ? 'status-critical' : hasWarning ? 'status-warning' : 'status-healthy');
+        }
+        
+        // Load performance metrics
+        async function loadPerformanceMetrics() {
+            // TODO: Fetch from /api/diagnostics/performance
+            const mockMetrics = {
+                avg_response_time: 245.5,
+                p50_response_time: 180.2,
+                p95_response_time: 980.3,
+                p99_response_time: 1520.8,
+                max_response_time: 3200.5,
+                slow_requests_count: 42,
+                requests_per_second: 125.3
+            };
+            
+            const container = document.getElementById('perf-metrics');
+            container.innerHTML = `
+                <div class="perf-metric">
+                    <span class="perf-label">Average Response Time</span>
+                    <span class="perf-value">${formatDuration(mockMetrics.avg_response_time)}</span>
+                </div>
+                <div class="perf-metric">
+                    <span class="perf-label">P50 Response Time</span>
+                    <span class="perf-value">${formatDuration(mockMetrics.p50_response_time)}</span>
+                </div>
+                <div class="perf-metric">
+                    <span class="perf-label">P95 Response Time</span>
+                    <span class="perf-value">${formatDuration(mockMetrics.p95_response_time)}</span>
+                </div>
+                <div class="perf-metric">
+                    <span class="perf-label">P99 Response Time</span>
+                    <span class="perf-value">${formatDuration(mockMetrics.p99_response_time)}</span>
+                </div>
+                <div class="perf-metric">
+                    <span class="perf-label">Slow Requests</span>
+                    <span class="perf-value">${mockMetrics.slow_requests_count}</span>
+                </div>
+                <div class="perf-metric">
+                    <span class="perf-label">Throughput</span>
+                    <span class="perf-value">${mockMetrics.requests_per_second.toFixed(1)} req/s</span>
+                </div>
+            `;
+        }
+        
+        // Load health stats
+        async function loadHealthStats() {
+            const res = await fetch('/api/diagnostics/stats');
+            const stats = await res.json();
+            
+            const container = document.getElementById('health-stats');
+            container.innerHTML = `
+                <div class="stat-box">
+                    <div class="stat-label">Error Rate</div>
+                    <div class="stat-value">${stats.error_rate.toFixed(2)}%</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Total Errors</div>
+                    <div class="stat-value">${stats.total_errors}</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Requests</div>
+                    <div class="stat-value">${stats.total_requests.toLocaleString()}</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Traces Stored</div>
+                    <div class="stat-value">${stats.error_traces_in_memory}</div>
+                </div>
+            `;
+        }
+        
+        // Load logs
+        async function loadLogs() {
+            // TODO: Fetch from /api/logs
+            const mockLogs = [
+                { time: Date.now(), level: 'INFO', component: 'Gateway', message: 'Request received: GET /api/users' },
+                { time: Date.now() - 100, level: 'INFO', component: 'Auth', message: 'Token validated for user alice' },
+                { time: Date.now() - 250, level: 'WARN', component: 'Database', message: 'Slow query detected (850ms)' },
+                { time: Date.now() - 500, level: 'ERROR', component: 'PaymentService', message: 'Payment gateway timeout' },
+                { time: Date.now() - 1000, level: 'INFO', component: 'UserService', message: 'User profile updated' }
+            ];
+            
+            const container = document.getElementById('log-viewer');
+            container.innerHTML = mockLogs.map(log => `
+                <div class="log-entry">
+                    <span class="log-time">${formatTime(log.time / 1000)}</span>
+                    <span class="log-level log-level-${log.level}">${log.level}</span>
+                    <span class="log-component">${log.component}</span>
+                    <span class="log-message">${log.message}</span>
+                </div>
+            `).join('');
+            
+            // Auto-scroll to bottom
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        function clearLogs() {
+            document.getElementById('log-viewer').innerHTML = 
+                '<div style="color: #718096; text-align: center; padding: 20px;">Logs cleared</div>';
+        }
+        
+        // Auto-refresh every 3 seconds
+        setInterval(() => {
+            loadAlerts();
+            loadPerformanceMetrics();
+            loadHealthStats();
+            loadLogs();
+        }, 3000);
+        
+        // Initial load
+        loadAlerts();
+        loadPerformanceMetrics();
+        loadHealthStats();
+        loadLogs();
+    </script>
+</body>
+</html>

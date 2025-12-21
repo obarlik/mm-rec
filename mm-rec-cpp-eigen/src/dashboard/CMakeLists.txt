@@ -8,6 +8,7 @@ set_target_properties(dashboard_assets PROPERTIES LINKER_LANGUAGE CXX)
 embed_resource(dashboard_assets ${CMAKE_CURRENT_SOURCE_DIR}/index.html)
 embed_resource(dashboard_assets ${CMAKE_CURRENT_SOURCE_DIR}/style.css)
 embed_resource(dashboard_assets ${CMAKE_CURRENT_SOURCE_DIR}/app.js)
+embed_resource(dashboard_assets ${CMAKE_CURRENT_SOURCE_DIR}/ops.html)
 
 # Allow consumers to find embedded_assets.h
 target_include_directories(dashboard_assets INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
