@@ -66,6 +66,43 @@ struct LogEntry {
 };
 
 /**
+ * IAlertManager Interface
+ * 
+ * Interface for alert management.
+ * Allows for easy mocking in tests.
+ */
+class IAlertManager {
+public:
+    virtual ~IAlertManager() = default;
+    
+    // Alert management
+    virtual void create_alert(AlertLevel level, const std::string& title, 
+                             const std::string& message, 
+                             const std::string& corr_id = "") = 0;
+    virtual std::vector<Alert> get_active_alerts() const = 0;
+    virtual std::vector<Alert> get_recent_alerts(size_t limit = 100) const = 0;
+    virtual void acknowledge_alert(size_t index) = 0;
+    virtual void clear_alerts() = 0;
+    
+    // Performance monitoring
+    virtual void record_response_time(double milliseconds) = 0;
+    virtual PerformanceMetrics get_performance_metrics() const = 0;
+    
+    // Log management
+    virtual void add_log(const std::string& level, const std::string& component,
+                        const std::string& message, const std::string& corr_id = "") = 0;
+    virtual std::vector<LogEntry> get_recent_logs(size_t limit = 100) const = 0;
+    virtual std::vector<LogEntry> search_logs_by_correlation(const std::string& corr_id) const = 0;
+    
+    // Health checks
+    virtual void check_health(DiagnosticManager* diag_mgr) = 0;
+    
+    // Configuration
+    virtual void set_error_rate_threshold(double threshold) = 0;
+    virtual void set_slow_request_threshold(double ms) = 0;
+};
+
+/**
  * Alert Manager
  * 
  * Monitors system health and generates alerts:
@@ -74,7 +111,7 @@ struct LogEntry {
  * - Memory pressure
  * - Custom thresholds
  */
-class AlertManager {
+class AlertManager : public IAlertManager {
 private:
     // Alert storage (last N alerts)
     std::deque<Alert> alerts_;
@@ -109,7 +146,7 @@ public:
      */
     void create_alert(AlertLevel level, const std::string& title, 
                      const std::string& message, 
-                     const std::string& corr_id = "") {
+                     const std::string& corr_id = "") override {
         std::lock_guard<std::mutex> lock(alerts_mutex_);
         
         Alert alert;

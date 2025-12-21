@@ -83,9 +83,9 @@ public:
         // Dashboard manager - web UI
         container.bind_singleton<DashboardManager>();
         
-        // Diagnostic & Alert Management (Operations Dashboard)
-        container.bind_singleton<diagnostics::DiagnosticManager>();
-        container.bind_singleton<diagnostics::AlertManager>();
+        // Diagnostic & Alert Management (Operations Dashboard) - Interface-based!
+        container.bind_singleton<diagnostics::IDiagnosticManager, diagnostics::DiagnosticManager>();
+        container.bind_singleton<diagnostics::IAlertManager, diagnostics::AlertManager>();
         
         // ========================================
         // HTTP Request-Scoped Services

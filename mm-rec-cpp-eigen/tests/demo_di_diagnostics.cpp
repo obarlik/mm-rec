@@ -14,9 +14,9 @@ int main() {
     // Create application scope
     auto scope = ServiceConfigurator::create_scope();
     
-    // Resolve services from DI (NO MORE SINGLETONS!)
-    auto diag_mgr = scope->resolve<DiagnosticManager>();
-    auto alert_mgr = scope->resolve<AlertManager>();
+    // Resolve services from DI (INTERFACE-BASED!)
+    auto diag_mgr = scope->resolve<IDiagnosticManager>();
+    auto alert_mgr = scope->resolve<IAlertManager>();
     auto logger = scope->resolve<ILogger>();
     
     // Configure diagnostic settings
