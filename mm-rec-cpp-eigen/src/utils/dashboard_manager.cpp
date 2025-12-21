@@ -145,8 +145,13 @@ void DashboardManager::update_system_stats(size_t mem_mb) {
 }
 
 // --- Helper for Resumable File Serving ---
-static std::string serve_file_with_range(const std::string& path, const mm_rec::net::Request& req) {
-    if (!std::filesystem::exists(path)) return mm_rec::net::HttpServer::build_response(404, "text/plain", "Not found");
+// --- Helper for Resumable File Serving ---
+static void serve_file_with_range(const std::string& path, const mm_rec::net::Request& req, std::shared_ptr<mm_rec::net::Response> res) {
+    if (!std::filesystem::exists(path)) {
+        res->status(404);
+        res->send("Not found");
+        return;
+    }
     
     uintmax_t file_size = std::filesystem::file_size(path);
     size_t range_start = 0;
@@ -172,11 +177,19 @@ static std::string serve_file_with_range(const std::string& path, const mm_rec::
 
     if (range_start >= file_size || range_end >= file_size || range_start > range_end) {
          std::string cr = "bytes */" + std::to_string(file_size);
-         return "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: " + cr + "\r\nContent-Length: 0\r\n\r\n";
+         res->status(416);
+         res->set_header("Content-Range", cr);
+         res->set_header("Content-Length", "0");
+         res->send("");
+         return;
     }
 
     std::ifstream f(path, std::ios::binary);
-    if (!f.good()) return mm_rec::net::HttpServer::build_response(500, "text/plain", "Read error");
+    if (!f.good()) {
+        res->status(500);
+        res->send("Read error");
+        return;
+    }
 
     f.seekg(range_start);
     size_t chunk_size = range_end - range_start + 1;
@@ -185,15 +198,14 @@ static std::string serve_file_with_range(const std::string& path, const mm_rec::
     std::string body(buffer.begin(), buffer.end());
 
     if (is_range) {
-         std::stringstream header;
-         header << "HTTP/1.1 206 Partial Content\r\n";
-         header << "Content-Type: application/octet-stream\r\n";
-         header << "Content-Length: " << chunk_size << "\r\n";
-         header << "Content-Range: bytes " << range_start << "-" << range_end << "/" << file_size << "\r\n";
-         header << "Access-Control-Allow-Origin: *\r\n\r\n";
-         return header.str() + body;
+         res->status(206);
+         res->set_header("Content-Type", "application/octet-stream");
+         res->set_header("Content-Range", "bytes " + std::to_string(range_start) + "-" + std::to_string(range_end) + "/" + std::to_string(file_size));
+         res->send(body);
     } else {
-         return mm_rec::net::HttpServer::build_response(200, "application/octet-stream", body); 
+         res->status(200);
+         res->set_header("Content-Type", "application/octet-stream");
+         res->send(body);
     }
 }
 
@@ -201,29 +213,27 @@ void DashboardManager::register_routes() {
     if (!server_) return;
 
     // MINIMAL TEST: Zero dependencies, pure stack
-    server_->register_handler("/", [](const mm_rec::net::Request&) -> std::string {
+    // MINIMAL TEST: Zero dependencies, pure stack
+    server_->register_handler("/", [](const auto&, std::shared_ptr<mm_rec::net::Response> res) {
         const char* body = "<html><body><h1>WORKS</h1></body></html>";
-        std::stringstream ss;
-        ss << "HTTP/1.1 200 OK\r\n";
-        ss << "Content-Type: text/html\r\n";
-        ss << "Content-Length: " << strlen(body) << "\r\n";
-        ss << "Connection: close\r\n\r\n";
-        ss << body;
-        return ss.str();
+        res->set_header("Content-Type", "text/html");
+        res->send(body);
     });
 
     // Static CSS
-    server_->register_handler("/static/style.css", [](const mm_rec::net::Request&) -> std::string {
-        return mm_rec::net::HttpServer::build_response(200, "text/css", std::string(assets::get_style_css()));
+    server_->register_handler("/static/style.css", [](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
+        res->set_header("Content-Type", "text/css");
+        res->send(std::string(assets::get_style_css()));
     });
 
     // Static JS
-    server_->register_handler("/static/app.js", [](const mm_rec::net::Request&) -> std::string {
-        return mm_rec::net::HttpServer::build_response(200, "application/javascript", std::string(assets::get_app_js()));
+    server_->register_handler("/static/app.js", [](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
+        res->set_header("Content-Type", "application/javascript");
+        res->send(std::string(assets::get_app_js()));
     });
     
     // API Stats
-    server_->register_handler("/api/stats", [this](const mm_rec::net::Request&) -> std::string {
+    server_->register_handler("/api/stats", [this](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
 
         std::stringstream ss;
         ss << "{";
@@ -252,11 +262,13 @@ void DashboardManager::register_routes() {
         ss << "],";
         ss << "\"avg_history\": []";
         ss << "}";
-        return mm_rec::net::HttpServer::build_response(200, "application/json", ss.str());
+        
+        res->set_header("Content-Type", "application/json");
+        res->send(ss.str());
     });
     
     // API Hardware
-    server_->register_handler("/api/hardware", [](const mm_rec::net::Request&) -> std::string {
+    server_->register_handler("/api/hardware", [](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
         auto& vk = mm_rec::VulkanBackend::get();
         std::string gpu_name = vk.is_ready() ? vk.get_device_name() : "Vulkan Not Ready";
         size_t vram_mb = vk.is_ready() ? (vk.get_total_vram() / 1024 / 1024) : 0;
@@ -270,18 +282,19 @@ void DashboardManager::register_routes() {
         json << "  \"cores_logical\": \"N/A\","; 
         json << "  \"simd\": \"AVX2 / Int8\"";
         json << "}";
-        return mm_rec::net::HttpServer::build_response(200, "application/json", json.str());
+        res->set_header("Content-Type", "application/json");
+        res->send(json.str());
     });
     
     // Stop Signal
-    server_->register_handler("/api/stop", [this](const mm_rec::net::Request&) -> std::string {
+    server_->register_handler("/api/stop", [this](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
         stats_.should_stop = true;
         LOG_INFO("Stop signal received from Dashboard.");
-        return mm_rec::net::HttpServer::build_response(200, "text/plain", "Stopping...");
+        res->send("Stopping...");
     });
 
     // History API
-    server_->register_handler("/api/history", [](const mm_rec::net::Request&) -> std::string {
+    server_->register_handler("/api/history", [](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
         std::ifstream f("dashboard_history.csv");
         std::vector<float> losses;
         std::string line;
@@ -305,11 +318,12 @@ void DashboardManager::register_routes() {
              json << losses[i] << (i < losses.size() - 1 ? "," : "");
         }
         json << "] }";
-        return mm_rec::net::HttpServer::build_response(200, "application/json", json.str());
+        res->set_header("Content-Type", "application/json");
+        res->send(json.str());
     });
     
     // API Runs List
-    server_->register_handler("/api/runs", [](const mm_rec::net::Request&) -> std::string {
+    server_->register_handler("/api/runs", [](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
         auto runs = RunManager::list_runs();
         std::stringstream ss;
         ss << "[";
@@ -326,21 +340,26 @@ void DashboardManager::register_routes() {
             if (i < runs.size() - 1) ss << ",";
         }
         ss << "]";
-        return mm_rec::net::HttpServer::build_response(200, "application/json", ss.str());
+        res->set_header("Content-Type", "application/json");
+        res->send(ss.str());
     });
 
     // API Stop Run
-    server_->register_handler("/api/runs/stop", [this](const mm_rec::net::Request&) -> std::string {
+    server_->register_handler("/api/runs/stop", [this](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
         if (!RunManager::is_job_running()) {
-             return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"No job is running\"}");
+             res->status(400);
+             res->set_header("Content-Type", "application/json");
+             res->send("{\"error\": \"No job is running\"}");
+             return;
         }
         RunManager::stop_job();
         LOG_INFO("Job stopped via API.");
-        return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"status\": \"stopped\"}");
+        res->set_header("Content-Type", "application/json");
+        res->send("{\"status\": \"stopped\"}");
     });
 
     // API Start Run (New)
-    server_->register_handler("/api/runs/start", [this](const mm_rec::net::Request& req_obj) -> std::string {
+    server_->register_handler("/api/runs/start", [this](const mm_rec::net::Request& req_obj, std::shared_ptr<mm_rec::net::Response> res) {
         const std::string& req = req_obj.body;
         auto get_json_val = [&](const std::string& key) -> std::string {
             std::string search = "\"" + key + "\":";
@@ -361,18 +380,26 @@ void DashboardManager::register_routes() {
         std::string config_file = get_json_val("config_file");
         std::string data_file = get_json_val("data_file");
 
+        res->set_header("Content-Type", "application/json");
+
         if (name.empty() || config_file.empty()) {
-            return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing run_name or config_file\"}");
+            res->status(400);
+            res->send("{\"error\": \"Missing run_name or config_file\"}");
+            return;
         }
 
         if (RunManager::is_job_running()) {
-            return mm_rec::net::HttpServer::build_response(409, "application/json", "{\"error\": \"Job already running\"}");
+            res->status(409);
+            res->send("{\"error\": \"Job already running\"}");
+            return;
         }
 
         // 1. Setup Run Directory
         std::string run_dir = "runs/" + name;
         if (std::filesystem::exists(run_dir)) {
-             return mm_rec::net::HttpServer::build_response(409, "application/json", "{\"error\": \"Run already exists\"}");
+             res->status(409);
+             res->send("{\"error\": \"Run already exists\"}");
+             return;
         }
         std::filesystem::create_directories(run_dir);
 
@@ -386,18 +413,20 @@ void DashboardManager::register_routes() {
             resolved_config = "configs/" + config_file;
         }
         
-        job_config.config_path = resolved_config; // Pass source, RunManager will isolate
-        job_config.data_path = data_file;     // Pass source, RunManager will isolate
+        job_config.config_path = resolved_config; 
+        job_config.data_path = data_file;     
 
         // 4. Start
         if (RunManager::start_job(job_config)) {
-             return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"status\": \"started\"}");
+             res->send("{\"status\": \"started\"}");
+        } else {
+             res->status(500);
+             res->send("{\"error\": \"Failed to start job\"}");
         }
-        return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Failed to start job\"}");
     });
 
     // API Resume Run
-    server_->register_handler("/api/runs/resume", [this](const mm_rec::net::Request& req_obj) -> std::string {
+    server_->register_handler("/api/runs/resume", [this](const mm_rec::net::Request& req_obj, std::shared_ptr<mm_rec::net::Response> res) {
          const std::string& req = req_obj.body;
          auto get_param = [&](const std::string& key) -> std::string {
              size_t pos = req.find(key + "=");
@@ -409,16 +438,24 @@ void DashboardManager::register_routes() {
          };
 
          std::string run_name = get_param("name");
+         res->set_header("Content-Type", "application/json");
+
          if (run_name.empty()) {
-             return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing name parameter\"}");
+             res->status(400);
+             res->send("{\"error\": \"Missing name parameter\"}");
+             return;
          }
 
          if (RunManager::is_job_running()) {
-             return mm_rec::net::HttpServer::build_response(409, "application/json", "{\"error\": \"Job already running\"}");
+             res->status(409);
+             res->send("{\"error\": \"Job already running\"}");
+             return;
          }
 
          if (!RunManager::run_exists(run_name)) {
-             return mm_rec::net::HttpServer::build_response(404, "application/json", "{\"error\": \"Run not found\"}");
+             res->status(404);
+             res->send("{\"error\": \"Run not found\"}");
+             return;
          }
          
          std::string run_dir = RunManager::get_run_dir(run_name);
@@ -430,13 +467,17 @@ void DashboardManager::register_routes() {
          }
          
          if (!std::filesystem::exists(config_path)) {
-              return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Missing config in run dir\"}");
+              res->status(500);
+              res->send("{\"error\": \"Missing config in run dir\"}");
+              return;
          }
          
          // 2. Verify Checkpoint (Data Integrity)
          std::string checkpoint_path = run_dir + "/checkpoint.bin";
          if (!std::filesystem::exists(checkpoint_path)) {
-              return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"No checkpoint found (cannot resume)\"}");
+              res->status(500);
+              res->send("{\"error\": \"No checkpoint found (cannot resume)\"}");
+              return;
          }
 
          TrainingJobConfig config;
@@ -445,13 +486,15 @@ void DashboardManager::register_routes() {
          config.data_path = "training_data.bin"; 
          
          if (RunManager::start_job(config)) {
-             return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"status\": \"started\"}");
+             res->send("{\"status\": \"started\"}");
+         } else {
+             res->status(500);
+             res->send("{\"error\": \"Failed to start\"}");
          }
-         return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Failed to start\"}");
     });
 
     // API Delete Run
-    server_->register_handler("/api/runs/delete", [this](const mm_rec::net::Request& req_obj) -> std::string {
+    server_->register_handler("/api/runs/delete", [this](const mm_rec::net::Request& req_obj, std::shared_ptr<mm_rec::net::Response> res) {
          const std::string& req = req_obj.body;
          auto get_param = [&](const std::string& key) -> std::string {
              size_t pos = req.find(key + "=");
@@ -463,32 +506,49 @@ void DashboardManager::register_routes() {
          };
 
          std::string run_name = get_param("name");
+         res->set_header("Content-Type", "application/json");
+
          if (run_name.empty()) {
-             return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing name parameter\"}");
+             res->status(400);
+             res->send("{\"error\": \"Missing name parameter\"}");
+             return;
          }
 
          if (RunManager::is_job_running()) {
-             return mm_rec::net::HttpServer::build_response(409, "application/json", "{\"error\": \"Cannot delete whle a job is running\"}");
+             res->status(409);
+             res->send("{\"error\": \"Cannot delete whle a job is running\"}");
+             return;
          }
 
          if (RunManager::delete_run(run_name)) {
-             return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"status\": \"deleted\"}");
+             res->send("{\"status\": \"deleted\"}");
+         } else {
+             res->status(500);
+             res->send("{\"error\": \"Delete failed\"}");
          }
-         return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Delete failed\"}");
     });
 
     // API Get Run Config
-    server_->register_handler("/api/runs/config", [](const mm_rec::net::Request& req_obj) -> std::string {
+    server_->register_handler("/api/runs/config", [](const mm_rec::net::Request& req_obj, std::shared_ptr<mm_rec::net::Response> res) {
          const std::string& req = req_obj.body;
          std::string first_line = req.substr(0, req.find("\r\n"));
          size_t q_pos = first_line.find("?name=");
-         if (q_pos == std::string::npos) return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing name parameter\"}");
+         
+         res->set_header("Content-Type", "application/json");
+
+         if (q_pos == std::string::npos) {
+             res->status(400);
+             res->send("{\"error\": \"Missing name parameter\"}");
+             return;
+         }
          
          size_t end_pos = first_line.find(" ", q_pos);
          std::string run_name = first_line.substr(q_pos + 6, end_pos - (q_pos + 6));
          
          if (run_name.empty() || run_name.find("..") != std::string::npos || run_name.find("/") != std::string::npos) {
-             return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Invalid run name\"}");
+             res->status(400);
+             res->send("{\"error\": \"Invalid run name\"}");
+             return;
          }
 
          std::string config_path = "runs/" + run_name + "/config.ini";
@@ -496,18 +556,23 @@ void DashboardManager::register_routes() {
              // Fallback for older runs
              config_path = "runs/" + run_name + "/config.txt";
              if (!std::filesystem::exists(config_path)) {
-                return mm_rec::net::HttpServer::build_response(404, "application/json", "{\"error\": \"Config not found\"}");
+                res->status(404);
+                res->send("{\"error\": \"Config not found\"}");
+                return;
              }
          }
          
          std::ifstream f(config_path);
-         if (!f.good()) return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Read error\"}");
+         if (!f.good()) {
+             res->status(500);
+             res->send("{\"error\": \"Read error\"}");
+             return;
+         }
          
          std::stringstream buffer;
          buffer << f.rdbuf();
          
-         // Escape JSON string for safe transport if returning as JSON field, 
-         // OR return plain text. Returning JSON object with "content" field is safer for UI.
+         // Escape JSON string
          std::string content = buffer.str();
          std::string json_content;
          for (char c : content) {
@@ -518,30 +583,44 @@ void DashboardManager::register_routes() {
              else json_content += c;
          }
          
-         return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"content\": \"" + json_content + "\"}");
+         res->send("{\"content\": \"" + json_content + "\"}");
     });
 
     // API Get Run Logs
-    server_->register_handler("/api/runs/logs", [](const mm_rec::net::Request& req_obj) -> std::string {
+    server_->register_handler("/api/runs/logs", [](const mm_rec::net::Request& req_obj, std::shared_ptr<mm_rec::net::Response> res) {
          const std::string& req = req_obj.body;
          std::string first_line = req.substr(0, req.find("\r\n"));
          size_t q_pos = first_line.find("?name=");
-         if (q_pos == std::string::npos) return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing name parameter\"}");
+         res->set_header("Content-Type", "application/json");
+         
+         if (q_pos == std::string::npos) {
+             res->status(400);
+             res->send("{\"error\": \"Missing name parameter\"}");
+             return;
+         }
          
          size_t end_pos = first_line.find(" ", q_pos);
          std::string run_name = first_line.substr(q_pos + 6, end_pos - (q_pos + 6));
          
          if (run_name.empty() || run_name.find("..") != std::string::npos || run_name.find("/") != std::string::npos) {
-             return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Invalid run name\"}");
+             res->status(400);
+             res->send("{\"error\": \"Invalid run name\"}");
+             return;
          }
 
          std::string log_path = "runs/" + run_name + "/train.log";
          if (!std::filesystem::exists(log_path)) {
-             return mm_rec::net::HttpServer::build_response(404, "application/json", "{\"error\": \"Log not found\"}");
+             res->status(404);
+             res->send("{\"error\": \"Log not found\"}");
+             return;
          }
          
          std::ifstream f(log_path, std::ios::binary);
-         if (!f.good()) return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Read error\"}");
+         if (!f.good()) {
+             res->status(500);
+             res->send("{\"error\": \"Read error\"}");
+             return;
+         }
          
          // Read last N bytes
          const size_t MAX_LOG_SIZE = 16384; // 16KB tail
@@ -564,13 +643,13 @@ void DashboardManager::register_routes() {
              else json_content += c;
          }
          
-         return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"content\": \"" + json_content + "\"}");
+         res->send("{\"content\": \"" + json_content + "\"}");
     });
 
     // --- Phase 3 Config & Data ---
 
     // API List Configs
-    server_->register_handler("/api/configs", [](const mm_rec::net::Request&) -> std::string {
+    server_->register_handler("/api/configs", [](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
         std::stringstream ss;
         ss << "[";
         bool first = true;
@@ -587,30 +666,46 @@ void DashboardManager::register_routes() {
             }
         } catch (...) {}
         ss << "]";
-        return mm_rec::net::HttpServer::build_response(200, "application/json", ss.str());
+        res->set_header("Content-Type", "application/json");
+        res->send(ss.str());
     });
     
     // API Read Config
-    server_->register_handler("/api/configs/read", [](const mm_rec::net::Request& req_obj) -> std::string {
+    server_->register_handler("/api/configs/read", [](const mm_rec::net::Request& req_obj, std::shared_ptr<mm_rec::net::Response> res) {
         const std::string& req = req_obj.body;
         std::string first_line = req.substr(0, req.find("\r\n"));
         size_t q_pos = first_line.find("?name=");
-        if (q_pos == std::string::npos) return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing name parameter\"}");
+        
+        res->set_header("Content-Type", "application/json");
+        
+        if (q_pos == std::string::npos) {
+            res->status(400);
+            res->send("{\"error\": \"Missing name parameter\"}");
+            return;
+        }
          
         size_t end_pos = first_line.find(" ", q_pos);
         std::string filename = first_line.substr(q_pos + 6, end_pos - (q_pos + 6));
          
         if (filename.find("/") != std::string::npos || filename.find("..") != std::string::npos) {
-             return mm_rec::net::HttpServer::build_response(403, "application/json", "{\"error\": \"Invalid filename\"}");
+             res->status(403);
+             res->send("{\"error\": \"Invalid filename\"}");
+             return;
         }
 
         std::string path = "configs/" + filename;
         if (!std::filesystem::exists(path)) {
-            return mm_rec::net::HttpServer::build_response(404, "application/json", "{\"error\": \"Config not found\"}");
+            res->status(404);
+            res->send("{\"error\": \"Config not found\"}");
+            return;
         }
         
         std::ifstream f(path);
-        if (!f.good()) return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Read error\"}");
+        if (!f.good()) {
+            res->status(500);
+            res->send("{\"error\": \"Read error\"}");
+            return;
+        }
         
         std::stringstream buffer;
         buffer << f.rdbuf();
@@ -625,11 +720,11 @@ void DashboardManager::register_routes() {
              else json_content += c;
          }
          
-         return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"content\": \"" + json_content + "\"}");
+         res->send("{\"content\": \"" + json_content + "\"}");
     });
 
     // API Create Config
-    server_->register_handler("/api/configs/create", [](const mm_rec::net::Request& req_obj) -> std::string {
+    server_->register_handler("/api/configs/create", [](const mm_rec::net::Request& req_obj, std::shared_ptr<mm_rec::net::Response> res) {
         const std::string& req = req_obj.body;
         auto get_json_val = [&](const std::string& key) -> std::string {
             std::string search = "\"" + key + "\":";
@@ -656,13 +751,19 @@ void DashboardManager::register_routes() {
         std::string filename = get_json_val("filename");
         std::string content = get_json_val("content");
         
+        res->set_header("Content-Type", "application/json");
+
         if (filename.empty() || content.empty()) {
-            return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing filename or content\"}");
+            res->status(400);
+            res->send("{\"error\": \"Missing filename or content\"}");
+            return;
         }
         
         if (filename.find(".ini") == std::string::npos) filename += ".ini";
         if (filename.find("/") != std::string::npos || filename.find("..") != std::string::npos) {
-            return mm_rec::net::HttpServer::build_response(403, "application/json", "{\"error\": \"Invalid filename\"}");
+            res->status(403);
+            res->send("{\"error\": \"Invalid filename\"}");
+            return;
         }
 
         std::filesystem::create_directories("configs"); // Ensure exists
@@ -670,15 +771,17 @@ void DashboardManager::register_routes() {
 
         std::ofstream file(full_path);
         if (!file.good()) {
-            return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Failed to write file\"}");
+            res->status(500);
+            res->send("{\"error\": \"Failed to write file\"}");
+            return;
         }
         file << content;
         file.close();
-        return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"status\": \"created\", \"file\": \"" + filename + "\"}");
+        res->send("{\"status\": \"created\", \"file\": \"" + filename + "\"}");
     });
 
     // API List Datasets
-    server_->register_handler("/api/datasets", [](const mm_rec::net::Request&) -> std::string {
+    server_->register_handler("/api/datasets", [](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
         std::stringstream ss;
         ss << "[";
         bool first = true;
@@ -693,41 +796,59 @@ void DashboardManager::register_routes() {
             }
         } catch (...) {}
         ss << "]";
-        return mm_rec::net::HttpServer::build_response(200, "application/json", ss.str());
+        res->set_header("Content-Type", "application/json");
+        res->send(ss.str());
     });
 
     // API Upload Dataset
-    server_->register_handler("/api/datasets/upload", [](const mm_rec::net::Request& req_obj) -> std::string {
+    server_->register_handler("/api/datasets/upload", [](const mm_rec::net::Request& req_obj, std::shared_ptr<mm_rec::net::Response> res) {
         const std::string& req = req_obj.body;
         size_t header_end = req.find("\r\n\r\n");
-        if (header_end == std::string::npos) return mm_rec::net::HttpServer::build_response(400, "text/plain", "Bad Request");
+        if (header_end == std::string::npos) {
+            res->status(400);
+            res->send("Bad Request");
+            return;
+        }
         
         std::string body = req.substr(header_end + 4); 
         std::string first_line = req.substr(0, req.find("\r\n"));
         size_t q_pos = first_line.find("?name=");
-        if (q_pos == std::string::npos) return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing name query param\"}");
+        
+        res->set_header("Content-Type", "application/json");
+
+        if (q_pos == std::string::npos) {
+            res->status(400);
+            res->send("{\"error\": \"Missing name query param\"}");
+            return;
+        }
         
         size_t end_pos = first_line.find(" ", q_pos);
         std::string filename = first_line.substr(q_pos + 6, end_pos - (q_pos + 6));
         
         if (filename.find(".bin") == std::string::npos) filename += ".bin";
         if (filename.find("/") != std::string::npos || filename.find("..") != std::string::npos) {
-            return mm_rec::net::HttpServer::build_response(403, "application/json", "{\"error\": \"Invalid filename\"}");
+             res->status(403);
+             res->send("{\"error\": \"Invalid filename\"}");
+             return;
         }
         
         std::ofstream file(filename, std::ios::binary);
         if (!file.good()) {
-            return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"Failed to write file\"}");
+            res->status(500);
+            res->send("{\"error\": \"Failed to write file\"}");
+            return;
         }
         file.write(body.data(), body.size());
         file.close();
-        return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"status\": \"uploaded\", \"size\": " + std::to_string(body.size()) + "}");
+        res->send("{\"status\": \"uploaded\", \"size\": " + std::to_string(body.size()) + "}");
     });
 
     // --- Phase 3 Model & Inference ---
 
+    // --- Phase 3 Model & Inference ---
+
     // API List Models
-    server_->register_handler("/api/models", [](const mm_rec::net::Request&) -> std::string {
+    server_->register_handler("/api/models", [](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
         std::vector<std::pair<std::string, uintmax_t>> models;
         try {
             // Root
@@ -757,18 +878,27 @@ void DashboardManager::register_routes() {
              if (i < models.size()-1) ss << ",";
         }
         ss << "]";
-        return mm_rec::net::HttpServer::build_response(200, "application/json", ss.str());
+        res->set_header("Content-Type", "application/json");
+        res->send(ss.str());
     });
 
     // API Download Model
-    server_->register_handler("/api/models/download", [](const mm_rec::net::Request& req) -> std::string {
+    server_->register_handler("/api/models/download", [](const mm_rec::net::Request& req, std::shared_ptr<mm_rec::net::Response> res) {
         std::string first_line = req.body.substr(0, req.body.find("\r\n"));
         size_t q_pos = first_line.find("?name=");
-        if (q_pos == std::string::npos) return mm_rec::net::HttpServer::build_response(400, "text/plain", "Missing name");
+        if (q_pos == std::string::npos) {
+            res->status(400); 
+            res->send("Missing name");
+            return;
+        }
         size_t end_pos = first_line.find(" ", q_pos);
         std::string name = first_line.substr(q_pos + 6, end_pos - (q_pos + 6));
         
-        if (name.find("..") != std::string::npos) return mm_rec::net::HttpServer::build_response(403, "text/plain", "Invalid path");
+        if (name.find("..") != std::string::npos) {
+            res->status(403);
+            res->send("Invalid path");
+            return;
+        }
         
         std::string path = name;
         if (name.find("/") != std::string::npos) {
@@ -777,108 +907,12 @@ void DashboardManager::register_routes() {
              path = "./" + name;
         }
 
-    // Use the common helper
-        return serve_file_with_range(path, req);
+        // Use the common helper
+        serve_file_with_range(path, req, res);
     });
 
     // API Inference
-    server_->register_handler("/api/inference", [](const mm_rec::net::Request& req) -> std::string {
-        auto get_json_val = [&](const std::string& key) -> std::string {
-            std::string search = "\"" + key + "\":";
-            size_t pos = req.body.find(search);
-             if (pos == std::string::npos) return "";
-            size_t start = req.body.find("\"", pos + search.length());
-             if (start == std::string::npos) return ""; 
-             start++;
-            size_t end = req.body.find("\"", start);
-            return req.body.substr(start, end - start);
-        };
 
-        std::string model_name = get_json_val("model");
-        std::string prompt = get_json_val("prompt");
-        
-        if (model_name.empty() || prompt.empty()) {
-             return mm_rec::net::HttpServer::build_response(400, "application/json", "{\"error\": \"Missing model or prompt\"}");
-        }
-
-        std::lock_guard<std::mutex> lock(g_inference.mtx);
-        
-        std::string path = model_name;
-        if (model_name.find("/") != std::string::npos) path = "runs/" + model_name;
-        
-        if (g_inference.current_model_path != path || !g_inference.model) {
-            if (!std::filesystem::exists(path)) return mm_rec::net::HttpServer::build_response(404, "application/json", "{\"error\": \"Model not found\"}");
-            
-            try {
-                std::string run_dir = std::filesystem::path(path).parent_path().string();
-                std::string config_path = run_dir + "/config.ini";
-                if (!std::filesystem::exists(config_path)) config_path = "mm_rec.ini";
-
-                 MMRecModelConfig cfg;
-                 std::ifstream cfile(config_path);
-                 std::string line;
-                 while(std::getline(cfile, line)) {
-                     if (line.find("vocab_size") != std::string::npos) cfg.vocab_size = std::stoi(line.substr(line.find("=")+1));
-                     if (line.find("hidden_dim") != std::string::npos) cfg.hidden_dim = std::stoi(line.substr(line.find("=")+1));
-                     if (line.find("num_layers") != std::string::npos) cfg.num_layers = std::stoi(line.substr(line.find("=")+1));
-                 }
-                 
-                 g_inference.model = std::make_unique<MMRecModel>(cfg);
-                 CheckpointMetadata meta;
-                 CheckpointManager::load_checkpoint(path, *g_inference.model, meta);
-                 
-                 g_inference.tokenizer = std::make_unique<Tokenizer>();
-                 g_inference.tokenizer->load_model("vocab.json", "merges.txt"); 
-                 
-                 g_inference.current_model_path = path;
-            } catch (const std::exception& e) {
-                return mm_rec::net::HttpServer::build_response(500, "application/json", "{\"error\": \"" + std::string(e.what()) + "\"}");
-            }
-        }
-        
-        std::vector<int> tokens = g_inference.tokenizer->encode(prompt);
-        std::string result = prompt;
-        int max_new_tokens = 50;
-        int32_t current_token = tokens.empty() ? g_inference.tokenizer->bos_id() : tokens.back();
-        
-        g_inference.model->reset_memory(1);
-        
-        for(size_t i=0; i<tokens.size()-1; ++i) {
-            Tensor input = Tensor::zeros({1, 1});
-            input.data()[0] = (float)tokens[i];
-            g_inference.model->forward(input);
-            if (!req.is_connected()) { LOG_INFO("Client disconnected during context ingest"); return ""; }
-        }
-        
-        for(int i=0; i<max_new_tokens; ++i) {
-            if (!req.is_connected()) { LOG_INFO("Client disconnected during generation"); return ""; }
-
-            Tensor input = Tensor::zeros({1, 1});
-            input.data()[0] = (float)current_token;
-            Tensor logits = g_inference.model->forward(input);
-            
-            int64_t last_layer = g_inference.model->get_config().num_layers - 1;
-            float* vocab_logits = logits.data() + (last_layer * 1 * 1 * g_inference.model->get_config().vocab_size);
-            
-            int best = 0; float max_val = -1e9;
-            for(int v=0; v<g_inference.model->get_config().vocab_size; ++v) {
-                if (vocab_logits[v] > max_val) { max_val = vocab_logits[v]; best = v; }
-            }
-            
-            if (best == g_inference.tokenizer->eos_id()) break;
-            
-            result += g_inference.tokenizer->decode({best});
-            current_token = best;
-        }
-        
-        std::string json_result;
-        for (char c : result) {
-            if (c == '"') json_result += "\\\"";
-            else if (c == '\n') json_result += "\\n";
-            else json_result += c;
-        }
-        return mm_rec::net::HttpServer::build_response(200, "application/json", "{\"text\": \"" + json_result + "\"}");
-    });
 
 } // register_routes
 

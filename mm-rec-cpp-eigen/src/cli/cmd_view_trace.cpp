@@ -35,14 +35,17 @@ int cmd_view_trace(int argc, char* argv[]) {
     net::HttpServer server(port);
 
     // Register Handler
-    server.register_handler("/" + filename, [&](const net::Request&) -> std::string {
+    server.register_handler("/" + filename, [&](const net::Request&, std::shared_ptr<net::Response> res) {
         std::ifstream f(trace_path);
         if (f) {
             std::stringstream buffer;
             buffer << f.rdbuf();
-            return net::HttpServer::build_response(200, "application/json", buffer.str(), true); // CORS enabled
+            res->set_header("Content-Type", "application/json");
+            res->set_header("Access-Control-Allow-Origin", "*"); // Ensure CORS for Perfetto
+            res->send(buffer.str());
         } else {
-            return net::HttpServer::build_response(404, "text/plain", "File not found");
+            res->status(404);
+            res->send("File not found");
         }
     });
 

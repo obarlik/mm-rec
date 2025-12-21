@@ -12,59 +12,40 @@ class Middlewares {
 public:
     // 1. Logger Middleware
     // Logs: [METHOD] path -> status code (duration ms)
-    static std::string Logger(const Request& req, HttpServer::NextFn next) {
+    static void Logger(const Request& req, std::shared_ptr<Response> res, HttpServer::NextFn next) {
         auto start = std::chrono::steady_clock::now();
         
         // Process request
-        std::string response = next(req);
+        next(req, res);
         
         auto end = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-        // Extract Status Code (Naive parsing for log, ideally HttpServer returns Response object)
-        std::string status = "???";
-        if (response.size() > 12) {
-            status = response.substr(9, 3);
-        }
-
-        LOG_INFO("[" + req.method + "] " + req.path + " -> " + status + " (" + std::to_string(duration) + "ms)");
-        
-        return response;
+        LOG_INFO("[" + req.method + "] " + req.path + " -> " + std::to_string(res->get_status()) + " (" + std::to_string(duration) + "ms)");
     }
 
     // 2. Security Middleware (CORS + Headers)
-    static std::string Security(const Request& req, HttpServer::NextFn next) {
-        std::string response = next(req);
-
-        // Security Headers injection if not present
-        // (Note: This naive string insertion works because our server builds simple responses. 
-        //  A proper HttpParser would be better, but we stick to simplicity.)
+    static void Security(const Request& req, std::shared_ptr<Response> res, HttpServer::NextFn next) {
+        // Pre-process: Set headers BEFORE next() potentially sends data
+        res->set_header("X-Content-Type-Options", "nosniff");
+        res->set_header("X-Frame-Options", "DENY");
+        res->set_header("X-XSS-Protection", "1; mode=block");
         
-        std::string headers_to_add = 
-            "X-Content-Type-Options: nosniff\r\n"
-            "X-Frame-Options: DENY\r\n"
-            "X-XSS-Protection: 1; mode=block\r\n";
-            
-        // Find end of headers (\r\n\r\n)
-        size_t header_end = response.find("\r\n\r\n");
-        if (header_end != std::string::npos) {
-            response.insert(header_end, headers_to_add);
-        }
+        // CORS (Already default in Response constructor, but enforcing here if needed)
+        // res->set_header("Access-Control-Allow-Origin", "*"); 
 
-        return response;
+        next(req, res);
     }
 
     // 3. Metrics Middleware
-    static std::string Metrics(const Request& req, HttpServer::NextFn next) {
+    static void Metrics(const Request& req, std::shared_ptr<Response> res, HttpServer::NextFn next) {
         auto start = std::chrono::steady_clock::now();
-        std::string response = next(req);
+        next(req, res);
         auto end = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
         // Record API Latency (Value1 = Duration ms)
         MetricsManager::record(MetricType::API_LATENCY, static_cast<float>(duration));
-        
-        return response;
     }
 };
 

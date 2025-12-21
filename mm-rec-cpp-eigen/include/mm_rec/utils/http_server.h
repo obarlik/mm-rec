@@ -4,6 +4,7 @@
 #include "mm_rec/utils/thread_pool.h" 
 #include "mm_rec/utils/connection_manager.h" // New
 #include "mm_rec/utils/traffic_manager.h"    // New
+#include "mm_rec/utils/response.h" // New include
 #include <string>
 #include <functional>
 #include <map>
@@ -55,15 +56,15 @@ struct Request {
 
 class HttpServer {
 public:
-    using Handler = std::function<std::string(const Request&)>;
+    using Handler = std::function<void(const Request&, std::shared_ptr<Response>)>;
     // NextFn represents the next step in the pipeline (either another middleware or the final handler)
-    using NextFn = std::function<std::string(const Request&)>;
+    using NextFn = std::function<void(const Request&, std::shared_ptr<Response>)>;
     
     // Bidirectional Middleware:
     // - Pre-processing: Code before calling next(req)
     // - Post-processing: Code after calling next(req)
     // - Short-circuit: Return response WITHOUT calling next(req)
-    using Middleware = std::function<std::string(const Request&, NextFn)>;
+    using Middleware = std::function<void(const Request&, std::shared_ptr<Response>, NextFn)>;
 
     HttpServer(const HttpServerConfig& config) 
         : config_(config), 
@@ -259,24 +260,35 @@ private:
 
     void handle_client(int socket, const std::string& client_ip) {
         
-        // 2. Traffic Throttling (Speed Control)
+        // 2. Traffic Throttling 
         traffic_manager_.apply_throttling();
+        
+        // Create Response Object
+        auto res = std::make_shared<Response>(socket);
 
         // 3. Rate Limit Check
         if (!traffic_manager_.allowed(client_ip)) {
-             // Too Many Requests
-             std::string response = build_response(429, "text/plain", "429 Too Many Requests");
+             res->status(429);
+             res->send("429 Too Many Requests");
+             // Socket closed by destructor/shared_ptr usually? 
+             // Currently Response doesn't close socket, HttpServer does locally?
+             // If async, who closes socket?
+             // Ideally Response or HttpServer should close when 'end' happens.
+             // For now, let's keep blocking-style async: we wait for handler to return (since they are sync functions returning void), then close.
+             // UNLESS we want true async where handler returns and socket stays open.
+             // For "Phase 11" as described: "Transition to void(req, res)".
+             // If we keep thread_pool blocked, we can safely close socket at end of scope.
+             // If we want true async later, we'd need shared_from_this for socket.
+             // Let's stick to: Handler finishes -> We close.
 #ifndef _WIN32
-            send(socket, response.c_str(), response.size(), 0);
             close(socket);
 #else
-            send(socket, response.c_str(), static_cast<int>(response.size()), 0);
             closesocket(socket);
 #endif
             return;
         }
 
-        // --- Standard Handling (Timeouts, Read, Dispatch) ---
+        // --- Standard Handling ---
 #ifdef _WIN32
         DWORD timeout = config_.timeout_sec * 1000;
         setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
@@ -289,7 +301,7 @@ private:
         setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
 #endif
 
-        std::vector<char> buffer(8192); // Increased buffer
+        std::vector<char> buffer(8192);
         
         // LOG_INFO("handle_client: about to read from socket");
         
@@ -358,12 +370,10 @@ private:
 #endif
         };
 
-        std::string response;
-
         // --- Chain of Responsibility Composition ---
         
         // 1. Initial "Bottom" Handler: The Router
-        NextFn dispatch = [this](const Request& r) -> std::string {
+        NextFn dispatch = [this](const Request& r, std::shared_ptr<Response> res) {
              Handler handler = nullptr;
              {
                  std::lock_guard<std::mutex> lock(handlers_mutex_);
@@ -382,12 +392,15 @@ private:
 
              if (handler) {
                  try {
-                     return handler(r);
+                     handler(r, res);
                  } catch(const std::exception& e) {
-                     return build_response(500, "text/plain", std::string("Internal Error: ") + e.what());
+                     res->status(500);
+                     res->send(std::string("Internal Error: ") + e.what());
                  }
+             } else {
+                 res->status(404);
+                 res->send("Not Found");
              }
-             return build_response(404, "text/plain", "Not Found");
         };
 
         // 2. Wrap Middleware Layers (Reverse Order)
@@ -397,20 +410,19 @@ private:
             for (auto it = middlewares_.rbegin(); it != middlewares_.rend(); ++it) {
                 auto current_mw = *it;
                 auto next = dispatch; // Capture current 'next'
-                dispatch = [current_mw, next](const Request& r) -> std::string {
-                    return current_mw(r, next);
+                dispatch = [current_mw, next](const Request& r, std::shared_ptr<Response> res) {
+                    current_mw(r, res, next);
                 };
             }
         }
 
         // 3. Execute Chain
-        response = dispatch(req);
+        dispatch(req, res);
 
+        // Cleanup
 #ifndef _WIN32
-        send(socket, response.c_str(), response.size(), 0);
         close(socket);
 #else
-        send(socket, response.c_str(), static_cast<int>(response.size()), 0);
         closesocket(socket);
 #endif
     }
