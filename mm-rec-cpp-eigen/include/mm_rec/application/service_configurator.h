@@ -18,6 +18,8 @@
 #include "mm_rec/data/data_loader.h"                // Added DataLoaderFactory
 #include "mm_rec/core/i_compute_backend.h"          // Added IComputeBackend
 #include "mm_rec/core/vulkan_backend.h"             // Added VulkanBackend Implementation
+#include "mm_rec/application/i_run_manager.h"
+#include "mm_rec/application/run_manager.h"
 
 // Forward declaration to avoid circular dependency
 namespace mm_rec { class DashboardManager; }
@@ -136,6 +138,14 @@ public:
         
         // Alert Generation & System Health Monitoring
         container.bind_singleton<diagnostics::IAlertManager, diagnostics::AlertManager>();
+
+        // Run Manager (Job Lifecycle & Isolation)
+        // Singleton as it manages global state (active job) but safely wrapped
+        container.bind_singleton<IRunManager, RunManager>();
+
+        // Run Manager (Job Lifecycle & Isolation)
+        // Singleton as it manages global state (active job) but safely wrapped
+        container.bind_singleton<IRunManager, RunManager>();
 
         // Model Checkpointing (Save/Load)
         container.bind_singleton<ICheckpointManager, CheckpointManager>(); 

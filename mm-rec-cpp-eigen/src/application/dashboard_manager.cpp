@@ -2,7 +2,7 @@
 #include "embedded_assets.h"
 #include "mm_rec/infrastructure/logger.h"
 #include "mm_rec/utils/ui.h"
-#include "mm_rec/application/run_manager.h"
+#include "mm_rec/application/i_run_manager.h"
 #include "mm_rec/core/vulkan_backend.h"
 #include "mm_rec/core/dynamic_balancer.h"
 #include "mm_rec/business/metrics.h"
@@ -35,11 +35,16 @@ static InferenceState g_inference;
 
 DashboardManager::DashboardManager() {
     // Initialize standard/safe values
+    if (mm_rec::ServiceConfigurator::container().is_registered<mm_rec::IRunManager>()) {
+         run_manager_ = mm_rec::ServiceConfigurator::container().resolve<mm_rec::IRunManager>();
+    }
 }
 
 DashboardManager::DashboardManager(std::shared_ptr<mm_rec::net::HttpServer> server) 
     : server_(server) {
-    // Initialize safe values
+    if (mm_rec::ServiceConfigurator::container().is_registered<mm_rec::IRunManager>()) {
+         run_manager_ = mm_rec::ServiceConfigurator::container().resolve<mm_rec::IRunManager>();
+    }
 }
 
 void DashboardManager::set_history_path(const std::string& path) {
@@ -417,15 +422,20 @@ void DashboardManager::register_routes() {
     });
     
     // API Runs List
-    server_->register_handler("/api/runs", [](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
-        auto runs = RunManager::list_runs();
+    server_->register_handler("/api/runs", [this](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
+        if (!run_manager_) {
+            res->status(503);
+            res->send("{\"error\": \"RunManager service unavailable\"}");
+            return;
+        }
+        auto runs = run_manager_->list_runs();
         std::stringstream ss;
         ss << "[";
         for (size_t i = 0; i < runs.size(); ++i) {
             const auto& run = runs[i];
             ss << "{";
             ss << "\"name\": \"" << run.name << "\",";
-            ss << "\"status\": \"" << (RunManager::is_job_running() && run.status == RunStatus::RUNNING ? "RUNNING" : run.status_str) << "\",";
+            ss << "\"status\": \"" << (run_manager_->is_job_running() && run.status == RunStatus::RUNNING ? "RUNNING" : run.status_str) << "\",";
             ss << "\"epoch\": " << run.current_epoch << ",";
             ss << "\"loss\": " << run.current_loss << ",";
             ss << "\"best_loss\": " << run.best_loss << ",";
@@ -440,13 +450,18 @@ void DashboardManager::register_routes() {
 
     // API Stop Run
     server_->register_handler("/api/runs/stop", [this](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
-        if (!RunManager::is_job_running()) {
+        if (!run_manager_) {
+            res->status(503);
+            res->send("{\"error\": \"RunManager service unavailable\"}");
+            return;
+        }
+        if (!run_manager_->is_job_running()) {
              res->status(400);
              res->set_header("Content-Type", "application/json");
              res->send("{\"error\": \"No job is running\"}");
              return;
         }
-        RunManager::stop_job();
+        run_manager_->stop_job();
         LOG_INFO("Job stopped via API.");
         res->set_header("Content-Type", "application/json");
         res->send("{\"status\": \"stopped\"}");
@@ -482,7 +497,13 @@ void DashboardManager::register_routes() {
             return;
         }
 
-        if (RunManager::is_job_running()) {
+        if (!run_manager_) {
+            res->status(503);
+            res->send("{\"error\": \"RunManager service unavailable\"}");
+            return;
+        }
+
+        if (run_manager_->is_job_running()) {
             res->status(409);
             res->send("{\"error\": \"Job already running\"}");
             return;
@@ -511,7 +532,7 @@ void DashboardManager::register_routes() {
         job_config.data_path = data_file;     
 
         // 4. Start
-        if (RunManager::start_job(job_config)) {
+        if (run_manager_->start_job(job_config)) {
              res->send("{\"status\": \"started\"}");
         } else {
              res->status(500);
@@ -521,6 +542,11 @@ void DashboardManager::register_routes() {
 
     // API Resume Run
     server_->register_handler("/api/runs/resume", [this](const mm_rec::net::Request& req_obj, std::shared_ptr<mm_rec::net::Response> res) {
+         if (!run_manager_) {
+             res->status(503);
+             res->send("{\"error\": \"RunManager service unavailable\"}");
+             return;
+         }
          const std::string& req = req_obj.body;
          auto get_param = [&](const std::string& key) -> std::string {
              size_t pos = req.find(key + "=");
@@ -540,19 +566,19 @@ void DashboardManager::register_routes() {
              return;
          }
 
-         if (RunManager::is_job_running()) {
+         if (run_manager_->is_job_running()) {
              res->status(409);
              res->send("{\"error\": \"Job already running\"}");
              return;
          }
 
-         if (!RunManager::run_exists(run_name)) {
+         if (!run_manager_->run_exists(run_name)) {
              res->status(404);
              res->send("{\"error\": \"Run not found\"}");
              return;
          }
          
-         std::string run_dir = RunManager::get_run_dir(run_name);
+         std::string run_dir = run_manager_->get_run_dir(run_name);
          
          // 1. Verify Config (Isolated)
          std::string config_path = run_dir + "/config.ini";
@@ -579,7 +605,7 @@ void DashboardManager::register_routes() {
          config.config_path = config_path;
          config.data_path = "training_data.bin"; 
          
-         if (RunManager::start_job(config)) {
+         if (run_manager_->start_job(config)) {
              res->send("{\"status\": \"started\"}");
          } else {
              res->status(500);
@@ -589,6 +615,11 @@ void DashboardManager::register_routes() {
 
     // API Delete Run
     server_->register_handler("/api/runs/delete", [this](const mm_rec::net::Request& req_obj, std::shared_ptr<mm_rec::net::Response> res) {
+         if (!run_manager_) {
+             res->status(503);
+             res->send("{\"error\": \"RunManager service unavailable\"}");
+             return;
+         }
          const std::string& req = req_obj.body;
          auto get_param = [&](const std::string& key) -> std::string {
              size_t pos = req.find(key + "=");
@@ -608,13 +639,13 @@ void DashboardManager::register_routes() {
              return;
          }
 
-         if (RunManager::is_job_running()) {
+         if (run_manager_->is_job_running()) {
              res->status(409);
              res->send("{\"error\": \"Cannot delete whle a job is running\"}");
              return;
          }
 
-         if (RunManager::delete_run(run_name)) {
+         if (run_manager_->delete_run(run_name)) {
              res->send("{\"status\": \"deleted\"}");
          } else {
              res->status(500);
@@ -942,7 +973,7 @@ void DashboardManager::register_routes() {
     // --- Phase 3 Model & Inference ---
 
     // API List Models
-    server_->register_handler("/api/models", [](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
+    server_->register_handler("/api/models", [this](const mm_rec::net::Request&, std::shared_ptr<mm_rec::net::Response> res) {
         std::vector<std::pair<std::string, uintmax_t>> models;
         try {
             // Root
@@ -952,8 +983,11 @@ void DashboardManager::register_routes() {
                 }
             }
             // Runs (Recursive-ish)
-            if (std::filesystem::exists("runs")) {
-                for (const auto& run_entry : std::filesystem::directory_iterator("runs")) {
+            std::string runs_dir = "runs";
+            if (run_manager_) runs_dir = run_manager_->get_runs_dir();
+
+            if (std::filesystem::exists(runs_dir)) {
+                for (const auto& run_entry : std::filesystem::directory_iterator(runs_dir)) {
                     if (run_entry.is_directory()) {
                         for (const auto& file : std::filesystem::directory_iterator(run_entry.path())) {
                              if (file.path().extension() == ".bin") {
@@ -977,7 +1011,7 @@ void DashboardManager::register_routes() {
     });
 
     // API Download Model
-    server_->register_handler("/api/models/download", [](const mm_rec::net::Request& req, std::shared_ptr<mm_rec::net::Response> res) {
+    server_->register_handler("/api/models/download", [this](const mm_rec::net::Request& req, std::shared_ptr<mm_rec::net::Response> res) {
         std::string first_line = req.body.substr(0, req.body.find("\r\n"));
         size_t q_pos = first_line.find("?name=");
         if (q_pos == std::string::npos) {
@@ -996,7 +1030,14 @@ void DashboardManager::register_routes() {
         
         std::string path = name;
         if (name.find("/") != std::string::npos) {
-             path = "runs/" + name; 
+             // Assume it's run/file format
+             std::string run_name = name.substr(0, name.find("/"));
+             std::string file_name = name.substr(name.find("/") + 1);
+             if (run_manager_) {
+                  path = run_manager_->get_run_dir(run_name) + "/" + file_name;
+             } else {
+                  path = "runs/" + name;
+             }
         } else {
              path = "./" + name;
         }

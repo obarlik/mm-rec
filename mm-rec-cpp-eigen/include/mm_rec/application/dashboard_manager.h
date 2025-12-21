@@ -3,6 +3,7 @@
 #include "mm_rec/infrastructure/http_server.h"
 #include "mm_rec/infrastructure/di_container.h"
 #include "mm_rec/application/i_training_monitor.h" // Interface
+#include "mm_rec/application/i_run_manager.h"      // Interface
 #include <atomic>
 #include <mutex>
 #include <deque>
@@ -87,6 +88,7 @@ private:
 
     // Injected dependencies (not owned!)
     std::shared_ptr<mm_rec::net::HttpServer> server_;
+    std::shared_ptr<mm_rec::IRunManager> run_manager_;
     DashboardStats stats_;
     
     // History for graphs

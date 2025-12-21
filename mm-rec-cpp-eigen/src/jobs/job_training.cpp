@@ -19,6 +19,7 @@
 #include "mm_rec/application/dashboard_manager.h"
 #include "mm_rec/infrastructure/i_metrics_exporter.h" // Interface
 #include "mm_rec/application/service_configurator.h" // For DI resolution
+#include "mm_rec/application/i_run_manager.h"      // IRunManager Interface
 
 #include <iostream>
 #include <fstream>
@@ -76,11 +77,12 @@ void JobTraining::run_internal(TrainingJobConfig config) {
     auto checkpoint_manager = ServiceConfigurator::container().resolve<ICheckpointManager>();
     auto data_loader_factory = ServiceConfigurator::container().resolve<IDataLoaderFactory>();
     auto compute_backend = ServiceConfigurator::container().resolve<IComputeBackend>();
+    auto run_manager = ServiceConfigurator::container().resolve<IRunManager>();
 
     try {
         // --- Setup Run Directory ---
-        std::string runs_dir = "runs";
-        std::string run_dir = runs_dir + "/" + config.run_name;
+        std::string runs_dir = run_manager->get_runs_dir();
+        std::string run_dir = run_manager->get_run_dir(config.run_name);
         
         if (!fs::exists(runs_dir)) fs::create_directory(runs_dir);
         if (!fs::exists(run_dir)) fs::create_directory(run_dir);

@@ -4,20 +4,19 @@
 #include <sstream>
 #include <algorithm>
 #include <ctime>
-#include <memory>
 #include <mutex>
-#include "mm_rec/jobs/job_training.h"
 
 namespace mm_rec {
 namespace fs = std::filesystem;
 
-// Static state
-static std::unique_ptr<JobTraining> active_job_ = nullptr;
-static std::string active_run_name_ = "";  // Track which run owns the active job
-static std::mutex run_manager_mutex_;
+RunManager::RunManager() : active_job_(nullptr), active_run_name_("") {}
+
+RunManager::~RunManager() {
+    stop_job();
+}
 
 bool RunManager::start_job(const TrainingJobConfig& config_in) {
-    std::lock_guard<std::mutex> lock(run_manager_mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     if (active_job_ && active_job_->is_running()) {
         ui::error("Job already running for: " + active_run_name_);
         return false;
@@ -80,10 +79,7 @@ bool RunManager::start_job(const TrainingJobConfig& config_in) {
     
     active_job_ = std::make_unique<JobTraining>();
     try {
-        // Start the job (Training happens in a separate thread inside, 
-        // but initialization like dataset loading might happen here depending on implementation)
-        // If start() is blocking or does init, we catch errors here.
-        // Assuming active_job_->start() spawns a thread, but might throw during setup.
+        // Start the job
         bool success = active_job_->start(isolated_config);
         if (!success) {
             // Failed to start - clear ownership
@@ -97,11 +93,8 @@ bool RunManager::start_job(const TrainingJobConfig& config_in) {
     }
 }
 
-// In .cpp file, add static mutex
-// static std::mutex run_manager_mutex_; // Moved to top
-
 void RunManager::stop_job() {
-    std::lock_guard<std::mutex> lock(run_manager_mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     if (active_job_ && active_job_->is_running()) {
         std::cerr << "[RunManager] Stopping job..." << std::endl;
         active_job_->stop();
@@ -117,6 +110,9 @@ void RunManager::stop_job() {
 }
 
 bool RunManager::is_job_running() {
+    // Note: No mutex here to avoid blocking status checks excessively, 
+    // assuming unique_ptr access is atomic enough for null check.
+    // Ideally should be locked if strict consistency required.
     return active_job_ && active_job_->is_running();
 }
 
@@ -130,18 +126,10 @@ bool RunManager::run_exists(const std::string& run_name) {
 
 bool RunManager::create_run(const std::string& run_name) {
     std::string run_dir = get_run_dir(run_name);
-    
-    if (fs::exists(run_dir)) {
-        return true; // Already exists (Idempotent success)
-    }
+    if (fs::exists(run_dir)) return true;
     
     try {
-        // Create runs directory if needed
-        if (!fs::exists(get_runs_dir())) {
-            fs::create_directory(get_runs_dir());
-        }
-        
-        // Create run directory
+        if (!fs::exists(get_runs_dir())) fs::create_directory(get_runs_dir());
         fs::create_directory(run_dir);
         return true;
     } catch (...) {
@@ -151,10 +139,7 @@ bool RunManager::create_run(const std::string& run_name) {
 
 bool RunManager::delete_run(const std::string& run_name) {
     std::string run_dir = get_run_dir(run_name);
-    
-    if (!fs::exists(run_dir)) {
-        return false;
-    }
+    if (!fs::exists(run_dir)) return false;
     
     try {
         fs::remove_all(run_dir);
@@ -166,17 +151,11 @@ bool RunManager::delete_run(const std::string& run_name) {
 
 RunStatus RunManager::get_run_status(const std::string& run_name) {
     std::string run_dir = get_run_dir(run_name);
+    if (!fs::exists(run_dir)) return RunStatus::UNKNOWN;
     
-    if (!fs::exists(run_dir)) {
-        return RunStatus::UNKNOWN;
-    }
+    if (fs::exists(run_dir + "/.lock")) return RunStatus::RUNNING;
     
-    // Check for lock file (running)
-    if (fs::exists(run_dir + "/.lock")) {
-        return RunStatus::RUNNING;
-    }
-    
-    // Check for log file with errors
+    // Check log for errors
     std::string log_path = run_dir + "/train.log";
     if (fs::exists(log_path)) {
         std::ifstream log(log_path);
@@ -190,15 +169,8 @@ RunStatus RunManager::get_run_status(const std::string& run_name) {
         }
     }
     
-    // Check for final checkpoint
-    if (fs::exists(run_dir + "/kernel_adaptive_final.bin")) {
-        return RunStatus::COMPLETED;
-    }
-    
-    // Has checkpoint but not final
-    if (fs::exists(run_dir + "/checkpoint_latest.bin")) {
-        return RunStatus::STOPPED;
-    }
+    if (fs::exists(run_dir + "/kernel_adaptive_final.bin")) return RunStatus::COMPLETED;
+    if (fs::exists(run_dir + "/checkpoint_latest.bin")) return RunStatus::STOPPED;
     
     return RunStatus::UNKNOWN;
 }
@@ -230,38 +202,32 @@ RunInfo RunManager::get_run_info(const std::string& run_name) {
     info.name = run_name;
     
     std::string run_dir = get_run_dir(run_name);
-    
     if (!fs::exists(run_dir)) {
         info.status = RunStatus::UNKNOWN;
         info.status_str = "NOT FOUND";
         return info;
     }
     
-    // Get status
     info.status = get_run_status(run_name);
     info.status_str = status_to_string(info.status);
     
-    // Get timestamps
     try {
         auto ftime = fs::last_write_time(run_dir);
         auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
             ftime - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
         info.modified = sctp;
-        info.created = sctp; // Approximate
+        info.created = sctp;
     } catch (...) {}
     
-    // Check for files
     info.has_checkpoint = fs::exists(run_dir + "/checkpoint_latest.bin");
     info.has_log = fs::exists(run_dir + "/train.log");
     info.has_config = fs::exists(run_dir + "/config.txt");
     
-    // Parse checkpoint metadata if available
     std::string latest_ckpt = run_dir + "/checkpoint_latest.bin";
     if (fs::exists(latest_ckpt)) {
         std::ifstream ckpt(latest_ckpt, std::ios::binary);
         if (ckpt.good()) {
-            // Read epoch (first 4 bytes after magic/version)
-            ckpt.seekg(8); // Skip magic and version
+            ckpt.seekg(8); 
             ckpt.read(reinterpret_cast<char*>(&info.current_epoch), sizeof(int));
             ckpt.read(reinterpret_cast<char*>(&info.current_loss), sizeof(float));
         }
@@ -271,12 +237,11 @@ RunInfo RunManager::get_run_info(const std::string& run_name) {
     if (fs::exists(best_ckpt)) {
         std::ifstream ckpt(best_ckpt, std::ios::binary);
         if (ckpt.good()) {
-            ckpt.seekg(12); // Skip to loss field
+            ckpt.seekg(12);
             ckpt.read(reinterpret_cast<char*>(&info.best_loss), sizeof(float));
         }
     }
     
-    // Get directory size
     info.total_size_mb = get_directory_size(run_dir) / (1024 * 1024);
     
     return info;
@@ -284,10 +249,7 @@ RunInfo RunManager::get_run_info(const std::string& run_name) {
 
 std::vector<RunInfo> RunManager::list_runs() {
     std::vector<RunInfo> runs;
-    
-    if (!fs::exists(get_runs_dir())) {
-        return runs;
-    }
+    if (!fs::exists(get_runs_dir())) return runs;
     
     try {
         for (const auto& entry : fs::directory_iterator(get_runs_dir())) {
@@ -298,7 +260,6 @@ std::vector<RunInfo> RunManager::list_runs() {
         }
     } catch (...) {}
     
-    // Sort by modified time (newest first)
     std::sort(runs.begin(), runs.end(), [](const RunInfo& a, const RunInfo& b) {
         return a.modified > b.modified;
     });
